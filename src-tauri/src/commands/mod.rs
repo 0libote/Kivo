@@ -22,7 +22,7 @@ use crate::{
         SpeechEventSink, SpeechStartOptions,
     },
     text::{
-        ActiveApplication, CapturedSelection, ScreenRect, TextError, TextService,
+        ActiveApplication, CapturedSelection, ScreenPoint, ScreenRect, TextError, TextService,
         WritingPopupMachine, WritingPopupPhase, WritingTransitionError,
     },
 };
@@ -41,6 +41,7 @@ pub struct AppCore {
     writing: Mutex<WritingPopupMachine>,
     pending_selection: Mutex<Option<Arc<CapturedSelection>>>,
     last_result: Mutex<Option<Arc<str>>>,
+    last_cursor: Mutex<Option<ScreenPoint>>,
     writing_generation: AtomicU64,
 }
 
@@ -66,6 +67,7 @@ impl AppCore {
             writing: Mutex::new(WritingPopupMachine::default()),
             pending_selection: Mutex::new(None),
             last_result: Mutex::new(None),
+            last_cursor: Mutex::new(None),
             writing_generation: AtomicU64::new(0),
         })
     }
@@ -227,50 +229,96 @@ impl AppCore {
     }
 
     pub async fn open_writing_tools(&self) -> Result<WritingPopupContext, AppCoreError> {
-        let selection = Arc::new(self.text.capture_selection().await?);
-        let context = WritingPopupContext {
-            application: selection.application.clone(),
-            anchor: selection.anchor,
-        };
+        // Cursor first: cheapest and most accurate at hotkey time. It never
+        // depends on window focus, unlike the text capture below.
+        let cursor = self.text.cursor_position();
+        *self
+            .last_cursor
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)? = cursor;
 
-        *self
-            .pending_selection
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)? = Some(selection);
-        *self
-            .last_result
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)? = None;
-        self.writing
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .show();
-        Ok(context)
+        match self.text.capture_selection().await {
+            Ok(selection) => {
+                let selection = Arc::new(selection);
+                let context = WritingPopupContext {
+                    application: selection.application.clone(),
+                    anchor: selection.anchor,
+                    cursor,
+                    has_selection: true,
+                    initial_text: selection.text().to_owned(),
+                };
+                *self
+                    .pending_selection
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = Some(selection);
+                *self
+                    .last_result
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = None;
+                self.writing
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)?
+                    .show();
+                Ok(context)
+            }
+            // Nothing highlighted (or the app exposes no readable text):
+            // open quick chat with an empty input box instead of an error.
+            // Permission failures still propagate so onboarding can prompt.
+            Err(TextError::NoSelection | TextError::UnsupportedApplication) => {
+                *self
+                    .pending_selection
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = None;
+                *self
+                    .last_result
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = None;
+                self.writing
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)?
+                    .show();
+                Ok(WritingPopupContext::chat(cursor))
+            }
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn writing_context(&self) -> Result<WritingPopupContext, AppCoreError> {
-        let selection = self
+        let cursor = self
+            .last_cursor
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .clone();
+        match self
             .pending_selection
             .lock()
             .map_err(|_| AppCoreError::Unavailable)?
             .clone()
-            .ok_or(AppCoreError::SelectionExpired)?;
-        Ok(WritingPopupContext {
-            application: selection.application.clone(),
-            anchor: selection.anchor,
-        })
+        {
+            Some(selection) => Ok(WritingPopupContext {
+                application: selection.application.clone(),
+                anchor: selection.anchor,
+                cursor,
+                has_selection: true,
+                initial_text: selection.text().to_owned(),
+            }),
+            // Chat mode (or a cleared context): still a valid popup state.
+            None => Ok(WritingPopupContext::chat(cursor)),
+        }
     }
 
     pub async fn run_writing_action(
         &self,
         action: WritingAction,
         custom_instruction: Option<String>,
+        source_override: Option<String>,
     ) -> Result<WritingOutcome, AppCoreError> {
-        if !self
-            .settings()?
-            .writing_tools
-            .enabled_actions
-            .contains(&action)
+        if action != WritingAction::Chat
+            && !self
+                .settings()?
+                .writing_tools
+                .enabled_actions
+                .contains(&action)
         {
             return Err(AppCoreError::ActionDisabled);
         }
@@ -281,13 +329,24 @@ impl AppCore {
             .begin(action)?;
         let generation = self.writing_generation.fetch_add(1, Ordering::AcqRel) + 1;
 
-        let selection = self
+        let edited = source_override
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned);
+        let source_text = match self
             .pending_selection
             .lock()
             .map_err(|_| AppCoreError::Unavailable)?
             .clone()
-            .ok_or(AppCoreError::SelectionExpired)?;
-        let prompt = match writing_prompt(action, selection.text(), custom_instruction.as_deref()) {
+        {
+            // An edited manual text box wins over the captured highlight.
+            Some(selection) => edited.unwrap_or_else(|| selection.text().to_owned()),
+            // Quick chat and manually supplied text need no selection.
+            None => edited.ok_or(AppCoreError::SelectionExpired)?,
+        };
+        // Chat input counts as the instruction, not a source document.
+        let prompt = match writing_prompt(action, &source_text, custom_instruction.as_deref()) {
             Ok(prompt) => prompt,
             Err(error) => {
                 self.fail_writing();
@@ -312,8 +371,16 @@ impl AppCore {
             return Err(AppCoreError::WritingCancelled);
         }
 
+        // Replacement always targets the original highlight in the host app,
+        // even when the user edited the text box before running the action.
+        let pending = self
+            .pending_selection
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .clone();
         if action.replaces_selection() {
-            if let Err(error) = self.text.replace_selected_text(&selection, &result).await {
+            let selection = pending.as_deref().ok_or(AppCoreError::SelectionExpired)?;
+            if let Err(error) = self.text.replace_selected_text(selection, &result).await {
                 self.fail_writing();
                 return Err(error.into());
             }
@@ -397,6 +464,26 @@ impl AppCore {
 pub struct WritingPopupContext {
     pub application: ActiveApplication,
     pub anchor: Option<ScreenRect>,
+    pub cursor: Option<ScreenPoint>,
+    pub has_selection: bool,
+    /// Text shown in the manual text box: the captured highlight, or empty
+    /// for quick chat. Only sent to Kivo's own popup.
+    pub initial_text: String,
+}
+
+impl WritingPopupContext {
+    fn chat(cursor: Option<ScreenPoint>) -> Self {
+        Self {
+            application: ActiveApplication {
+                identifier: "quick-chat".into(),
+                display_name: "Quick chat".into(),
+            },
+            anchor: None,
+            cursor,
+            has_selection: false,
+            initial_text: String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -541,7 +628,7 @@ impl From<AppCoreError> for CommandError {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
     pub launch_at_login: bool,
@@ -555,6 +642,12 @@ pub struct FrontendSettings {
     pub sound_feedback: bool,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
+    pub writing_popup_anchor: String,
+    pub writing_popup_x: f64,
+    pub writing_popup_y: f64,
+    pub writing_popup_width: f64,
+    pub writing_popup_height: f64,
+    pub writing_allow_manual_text: bool,
     pub onboarding_complete: bool,
 }
 
@@ -586,6 +679,17 @@ impl From<AppSettings> for FrontendSettings {
                 .map(action_id)
                 .map(str::to_owned)
                 .collect(),
+            writing_popup_anchor: match settings.writing_tools.popup_anchor {
+                crate::config::PopupAnchor::Cursor => "cursor",
+                crate::config::PopupAnchor::Selection => "selection",
+                crate::config::PopupAnchor::Fixed => "fixed",
+            }
+            .into(),
+            writing_popup_x: settings.writing_tools.popup_fixed_x,
+            writing_popup_y: settings.writing_tools.popup_fixed_y,
+            writing_popup_width: settings.writing_tools.popup_width,
+            writing_popup_height: settings.writing_tools.popup_height,
+            writing_allow_manual_text: settings.writing_tools.allow_manual_text,
             onboarding_complete: settings.general.onboarding_complete,
         }
     }
@@ -606,6 +710,17 @@ impl TryFrom<FrontendSettings> for AppSettings {
             .iter()
             .map(|action| parse_action(action))
             .collect::<Result<Vec<_>, _>>()?;
+        // "chat" is a mode, not a toggleable action; it is always available
+        // and never persisted in the enabled list.
+        let enabled_actions = enabled_actions
+            .into_iter()
+            .filter(|action| *action != WritingAction::Chat)
+            .collect();
+        let popup_anchor = match settings.writing_popup_anchor.as_str() {
+            "selection" => crate::config::PopupAnchor::Selection,
+            "fixed" => crate::config::PopupAnchor::Fixed,
+            _ => crate::config::PopupAnchor::Cursor,
+        };
         Ok(AppSettings {
             schema_version: crate::config::SETTINGS_SCHEMA_VERSION,
             general: crate::config::GeneralSettings {
@@ -631,6 +746,12 @@ impl TryFrom<FrontendSettings> for AppSettings {
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
                 enabled_actions,
+                popup_anchor,
+                popup_fixed_x: settings.writing_popup_x,
+                popup_fixed_y: settings.writing_popup_y,
+                popup_width: settings.writing_popup_width,
+                popup_height: settings.writing_popup_height,
+                allow_manual_text: settings.writing_allow_manual_text,
             },
         })
     }
@@ -650,6 +771,12 @@ pub struct SettingsPatch {
     sound_feedback: Option<bool>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
+    writing_popup_anchor: Option<String>,
+    writing_popup_x: Option<f64>,
+    writing_popup_y: Option<f64>,
+    writing_popup_width: Option<f64>,
+    writing_popup_height: Option<f64>,
+    writing_allow_manual_text: Option<bool>,
     onboarding_complete: Option<bool>,
 }
 
@@ -673,6 +800,12 @@ impl SettingsPatch {
         assign!(sound_feedback);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
+        assign!(writing_popup_anchor);
+        assign!(writing_popup_x);
+        assign!(writing_popup_y);
+        assign!(writing_popup_width);
+        assign!(writing_popup_height);
+        assign!(writing_allow_manual_text);
         assign!(onboarding_complete);
         settings
     }
@@ -719,12 +852,15 @@ pub struct SelectionContext {
     application_name: String,
     can_replace: bool,
     bounds: Option<ScreenRect>,
+    initial_text: String,
 }
 
 #[derive(Deserialize)]
 pub struct WritingRequest {
     action: String,
     instruction: Option<String>,
+    /// Edited manual text-box content, or the quick-chat message.
+    text: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -930,7 +1066,7 @@ pub async fn get_writing_context(
             .await
             .map_err(CommandError::from)?
     };
-    crate::shell::position_writing_surface(&app, context.anchor);
+    crate::shell::position_writing_surface(&app, context.cursor, context.anchor);
     let _ = app
         .get_webview_window("writing-tools")
         .and_then(|window| window.set_focus().ok().map(|_| window));
@@ -944,7 +1080,7 @@ pub async fn run_writing_action(
 ) -> Result<WritingResponse, CommandError> {
     let action = parse_action(&request.action)?;
     match core
-        .run_writing_action(action, request.instruction)
+        .run_writing_action(action, request.instruction, request.text)
         .await
         .map_err(CommandError::from)?
     {
@@ -1007,7 +1143,7 @@ pub fn set_surface_mode(
     }
     crate::shell::size_writing_surface(&app, &mode).map_err(platform_command_error)?;
     if let Ok(context) = core.writing_context() {
-        crate::shell::position_writing_surface(&app, context.anchor);
+        crate::shell::position_writing_surface(&app, context.cursor, context.anchor);
     }
     Ok(())
 }
@@ -1043,10 +1179,11 @@ pub fn open_external(app: AppHandle, url: String) -> Result<(), CommandError> {
 
 fn selection_context(context: WritingPopupContext) -> SelectionContext {
     SelectionContext {
-        has_selection: true,
+        has_selection: context.has_selection,
         application_name: context.application.display_name,
-        can_replace: true,
+        can_replace: context.has_selection,
         bounds: context.anchor,
+        initial_text: context.initial_text,
     }
 }
 
@@ -1127,6 +1264,7 @@ fn parse_action(value: &str) -> Result<WritingAction, AppCoreError> {
         "custom" => Ok(WritingAction::Custom),
         "summarize" => Ok(WritingAction::Summarize),
         "key-points" => Ok(WritingAction::KeyPoints),
+        "chat" => Ok(WritingAction::Chat),
         _ => Err(AppCoreError::ActionDisabled),
     }
 }
@@ -1141,6 +1279,7 @@ fn action_id(action: WritingAction) -> &'static str {
         WritingAction::Custom => "custom",
         WritingAction::Summarize => "summarize",
         WritingAction::KeyPoints => "key-points",
+        WritingAction::Chat => "chat",
     }
 }
 

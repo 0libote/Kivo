@@ -1,6 +1,6 @@
 import type { SelectionContext, WritingActionId } from "../../types";
 
-export type WritingMode = "closed" | "menu" | "custom" | "processing" | "result" | "error";
+export type WritingMode = "closed" | "menu" | "chat" | "custom" | "processing" | "result" | "error";
 
 export interface WritingToolsState {
   mode: WritingMode;
@@ -9,6 +9,8 @@ export interface WritingToolsState {
   selectedIndex: number;
   activeAction: WritingActionId | null;
   customInstruction: string;
+  /** Editable text-box content: captured highlight, or the chat message. */
+  sourceText: string;
   resultText: string;
   error: string | null;
   canRetry: boolean;
@@ -20,6 +22,7 @@ export type WritingToolsEvent =
   | { type: "SELECT"; index: number }
   | { type: "OPEN_CUSTOM"; initialValue?: string }
   | { type: "SET_CUSTOM"; value: string }
+  | { type: "SET_SOURCE"; value: string }
   | { type: "RUN"; action: WritingActionId }
   | { type: "RESULT"; text: string }
   | { type: "REPLACED" }
@@ -34,6 +37,7 @@ export const initialWritingToolsState: WritingToolsState = {
   selectedIndex: 0,
   activeAction: null,
   customInstruction: "",
+  sourceText: "",
   resultText: "",
   error: null,
   canRetry: false,
@@ -44,9 +48,10 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
     case "OPEN":
       return {
         ...initialWritingToolsState,
-        mode: "menu",
+        mode: event.context.hasSelection ? "menu" : "chat",
         context: event.context,
         enabledActions: event.enabledActions,
+        sourceText: event.context.initialText ?? "",
       };
     case "MOVE": {
       if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
@@ -67,8 +72,13 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
       };
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
+    case "SET_SOURCE":
+      return state.mode === "menu" || state.mode === "chat"
+        ? { ...state, sourceText: event.value }
+        : state;
     case "RUN":
-      if (!state.context) return state;
+      if (state.mode !== "menu" && state.mode !== "custom" && state.mode !== "chat") return state;
+      if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
       return { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false };
     case "RESULT":
       if (state.mode !== "processing") return state;
@@ -79,7 +89,14 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
       return { ...state, mode: "error", error: event.message, canRetry: event.canRetry ?? false };
     case "BACK":
       if (state.mode === "custom" || state.mode === "error" || state.mode === "result") {
-        return { ...state, mode: "menu", activeAction: null, error: null, canRetry: false, resultText: "" };
+        return {
+          ...state,
+          mode: state.context?.hasSelection ? "menu" : "chat",
+          activeAction: null,
+          error: null,
+          canRetry: false,
+          resultText: "",
+        };
       }
       return state;
     case "CLOSE":

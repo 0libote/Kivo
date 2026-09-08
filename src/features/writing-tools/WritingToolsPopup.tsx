@@ -18,6 +18,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   const [state, dispatch] = useReducer(writingToolsReducer, initialWritingToolsState);
   const [copied, setCopied] = useState(false);
   const customInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const actions = useMemo(
     () => WRITING_ACTIONS.filter((action) => settings.enabledWritingActions.includes(action.id)),
     [settings.enabledWritingActions],
@@ -25,10 +26,6 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 
   const openWithContext = useCallback(
     (context: SelectionContext) => {
-      if (!context.hasSelection) {
-        dispatch({ type: "FAIL", message: "Select some text first." });
-        return;
-      }
       dispatch({ type: "OPEN", context, enabledActions: actions.map((action) => action.id) });
     },
     [actions],
@@ -56,6 +53,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 
   useEffect(() => {
     if (state.mode === "custom") customInputRef.current?.focus();
+    if (state.mode === "chat") chatInputRef.current?.focus();
   }, [state.mode]);
 
   useEffect(() => {
@@ -68,18 +66,20 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     void nativeBridge.closeSurface("writing-tools");
   }, []);
 
-  const runAction = useCallback(async (actionId: WritingActionId) => {
+  const runAction = useCallback(async (actionId: WritingActionId, sourceText?: string) => {
     if (actionId === "custom" && state.mode !== "custom") {
       dispatch({ type: "OPEN_CUSTOM" });
       return;
     }
     if (actionId === "custom" && !state.customInstruction.trim()) return;
+    if (actionId === "chat" && !(sourceText ?? state.sourceText).trim()) return;
 
     dispatch({ type: "RUN", action: actionId });
     try {
       const response = await nativeBridge.runWritingAction({
         action: actionId,
         instruction: actionId === "custom" ? state.customInstruction.trim() : undefined,
+        text: (sourceText ?? state.sourceText).trim() || undefined,
       });
       if (response.kind === "result" && typeof response.text === "string") {
         dispatch({ type: "RESULT", text: response.text });
@@ -91,14 +91,24 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
       const nativeError = error instanceof NativeError ? error : null;
       dispatch({ type: "FAIL", message: messageForError(error), canRetry: nativeError?.recoverable });
     }
-  }, [state.customInstruction, state.mode]);
+  }, [state.customInstruction, state.mode, state.sourceText]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (state.mode === "menu" || state.mode === "processing") close();
+        if (state.mode === "menu" || state.mode === "processing" || state.mode === "chat") close();
         else dispatch({ type: "BACK" });
+        return;
+      }
+      if (state.mode === "chat") {
+        if (event.key === "Enter" && !event.shiftKey) {
+          const target = event.target as HTMLElement | null;
+          if (target?.tagName === "TEXTAREA") {
+            event.preventDefault();
+            void runAction("chat");
+          }
+        }
         return;
       }
       if (state.mode !== "menu") return;
@@ -127,7 +137,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [close, runAction, state.enabledActions, state.mode, state.selectedIndex]);
 
-  const activeDefinition = state.activeAction ? writingAction(state.activeAction) : null;
+  const activeDefinition = state.activeAction
+    ? state.activeAction === "chat"
+      ? { label: "Quick chat" }
+      : writingAction(state.activeAction)
+    : null;
 
   return (
     <main className="writing-stage" data-platform={platform}>
@@ -147,6 +161,20 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
                     <Icon name="close" size={14} />
                   </button>
                 </header>
+                {settings.writingAllowManualText ? (
+                  <div className="writing-source">
+                    <label htmlFor="writing-source-text">
+                      {state.context?.applicationName ? `Selected in ${state.context.applicationName}` : "Selected text"}
+                    </label>
+                    <textarea
+                      id="writing-source-text"
+                      onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
+                      rows={3}
+                      spellCheck
+                      value={state.sourceText}
+                    />
+                  </div>
+                ) : null}
                 <div aria-label="Writing actions" className="writing-actions" role="listbox">
                   {actions.map((action, index) => (
                     <button
@@ -170,6 +198,36 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
                   <kbd>↵</kbd>
                 </button>
               </div>
+            ) : null}
+
+            {state.mode === "chat" ? (
+              <form
+                className="writing-chat"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void runAction("chat");
+                }}
+              >
+                <header className="writing-popup__header" data-tauri-drag-region>
+                  <span>Quick chat</span>
+                  <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
+                    <Icon name="close" size={14} />
+                  </button>
+                </header>
+                <p className="writing-chat__hint">Nothing selected — ask anything.</p>
+                <textarea
+                  aria-label="Chat message"
+                  onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
+                  placeholder="Ask anything…"
+                  ref={chatInputRef}
+                  rows={4}
+                  spellCheck
+                  value={state.sourceText}
+                />
+                <div className="writing-chat__footer">
+                  <Button compact disabled={!state.sourceText.trim()} tone="primary" type="submit">Ask</Button>
+                </div>
+              </form>
             ) : null}
 
             {state.mode === "custom" ? (

@@ -14,8 +14,8 @@ use crate::{
         SpeechEventSink, SpeechFuture, SpeechSessionId, SpeechStartOptions, SpeechTranscript,
     },
     text::{
-        ActiveApplication as CoreApplication, CapturedSelection, ScreenRect as CoreRect,
-        TextAccessStrategy, TextError, TextFuture, TextService,
+        ActiveApplication as CoreApplication, CapturedSelection, ScreenPoint as CorePoint,
+        ScreenRect as CoreRect, TextAccessStrategy, TextError, TextFuture, TextService,
     },
 };
 
@@ -71,37 +71,25 @@ impl PlatformTextService {
 impl TextService for PlatformTextService {
     fn capture_selection(&self) -> TextFuture<'_, Result<CapturedSelection, TextError>> {
         Box::pin(async move {
-            let snapshot = self
-                .platform
-                .get_selected_text()
-                .map_err(text_error_from_platform)?;
-            let ticket = self.next_ticket.fetch_add(1, Ordering::Relaxed);
-            let application = CoreApplication {
-                identifier: snapshot
-                    .owner
-                    .identifier
-                    .clone()
-                    .unwrap_or_else(|| snapshot.owner.process_id.to_string()),
-                display_name: snapshot.owner.name.clone(),
-            };
-            let anchor = snapshot.bounds.last().map(|bounds| CoreRect {
-                x: bounds.x,
-                y: bounds.y,
-                width: bounds.width,
-                height: bounds.height,
-            });
-            let selection = CapturedSelection::new(
-                ticket,
-                snapshot.text.clone(),
-                application,
-                anchor,
-                TextAccessStrategy::Accessibility,
-            )?;
-            self.selections
-                .lock()
-                .map_err(|_| TextError::Backend)?
-                .insert(ticket, snapshot);
-            Ok(selection)
+            // Fast path: Accessibility / UI Automation reads without touching
+            // the clipboard. Any failure other than a missing permission falls
+            // through to the highlight-first simulated Copy below.
+            match self.platform.get_selected_text() {
+                Ok(snapshot) => self.remember(snapshot),
+                Err(error) => {
+                    if error.kind == PlatformErrorKind::PermissionDenied {
+                        return Err(text_error_from_platform(error));
+                    }
+                    let platform = Arc::clone(&self.platform);
+                    let snapshot = tokio::task::spawn_blocking(move || {
+                        platform.capture_selection_via_clipboard()
+                    })
+                    .await
+                    .map_err(|_| TextError::Backend)?
+                    .map_err(text_error_from_platform)?;
+                    self.remember(snapshot)
+                }
+            }
         })
     }
 
@@ -111,6 +99,11 @@ impl TextService for PlatformTextService {
         replacement: &'a str,
     ) -> TextFuture<'a, Result<(), TextError>> {
         Box::pin(async move {
+            if selection.strategy() == TextAccessStrategy::ClipboardFallback {
+                return self
+                    .paste_replacement(selection, replacement.to_owned())
+                    .await;
+            }
             if selection.strategy() != TextAccessStrategy::Accessibility {
                 return Err(TextError::UnsupportedApplication);
             }
@@ -118,11 +111,32 @@ impl TextService for PlatformTextService {
                 .selections
                 .lock()
                 .map_err(|_| TextError::Backend)?
-                .remove(&selection.ticket())
+                .get(&selection.ticket())
+                .cloned()
                 .ok_or(TextError::SelectionExpired)?;
-            self.platform
-                .replace_selected_text(&snapshot, replacement)
-                .map_err(text_error_from_platform)
+            match self.platform.replace_selected_text(&snapshot, replacement) {
+                Ok(()) => {
+                    self.selections
+                        .lock()
+                        .map_err(|_| TextError::Backend)?
+                        .remove(&selection.ticket());
+                    Ok(())
+                }
+                // Direct AX/UIA replacement fails in apps that expose text
+                // read-only; the simulated Paste covers those.
+                Err(error)
+                    if matches!(
+                        error.kind,
+                        PlatformErrorKind::Unsupported
+                            | PlatformErrorKind::InvalidState
+                            | PlatformErrorKind::Os
+                    ) =>
+                {
+                    self.paste_replacement(selection, replacement.to_owned())
+                        .await
+                }
+                Err(error) => Err(text_error_from_platform(error)),
+            }
         })
     }
 
@@ -132,6 +146,59 @@ impl TextService for PlatformTextService {
                 .insert_text_at_cursor(text)
                 .map_err(text_error_from_platform)
         })
+    }
+
+    fn cursor_position(&self) -> Option<CorePoint> {
+        self.platform.cursor_position().ok().map(|point| CorePoint {
+            x: point.x,
+            y: point.y,
+        })
+    }
+}
+
+impl PlatformTextService {
+    fn remember(&self, snapshot: SelectionSnapshot) -> Result<CapturedSelection, TextError> {
+        let ticket = self.next_ticket.fetch_add(1, Ordering::Relaxed);
+        let application = CoreApplication {
+            identifier: snapshot
+                .owner
+                .identifier
+                .clone()
+                .unwrap_or_else(|| snapshot.owner.process_id.to_string()),
+            display_name: snapshot.owner.name.clone(),
+        };
+        let anchor = snapshot.bounds.first().map(|bounds| CoreRect {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        });
+        let strategy = snapshot.strategy;
+        let selection =
+            CapturedSelection::new(ticket, snapshot.text.clone(), application, anchor, strategy)?;
+        self.selections
+            .lock()
+            .map_err(|_| TextError::Backend)?
+            .insert(ticket, snapshot);
+        Ok(selection)
+    }
+
+    async fn paste_replacement(
+        &self,
+        selection: &CapturedSelection,
+        replacement: String,
+    ) -> Result<(), TextError> {
+        let snapshot = self
+            .selections
+            .lock()
+            .map_err(|_| TextError::Backend)?
+            .remove(&selection.ticket())
+            .ok_or(TextError::SelectionExpired)?;
+        let platform = Arc::clone(&self.platform);
+        tokio::task::spawn_blocking(move || platform.paste_replacement(&snapshot, &replacement))
+            .await
+            .map_err(|_| TextError::Backend)?
+            .map_err(text_error_from_platform)
     }
 }
 

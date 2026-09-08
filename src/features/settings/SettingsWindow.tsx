@@ -130,6 +130,31 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
               <SettingRow label="Shortcut">
                 <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
               </SettingRow>
+              <SettingRow label="Popup follows" description="Cursor anchors beside the mouse; selection anchors under the highlight; fixed always opens in one place.">
+                <SegmentedControl
+                  ariaLabel="Popup placement"
+                  onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
+                  options={[{ label: "Cursor", value: "cursor" }, { label: "Selection", value: "selection" }, { label: "Fixed", value: "fixed" }]}
+                  value={settings.writingPopupAnchor}
+                />
+              </SettingRow>
+              {settings.writingPopupAnchor === "fixed" ? (
+                <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
+                  <div className="popup-geometry">
+                    <label>X<input aria-label="Fixed popup X" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupX: value }); }} type="number" value={settings.writingPopupX} /></label>
+                    <label>Y<input aria-label="Fixed popup Y" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupY: value }); }} type="number" value={settings.writingPopupY} /></label>
+                  </div>
+                </SettingRow>
+              ) : null}
+              <SettingRow label="Popup size" description="Width and height in pixels. One size for every Writing Tools view.">
+                <div className="popup-geometry">
+                  <label>W<input aria-label="Popup width" max={800} min={280} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupWidth: value }); }} type="number" value={settings.writingPopupWidth} /></label>
+                  <label>H<input aria-label="Popup height" max={800} min={200} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupHeight: value }); }} type="number" value={settings.writingPopupHeight} /></label>
+                </div>
+              </SettingRow>
+              <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
+                <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
+              </SettingRow>
             </SettingsGroup>
             <SettingsGroup header="Actions">
               {DEFAULT_WRITING_ACTIONS.map((id) => {

@@ -15,6 +15,13 @@ pub struct ScreenRect {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScreenPoint {
+    pub x: f64,
+    pub y: f64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveApplication {
@@ -22,10 +29,11 @@ pub struct ActiveApplication {
     pub display_name: String,
 }
 
-// Reserved for the isolated application-specific and clipboard strategies; the
-// current adapters deliberately use Accessibility/UI Automation first.
+// Reserved for the isolated application-specific strategy; the adapters use
+// Accessibility/UI Automation first and fall back to simulated Copy/Paste.
 #[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum TextAccessStrategy {
     Accessibility,
     ApplicationAdapter,
@@ -85,6 +93,12 @@ pub trait TextService: Send + Sync {
         replacement: &'a str,
     ) -> TextFuture<'a, Result<(), TextError>>;
     fn insert_text_at_cursor<'a>(&'a self, text: &'a str) -> TextFuture<'a, Result<(), TextError>>;
+    /// Mouse cursor in physical pixels with a top-left origin, for
+    /// cursor-anchored popup placement. Best effort: `None` falls back to the
+    /// selection anchor.
+    fn cursor_position(&self) -> Option<ScreenPoint> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

@@ -116,7 +116,13 @@ struct WritingContextEvent {
     application_name: String,
     can_replace: bool,
     bounds: Option<crate::text::ScreenRect>,
+    initial_text: String,
 }
+
+/// One stable size for every popup mode. Per-mode resizing made the old
+/// popup jump under the cursor; placement math depends on a known size.
+const WRITING_DEFAULT_WIDTH: f64 = 380.0;
+const WRITING_DEFAULT_HEIGHT: f64 = 460.0;
 
 pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
     build_window(app, "flow-bar", "Kivo Dictation", 220.0, 68.0, false, true)?;
@@ -124,8 +130,8 @@ pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         app,
         "writing-tools",
         "Kivo Writing Tools",
-        360.0,
-        420.0,
+        WRITING_DEFAULT_WIDTH,
+        WRITING_DEFAULT_HEIGHT,
         true,
         true,
     )?;
@@ -475,17 +481,20 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
     let core = app.state::<AppCore>();
     match core.open_writing_tools().await {
         Ok(context) => {
+            // Size before positioning: placement clamps against the real
+            // window frame, so the order matters.
             size_writing_surface(app, "menu").map_err(platform_command_error)?;
-            position_writing_surface(app, context.anchor);
+            position_writing_surface(app, context.cursor, context.anchor);
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
             let _ = app.emit_to(
                 "writing-tools",
                 "writing-context",
                 WritingContextEvent {
-                    has_selection: true,
+                    has_selection: context.has_selection,
                     application_name: context.application.display_name,
-                    can_replace: true,
+                    can_replace: context.has_selection,
                     bounds: context.anchor,
+                    initial_text: context.initial_text,
                 },
             );
             Ok(())
@@ -590,20 +599,10 @@ fn size_flow_bar(app: &AppHandle, status: &str) {
     }
 }
 
-pub(crate) fn size_writing_surface(app: &AppHandle, mode: &str) -> Result<(), PlatformError> {
-    let height = match mode {
-        "menu" => 246.0,
-        "custom" | "processing" => 56.0,
-        "result" => 420.0,
-        "error" => 96.0,
-        _ => {
-            return Err(PlatformError::new(
-                PlatformErrorKind::InvalidState,
-                "size_writing_surface",
-                "The Writing Tools surface mode is invalid.",
-            ));
-        }
-    };
+pub(crate) fn size_writing_surface(app: &AppHandle, _mode: &str) -> Result<(), PlatformError> {
+    // Deliberately mode-independent: the popup keeps one user-configurable
+    // size so it never jumps while working through menu/result states.
+    let (width, height) = writing_popup_size(app);
     let window = app.get_webview_window("writing-tools").ok_or_else(|| {
         PlatformError::new(
             PlatformErrorKind::NotFound,
@@ -612,8 +611,20 @@ pub(crate) fn size_writing_surface(app: &AppHandle, mode: &str) -> Result<(), Pl
         )
     })?;
     window
-        .set_size(Size::Logical(LogicalSize::new(360.0, height)))
+        .set_size(Size::Logical(LogicalSize::new(width, height)))
         .map_err(|_| window_error("size_writing_surface"))
+}
+
+fn writing_popup_size(app: &AppHandle) -> (f64, f64) {
+    app.try_state::<AppCore>()
+        .and_then(|core| core.settings().ok())
+        .map(|settings| {
+            (
+                settings.writing_tools.popup_width,
+                settings.writing_tools.popup_height,
+            )
+        })
+        .unwrap_or((WRITING_DEFAULT_WIDTH, WRITING_DEFAULT_HEIGHT))
 }
 
 pub(crate) fn show_surface(
@@ -723,29 +734,145 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
     }
 }
 
-pub(crate) fn position_writing_surface(app: &AppHandle, bounds: Option<crate::text::ScreenRect>) {
-    let (Some(window), Some(bounds)) = (app.get_webview_window("writing-tools"), bounds) else {
+pub(crate) fn position_writing_surface(
+    app: &AppHandle,
+    cursor: Option<crate::text::ScreenPoint>,
+    anchor: Option<crate::text::ScreenRect>,
+) {
+    let Some(window) = app.get_webview_window("writing-tools") else {
         return;
     };
-    let Ok(size) = window.outer_size() else {
+    let Ok(window_size) = window.outer_size() else {
         return;
     };
-    let mut x = (bounds.x + bounds.width / 2.0 - f64::from(size.width) / 2.0).round() as i32;
-    let mut y = (bounds.y + bounds.height + 10.0).round() as i32;
-    if let Ok(Some(monitor)) = window
-        .current_monitor()
-        .or_else(|_| window.primary_monitor())
-    {
-        let origin = monitor.position();
-        let monitor_size = monitor.size();
-        let right = origin.x + monitor_size.width as i32;
-        let bottom = origin.y + monitor_size.height as i32;
-        x = x.clamp(origin.x + 8, right - size.width as i32 - 8);
-        if y + size.height as i32 > bottom - 8 {
-            y = (bounds.y - f64::from(size.height) - 10.0).round() as i32;
-        }
-        y = y.clamp(origin.y + 8, bottom - size.height as i32 - 8);
+    let (anchor_mode, fixed_x, fixed_y) = writing_popup_placement(app);
+
+    // "fixed" pins the top-left corner exactly (clamped on-screen); every
+    // other mode anchors a point and offsets below the cursor/selection.
+    if anchor_mode == "fixed" {
+        let mut position = PhysicalPosition::new(fixed_x.round() as i32, fixed_y.round() as i32);
+        // Clamp against the monitor holding the fixed point so a position
+        // saved on a secondary display is not dragged to the primary one.
+        let fixed_monitor = monitor_containing(&window, fixed_x, fixed_y);
+        clamp_to_monitor_on(&window, &mut position, window_size, fixed_monitor);
+        let _ = window.set_position(Position::Physical(position));
+        return;
     }
+
+    let selection_point =
+        anchor.map(|bounds| (bounds.x + bounds.width / 2.0, bounds.y + bounds.height));
+    let Some((point_x, point_y)) = (match anchor_mode.as_str() {
+        "selection" => selection_point.or_else(|| cursor.map(|point| (point.x, point.y))),
+        _ => cursor.map(|point| (point.x, point.y)).or(selection_point),
+    }) else {
+        center_on_monitor(&window, window_size);
+        return;
+    };
+
+    let monitor = monitor_containing(&window, point_x, point_y)
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let origin = monitor.position();
+    let monitor_size = monitor.size();
+    let window_width = window_size.width as f64;
+    let window_height = window_size.height as f64;
+    // Points arrive in physical pixels; the stored cursor/selection values
+    // are converted at capture time, so only rounding happens here.
+    let mut x = (point_x - window_width / 2.0).round() as i32;
+    let mut y = (point_y + 16.0).round() as i32;
+    let right = origin.x + monitor_size.width as i32;
+    let bottom = origin.y + monitor_size.height as i32;
+    x = x.clamp(
+        origin.x + 8,
+        (right - window_size.width as i32 - 8).max(origin.x + 8),
+    );
+    // Flip above the point when there is no room below.
+    if y + window_size.height as i32 > bottom - 8 {
+        y = (point_y - window_height - 12.0).round() as i32;
+    }
+    y = y.clamp(
+        origin.y + 8,
+        (bottom - window_size.height as i32 - 8).max(origin.y + 8),
+    );
+    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
+}
+
+fn writing_popup_placement(app: &AppHandle) -> (String, f64, f64) {
+    app.try_state::<AppCore>()
+        .and_then(|core| core.settings().ok())
+        .map(|settings| {
+            let mode = match settings.writing_tools.popup_anchor {
+                crate::config::PopupAnchor::Selection => "selection",
+                crate::config::PopupAnchor::Fixed => "fixed",
+                crate::config::PopupAnchor::Cursor => "cursor",
+            }
+            .to_owned();
+            (
+                mode,
+                settings.writing_tools.popup_fixed_x,
+                settings.writing_tools.popup_fixed_y,
+            )
+        })
+        .unwrap_or(("cursor".to_owned(), 480.0, 320.0))
+}
+
+fn monitor_containing(window: &WebviewWindow, x: f64, y: f64) -> Option<tauri::Monitor> {
+    window
+        .available_monitors()
+        .ok()?
+        .into_iter()
+        .find(|monitor| {
+            let origin = monitor.position();
+            let size = monitor.size();
+            let origin_x = f64::from(origin.x);
+            let origin_y = f64::from(origin.y);
+            x >= origin_x
+                && x < origin_x + f64::from(size.width)
+                && y >= origin_y
+                && y < origin_y + f64::from(size.height)
+        })
+}
+
+fn clamp_to_monitor_on(
+    window: &WebviewWindow,
+    position: &mut PhysicalPosition<i32>,
+    window_size: tauri::PhysicalSize<u32>,
+    preferred: Option<tauri::Monitor>,
+) {
+    let monitor = preferred
+        .or_else(|| window.current_monitor().ok().flatten())
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let origin = monitor.position();
+    let monitor_size = monitor.size();
+    position.x = position.x.clamp(
+        origin.x + 8,
+        (origin.x + monitor_size.width as i32 - window_size.width as i32 - 8).max(origin.x + 8),
+    );
+    position.y = position.y.clamp(
+        origin.y + 8,
+        (origin.y + monitor_size.height as i32 - window_size.height as i32 - 8).max(origin.y + 8),
+    );
+}
+
+fn center_on_monitor(window: &WebviewWindow, window_size: tauri::PhysicalSize<u32>) {
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return;
+    };
+    let origin = monitor.position();
+    let monitor_size = monitor.size();
+    let x = origin.x + (monitor_size.width.saturating_sub(window_size.width) / 2) as i32;
+    let y = origin.y + (monitor_size.height.saturating_sub(window_size.height) / 2) as i32;
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
 }
 

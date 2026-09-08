@@ -11,7 +11,7 @@ use crate::ai::WritingAction;
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: u32,
@@ -180,11 +180,26 @@ impl Default for ShortcutBinding {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WritingToolsSettings {
     pub shortcut: ShortcutBinding,
     pub enabled_actions: Vec<WritingAction>,
+    pub popup_anchor: PopupAnchor,
+    pub popup_fixed_x: f64,
+    pub popup_fixed_y: f64,
+    pub popup_width: f64,
+    pub popup_height: f64,
+    pub allow_manual_text: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PopupAnchor {
+    #[default]
+    Cursor,
+    Selection,
+    Fixed,
 }
 
 impl Default for WritingToolsSettings {
@@ -192,6 +207,12 @@ impl Default for WritingToolsSettings {
         Self {
             shortcut: ShortcutBinding::writing_tools_default(),
             enabled_actions: WritingAction::all().to_vec(),
+            popup_anchor: PopupAnchor::default(),
+            popup_fixed_x: 480.0,
+            popup_fixed_y: 320.0,
+            popup_width: 380.0,
+            popup_height: 460.0,
+            allow_manual_text: true,
         }
     }
 }
@@ -200,6 +221,16 @@ impl WritingToolsSettings {
     fn normalize(&mut self) {
         let mut seen = HashSet::new();
         self.enabled_actions.retain(|action| seen.insert(*action));
+        // A single fixed size for every popup mode keeps placement stable;
+        // per-mode resizing is what made the old popup jump around.
+        self.popup_width = self.popup_width.clamp(280.0, 800.0);
+        self.popup_height = self.popup_height.clamp(200.0, 800.0);
+        if !self.popup_fixed_x.is_finite() {
+            self.popup_fixed_x = 480.0;
+        }
+        if !self.popup_fixed_y.is_finite() {
+            self.popup_fixed_y = 320.0;
+        }
     }
 }
 
@@ -381,5 +412,37 @@ mod tests {
             settings.writing_tools.enabled_actions,
             vec![WritingAction::Proofread, WritingAction::Concise]
         );
+    }
+
+    #[test]
+    fn popup_geometry_is_clamped_and_old_files_still_load() {
+        let mut settings = AppSettings::default();
+        settings.writing_tools.popup_width = 5000.0;
+        settings.writing_tools.popup_height = 10.0;
+        settings.writing_tools.popup_fixed_x = f64::NAN;
+
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.writing_tools.popup_width, 800.0);
+        assert_eq!(settings.writing_tools.popup_height, 200.0);
+        assert_eq!(settings.writing_tools.popup_fixed_x, 480.0);
+
+        // Files written before the popup fields existed deserialize via
+        // serde defaults and keep the cursor-anchored default.
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "general": {},
+            "dictation": { "shortcut": { "accelerator": "Fn" } },
+            "writingTools": {
+                "shortcut": { "accelerator": "Ctrl+Shift+Space" },
+                "enabledActions": ["proofread"],
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            settings.writing_tools.popup_anchor,
+            super::PopupAnchor::Cursor
+        );
+        assert!(settings.writing_tools.allow_manual_text);
     }
 }

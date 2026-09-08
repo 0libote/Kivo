@@ -22,6 +22,9 @@ pub enum WritingAction {
     Custom,
     Summarize,
     KeyPoints,
+    /// Single-shot quick chat, available when nothing is selected. The input
+    /// is the user's message; it never replaces a selection.
+    Chat,
 }
 
 impl WritingAction {
@@ -39,7 +42,7 @@ impl WritingAction {
     }
 
     pub const fn replaces_selection(self) -> bool {
-        !matches!(self, Self::Summarize | Self::KeyPoints)
+        !matches!(self, Self::Summarize | Self::KeyPoints | Self::Chat)
     }
 }
 
@@ -84,6 +87,9 @@ pub fn writing_prompt(
         WritingAction::KeyPoints => {
             "Extract the most important points as a concise Markdown bullet list. Do not add facts or opinions."
         }
+        WritingAction::Chat => {
+            "Answer the user's message directly and helpfully. Use restrained Markdown only where it improves readability."
+        }
     };
 
     let output_rule = if action.replaces_selection() {
@@ -91,6 +97,18 @@ pub fn writing_prompt(
     } else {
         "The output will be shown as an informational result. Use restrained Markdown only where it improves readability."
     };
+
+    // Quick chat takes the user's message as instructions, so it must not
+    // use the untrusted-source prefix shared by the text-rewriting actions.
+    if action == WritingAction::Chat {
+        return Ok(AiPrompt {
+            system_instruction: format!(
+                "You are a concise, helpful assistant inside a writing utility. {instruction}\n{output_rule}"
+            ),
+            input: format!("<message>\n{source_text}\n</message>"),
+            max_output_tokens: output_limit_for(source_text),
+        });
+    }
 
     Ok(AiPrompt {
         system_instruction: format!(
@@ -386,6 +404,15 @@ mod tests {
     #[test]
     fn custom_action_requires_an_instruction() {
         assert!(writing_prompt(WritingAction::Custom, "Text", Some("  ")).is_err());
+    }
+
+    #[test]
+    fn chat_takes_the_message_as_instructions_without_replacement() {
+        let prompt =
+            writing_prompt(WritingAction::Chat, "What is the capital of France?", None).unwrap();
+        assert!(!WritingAction::Chat.replaces_selection());
+        assert!(!prompt.system_instruction.contains("untrusted"));
+        assert!(prompt.input.contains("What is the capital of France?"));
     }
 
     #[test]

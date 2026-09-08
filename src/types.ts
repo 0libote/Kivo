@@ -24,7 +24,10 @@ export type WritingActionId =
   | "concise"
   | "summarize"
   | "key-points"
-  | "custom";
+  | "custom"
+  | "chat";
+
+export type WritingPopupAnchor = "cursor" | "selection" | "fixed";
 
 export interface AppSettings {
   launchAtLogin: boolean;
@@ -38,6 +41,12 @@ export interface AppSettings {
   soundFeedback: boolean;
   writingShortcut: string;
   enabledWritingActions: WritingActionId[];
+  writingPopupAnchor: WritingPopupAnchor;
+  writingPopupX: number;
+  writingPopupY: number;
+  writingPopupWidth: number;
+  writingPopupHeight: number;
+  writingAllowManualText: boolean;
   onboardingComplete: boolean;
 }
 
@@ -71,11 +80,15 @@ export interface SelectionContext {
   applicationName: string;
   canReplace: boolean;
   bounds?: { x: number; y: number; width: number; height: number };
+  /** Captured highlight for the manual text box; empty for quick chat. */
+  initialText: string;
 }
 
 export interface WritingRequest {
   action: WritingActionId;
   instruction?: string;
+  /** Edited text-box content, or the quick-chat message. */
+  text?: string;
 }
 
 export interface WritingResponse {
@@ -133,6 +146,12 @@ export function defaultSettings(platform: Platform): AppSettings {
     soundFeedback: true,
     writingShortcut: platform === "macos" ? "Ctrl+Shift+Space" : "Ctrl+Space",
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
+    writingPopupAnchor: "cursor",
+    writingPopupX: 480,
+    writingPopupY: 320,
+    writingPopupWidth: 380,
+    writingPopupHeight: 460,
+    writingAllowManualText: true,
     onboardingComplete: false,
   };
 }

@@ -21,6 +21,22 @@ impl PlatformImpl {
         Err(unsupported("get_selected_text"))
     }
 
+    pub(super) fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
+        Err(unsupported("capture_selection_via_clipboard"))
+    }
+
+    pub(super) fn paste_replacement(
+        &self,
+        _snapshot: &SelectionSnapshot,
+        _replacement: &str,
+    ) -> PlatformResult<()> {
+        Err(unsupported("paste_replacement"))
+    }
+
+    pub(super) fn cursor_position(&self) -> PlatformResult<ScreenPoint> {
+        Err(unsupported("cursor_position"))
+    }
+
     pub(super) fn replace_selected_text(
         &self,
         _snapshot: &SelectionSnapshot,

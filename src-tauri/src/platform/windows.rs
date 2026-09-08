@@ -13,7 +13,7 @@ use ::windows::{
         SpeechRecognitionResultStatus, SpeechRecognizer,
     },
     Win32::{
-        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Dwm::{
             DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
             DwmSetWindowAttribute,
@@ -22,27 +22,34 @@ use ::windows::{
             CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree,
             CredReadW, CredWriteW,
         },
-        System::Com::{
-            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+        System::{
+            Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+                OpenClipboard, SetClipboardData,
+            },
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
+            Ole::CF_UNICODETEXT,
         },
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
             },
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-                KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN,
+                GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
+                KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE,
+                VK_LWIN, VK_RWIN,
             },
             WindowsAndMessaging::{
-                CallNextHookEx, GWL_EXSTYLE, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
-                GetWindowTextW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SetForegroundWindow,
-                SetWindowLongPtrW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
-                WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_EX_NOACTIVATE,
-                WS_EX_TOOLWINDOW,
+                CallNextHookEx, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetMessageW,
+                GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG,
+                PostThreadMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
+                UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
+                WM_SYSKEYUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
             },
         },
     },
-    core::{HRESULT, HSTRING, PWSTR, w},
+    core::{HANDLE, HRESULT, HSTRING, PWSTR, w},
 };
 
 use crate::security::{CredentialError, CredentialStore, SecretString};
@@ -88,7 +95,98 @@ impl PlatformImpl {
                 identifier: None,
                 native_handle: window.0 as usize,
             },
+            strategy: crate::text::TextAccessStrategy::Accessibility,
             native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
+        })
+    }
+
+    /// Clipboard-fallback capture. Must run before the popup takes focus so
+    /// the simulated Ctrl+C lands in the user's application. Blocking.
+    pub(super) fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
+        let window = unsafe { GetForegroundWindow() };
+        let owner = foreground_application(window);
+        let backup = clipboard_text().ok();
+        let before = clipboard_sequence_number();
+        send_control_keystroke(b'C', "capture_selection_via_clipboard")?;
+
+        if !wait_for_clipboard_change(before, std::time::Duration::from_secs(2)) {
+            restore_clipboard_backup(backup.as_deref(), clipboard_sequence_number());
+            return Err(PlatformError::new(
+                PlatformErrorKind::NotFound,
+                "capture_selection_via_clipboard",
+                "Select some text first.",
+            ));
+        }
+        let after = clipboard_sequence_number();
+        let text = clipboard_text().map_err(|_| {
+            restore_clipboard_backup(backup.as_deref(), after);
+            os_error(
+                "capture_selection_via_clipboard",
+                "The selected text could not be read.",
+            )
+        })?;
+        restore_clipboard_backup(backup.as_deref(), after);
+        if text.trim().is_empty() {
+            return Err(PlatformError::new(
+                PlatformErrorKind::NotFound,
+                "capture_selection_via_clipboard",
+                "Select some text first.",
+            ));
+        }
+        Ok(SelectionSnapshot {
+            text,
+            bounds: Vec::new(),
+            owner,
+            strategy: crate::text::TextAccessStrategy::ClipboardFallback,
+            native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
+        })
+    }
+
+    /// Paste-based replacement for clipboard-captured selections. Restores the
+    /// previous clipboard content silently before returning, on both success
+    /// and failure paths after the clipboard was overwritten.
+    pub(super) fn paste_replacement(
+        &self,
+        snapshot: &SelectionSnapshot,
+        replacement: &str,
+    ) -> PlatformResult<()> {
+        if snapshot.owner.native_handle == 0 {
+            return Err(os_error(
+                "paste_replacement",
+                "The original application is no longer available.",
+            ));
+        }
+        let window = HWND(snapshot.owner.native_handle as *mut _);
+        if !unsafe { SetForegroundWindow(window) }.as_bool() {
+            return Err(os_error(
+                "paste_replacement",
+                "The original application could not be focused.",
+            ));
+        }
+        let backup = clipboard_text().ok();
+        set_clipboard_text(replacement)?;
+        let written = clipboard_sequence_number();
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        if let Err(error) = send_control_keystroke(b'V', "paste_replacement") {
+            restore_clipboard_backup(backup.as_deref(), written);
+            return Err(error);
+        }
+        // No cross-process paste-completion signal exists; 500ms covers
+        // slower targets while staying responsive.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        restore_clipboard_backup(backup.as_deref(), written);
+        Ok(())
+    }
+
+    pub(super) fn cursor_position(&self) -> PlatformResult<ScreenPoint> {
+        let mut point = POINT::default();
+        unsafe {
+            GetCursorPos(&mut point)
+                .map_err(|_| os_error("cursor_position", "The mouse position is unavailable."))?;
+        }
+        Ok(ScreenPoint {
+            x: f64::from(point.x),
+            y: f64::from(point.y),
         })
     }
 
@@ -404,6 +502,143 @@ impl CredentialStore for WindowsCredentialStore {
             Err(error) if error.code() == HRESULT::from_win32(ERROR_NOT_FOUND.0) => Ok(()),
             Err(_) => Err(CredentialError::Backend),
         }
+    }
+}
+
+fn foreground_application(window: HWND) -> ActiveApplication {
+    let mut title = [0_u16; 260];
+    let title_length = unsafe { GetWindowTextW(window, &mut title) }.max(0) as usize;
+    let name = String::from_utf16_lossy(&title[..title_length]);
+    let mut process_id = 0_u32;
+    unsafe {
+        GetWindowThreadProcessId(window, Some(&mut process_id));
+    }
+    ActiveApplication {
+        process_id,
+        name: if name.is_empty() {
+            format!("Application {process_id}")
+        } else {
+            name
+        },
+        identifier: None,
+        native_handle: window.0 as usize,
+    }
+}
+
+fn clipboard_sequence_number() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+fn clipboard_text() -> PlatformResult<String> {
+    unsafe {
+        OpenClipboard(None).map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
+        let result = (|| {
+            let handle = GetClipboardData(u32::from(CF_UNICODETEXT.0))
+                .map_err(|_| os_error("clipboard", "The clipboard could not be read."))?;
+            if handle.0.is_null() {
+                return Err(os_error("clipboard", "The clipboard holds no text."));
+            }
+            let memory = ::windows::Win32::Foundation::HGLOBAL(handle.0);
+            let locked = GlobalLock(memory) as *const u16;
+            if locked.is_null() {
+                return Err(os_error("clipboard", "The clipboard could not be read."));
+            }
+            let length = GlobalSize(memory) / 2;
+            let slice = std::slice::from_raw_parts(locked, length);
+            let end = slice.iter().position(|unit| *unit == 0).unwrap_or(length);
+            let text = String::from_utf16_lossy(&slice[..end]);
+            let _ = GlobalUnlock(memory);
+            Ok(text)
+        })();
+        let _ = CloseClipboard();
+        result
+    }
+}
+
+fn set_clipboard_text(text: &str) -> PlatformResult<()> {
+    unsafe {
+        let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        let bytes = wide.len() * 2;
+        OpenClipboard(None).map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
+        let result = (|| {
+            EmptyClipboard().map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
+            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes)
+                .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
+            let locked = GlobalLock(memory) as *mut u16;
+            if locked.is_null() {
+                return Err(os_error("clipboard", "The clipboard could not be written."));
+            }
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), locked, wide.len());
+            let _ = GlobalUnlock(memory);
+            SetClipboardData(
+                u32::from(CF_UNICODETEXT.0),
+                Some(HANDLE(memory.0 as *mut _)),
+            )
+            .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
+            // Ownership passes to the system on success; must not free.
+            std::mem::forget(memory);
+            Ok(())
+        })();
+        let _ = CloseClipboard();
+        result
+    }
+}
+
+/// Silently restores the pre-capture clipboard text, but only when nothing
+/// else changed the clipboard since (`observed` guards against clobbering a
+/// newer copy). A `None` backup means the clipboard held no text; it is left
+/// alone so non-text content is never destroyed.
+fn restore_clipboard_backup(backup: Option<&str>, observed: u32) {
+    let Some(backup) = backup else { return };
+    if clipboard_sequence_number() != observed {
+        return;
+    }
+    let _ = set_clipboard_text(backup);
+}
+
+fn wait_for_clipboard_change(before: u32, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        if clipboard_sequence_number() != before {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+    }
+}
+
+fn send_control_keystroke(key: u8, operation: &'static str) -> PlatformResult<()> {
+    let inputs = [
+        vk_input(VK_CONTROL.0, KEYBD_EVENT_FLAGS(0)),
+        vk_input(key as u16, KEYBD_EVENT_FLAGS(0)),
+        vk_input(key as u16, KEYEVENTF_KEYUP),
+        vk_input(VK_CONTROL.0, KEYEVENTF_KEYUP),
+    ];
+    let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) } as usize;
+    if sent == inputs.len() {
+        Ok(())
+    } else {
+        Err(os_error(operation, "The keyboard event could not be sent."))
+    }
+}
+
+fn vk_input(
+    code: u16,
+    flags: ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
+) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(code),
+                wScan: 0,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
     }
 }
 

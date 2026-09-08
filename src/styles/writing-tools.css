@@ -32,5 +32,14 @@
 .writing-error strong, .writing-error span { display: block; }
 .writing-error span { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
 .writing-error__actions { display: flex; gap: 6px; }
+.writing-source { padding: 8px 8px 0; }
+.writing-source label { display: block; margin: 0 4px 4px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
+.writing-source textarea { width: 100%; min-height: 56px; max-height: 110px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
+.writing-source textarea:focus { outline: none; border-color: var(--accent); }
+.writing-chat { display: flex; flex-direction: column; }
+.writing-chat__hint { margin: 8px 12px 0; color: var(--text-secondary); font-size: 12px; }
+.writing-chat textarea { margin: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; resize: none; }
+.writing-chat textarea:focus { outline: none; border-color: var(--accent); }
+.writing-chat__footer { display: flex; justify-content: flex-end; padding: 0 8px 8px; }
 
 :root[data-platform="windows"] .writing-action { border-radius: 4px; }
