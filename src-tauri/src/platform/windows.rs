@@ -13,7 +13,7 @@ use ::windows::{
         SpeechRecognitionResultStatus, SpeechRecognizer,
     },
     Win32::{
-        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, POINT, WPARAM},
+        Foundation::{ERROR_NOT_FOUND, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Dwm::{
             DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
             DwmSetWindowAttribute,
@@ -49,7 +49,7 @@ use ::windows::{
             },
         },
     },
-    core::{HANDLE, HRESULT, HSTRING, PWSTR, w},
+    core::{HRESULT, HSTRING, PWSTR, w},
 };
 
 use crate::security::{CredentialError, CredentialStore, SecretString};
