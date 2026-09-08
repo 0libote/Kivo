@@ -55,6 +55,7 @@ impl PlatformError {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn with_os_code(mut self, code: i64) -> Self {
         self.os_code = Some(code);
         self
@@ -133,6 +134,7 @@ pub enum PermissionKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub enum PermissionStatus {
     Granted,
     Denied,
@@ -212,6 +214,7 @@ pub struct SpeechOptions {
 }
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub enum SpeechEvent {
     Listening,
     Partial(String),

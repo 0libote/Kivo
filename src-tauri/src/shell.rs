@@ -884,11 +884,11 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
         let available = available_version
             .as_deref()
             .is_some_and(|version| version_is_newer(version, &current_version));
-        return Ok(UpdateResult {
+        Ok(UpdateResult {
             current_version,
             available_version: available.then_some(release.tag_name.replace("app-v", "")),
             available,
-        });
+        })
     }
 
     #[cfg(not(target_os = "windows"))]

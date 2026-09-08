@@ -71,6 +71,7 @@ pub struct CredentialStatus {
 pub enum CredentialError {
     #[allow(dead_code)]
     Unavailable,
+    #[allow(dead_code)]
     AccessDenied,
     InvalidSecret,
     Backend,
