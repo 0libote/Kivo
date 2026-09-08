@@ -4,8 +4,9 @@ name: Pre-release (continuous)
 #
 # Unsigned / untrusted by design: no Apple, updater, or Windows signing keys
 # are required. macOS builds ship unsigned (Gatekeeper will warn on first
-# launch) and the MSIX is packed without a certificate (Windows requires
-# sideloading / developer mode to install it). The tag-based `Release`
+# launch). Windows ships an unsigned NSIS installer (bypassable SmartScreen
+# warning) plus an MSIX test-signed with a throwaway self-signed cert
+# (install KivoBeta.cer into Trusted People first). The tag-based `Release`
 # workflow remains the signed path for stable `app-v*` releases.
 on:
   push:
@@ -65,9 +66,9 @@ jobs:
           gh release edit continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Unsigned: on macOS right-click the app and choose Open on first launch. Prefer stable app-v* releases when available."
+            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway), or install KivoBeta.cer into Trusted People then install the .msix. Prefer stable app-v* releases when available."
 
-  windows-msix:
+  windows:
     needs: macos
     runs-on: windows-latest
     steps:
@@ -80,16 +81,38 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile
-      # No WINDOWS_CERTIFICATE_* secrets: pack an unsigned MSIX for beta.
-      # Installing it requires sideloading / developer mode on Windows.
-      - name: Build unsigned MSIX (beta, untrusted)
+      # No signing keys: the NSIS .exe installs with a bypassable
+      # SmartScreen warning ("More info" -> "Run anyway").
+      - name: Build unsigned NSIS installer (beta, untrusted)
+        run: bun tauri build --bundles nsis
+      # The MSIX is test-signed with a throwaway self-signed cert generated
+      # in the run. Install KivoBeta.cer into Trusted People first, then the
+      # .msix installs. A fresh cert is generated every build.
+      - name: Build test-signed MSIX (beta, untrusted)
         shell: pwsh
         run: |
-          .\packaging\windows\build-msix.ps1 -Publisher "CN=0libote"
-      - name: Attach MSIX to the continuous pre-release
+          $cert = New-SelfSignedCertificate -Type Custom `
+            -Subject "CN=0libote" `
+            -KeyUsage DigitalSignature `
+            -FriendlyName "Kivo Beta (untrusted test cert)" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
+          $cer = "$env:RUNNER_TEMP\KivoBeta.cer"
+          $pfx = "$env:RUNNER_TEMP\kivo-beta.pfx"
+          Export-Certificate -Cert $cert -FilePath $cer | Out-Null
+          $pwd = ConvertTo-SecureString -String "kivo-beta" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd | Out-Null
+          .\packaging\windows\build-msix.ps1 `
+            -CertificatePath $pfx `
+            -CertificatePassword "kivo-beta" `
+            -Publisher "CN=0libote"
+          Copy-Item $cer "src-tauri\target\release\bundle\msix\KivoBeta.cer"
+      - name: Attach Windows artifacts to the continuous pre-release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
+          gh release upload continuous "src-tauri\target\release\bundle\nsis\Kivo_${version}_x64-setup.exe" --clobber
           gh release upload continuous "src-tauri\target\release\bundle\msix\Kivo_${version}_x64.msix" --clobber
+          gh release upload continuous "src-tauri\target\release\bundle\msix\KivoBeta.cer" --clobber
