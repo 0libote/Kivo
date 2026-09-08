@@ -1,8 +1,12 @@
 name: Pre-release (continuous)
 
-# Rolling pre-release rebuilt from every commit to main so testers and the
-# in-app updater always have something to install before the first stable
-# `app-v*` release is published.
+# Rolling beta pre-release rebuilt from every commit to main.
+#
+# Unsigned / untrusted by design: no Apple, updater, or Windows signing keys
+# are required. macOS builds ship unsigned (Gatekeeper will warn on first
+# launch) and the MSIX is packed without a certificate (Windows requires
+# sideloading / developer mode to install it). The tag-based `Release`
+# workflow remains the signed path for stable `app-v*` releases.
 on:
   push:
     branches: [main]
@@ -32,44 +36,36 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun typecheck
       - run: bun test
-      - run: bun run prepare:release
-        env:
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-      - name: Ensure the continuous release exists
+      - name: Reset the continuous release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view continuous > /dev/null 2>&1 || \
-            gh release create continuous \
-              --prerelease \
-              --title "Kivo continuous" \
-              --notes "Rolling pre-release rebuilt from every commit to main."
+          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
+          gh release create continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+      # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
+      # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
+      # signed updater artifacts, so this ships a plain beta .dmg.
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: continuous
-          releaseName: Kivo continuous
-          releaseBody: Rolling pre-release rebuilt from every commit to main. Prefer stable app-v* releases when available.
+          releaseName: Kivo continuous (beta)
+          releaseBody: Rolling unsigned beta pre-release rebuilt from every commit to main. Prefer stable app-v* releases when available.
           releaseDraft: false
           prerelease: true
-          args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
+          args: --target aarch64-apple-darwin
       - name: Stamp release notes with the built commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release edit continuous \
             --prerelease \
-            --title "Kivo continuous" \
-            --notes "Rolling pre-release from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Prefer stable app-v* releases when available."
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Unsigned: on macOS right-click the app and choose Open on first launch. Prefer stable app-v* releases when available."
 
   windows-msix:
     needs: macos
@@ -84,24 +80,12 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile
-      - name: Materialize the Windows signing certificate
+      # No WINDOWS_CERTIFICATE_* secrets: pack an unsigned MSIX for beta.
+      # Installing it requires sideloading / developer mode on Windows.
+      - name: Build unsigned MSIX (beta, untrusted)
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
         run: |
-          if (-not $env:WINDOWS_CERTIFICATE_BASE64) { throw "WINDOWS_CERTIFICATE_BASE64 is required." }
-          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\kivo.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-      - name: Build signed MSIX
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_PUBLISHER: ${{ secrets.WINDOWS_PUBLISHER }}
-        run: |
-          if (-not $env:WINDOWS_PUBLISHER) { throw "WINDOWS_PUBLISHER is required." }
-          .\packaging\windows\build-msix.ps1 `
-            -CertificatePath "$env:RUNNER_TEMP\kivo.pfx" `
-            -CertificatePassword $env:WINDOWS_CERTIFICATE_PASSWORD `
-            -Publisher $env:WINDOWS_PUBLISHER
+          .\packaging\windows\build-msix.ps1 -Publisher "CN=0libote"
       - name: Attach MSIX to the continuous pre-release
         shell: pwsh
         env:
