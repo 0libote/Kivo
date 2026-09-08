@@ -14,6 +14,7 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+#[cfg(not(target_os = "windows"))]
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
@@ -715,7 +716,7 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
     {
         let _ = moment;
         unsafe {
-            let _ = windows::Win32::UI::WindowsAndMessaging::MessageBeep(
+            let _ = windows::Win32::System::Diagnostics::Debug::MessageBeep(
                 windows::Win32::UI::WindowsAndMessaging::MB_OK,
             );
         }
@@ -755,6 +756,8 @@ pub(crate) fn hide_surface(app: &AppHandle, surface: &str) {
 }
 
 pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(), PlatformError> {
+    #[cfg(target_os = "windows")]
+    let _ = &permission;
     #[cfg(target_os = "macos")]
     let url = match permission {
         PermissionKind::Accessibility => {
