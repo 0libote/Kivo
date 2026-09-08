@@ -5,7 +5,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use windows::{
+use ::windows::{
     Foundation::TypedEventHandler,
     Globalization::Language,
     Media::SpeechRecognition::{
@@ -13,7 +13,7 @@ use windows::{
         SpeechRecognitionResultStatus, SpeechRecognizer,
     },
     Win32::{
-        Foundation::{ERROR_NOT_FOUND, HINSTANCE, HWND, LPARAM, LRESULT, WPARAM},
+        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, WPARAM},
         Graphics::Dwm::{
             DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
             DwmSetWindowAttribute,
@@ -35,10 +35,10 @@ use windows::{
             },
             WindowsAndMessaging::{
                 CallNextHookEx, GWL_EXSTYLE, GetForegroundWindow, GetMessageW, GetWindowLongPtrW,
-                GetWindowTextW, GetWindowThreadProcessId, HHOOK, KBDLLHOOKSTRUCT, MSG,
-                PostThreadMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
-                UnhookWindowsHookEx, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_KEYDOWN, WM_KEYUP,
-                WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                GetWindowTextW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW, SetForegroundWindow,
+                SetWindowLongPtrW, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+                WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP, WS_EX_NOACTIVATE,
+                WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -232,7 +232,7 @@ impl PlatformImpl {
         .map_err(|_| speech_error("Windows Speech could not be initialized."))?;
         let compilation = recognizer
             .CompileConstraintsAsync()
-            .and_then(|operation| operation.get())
+            .and_then(|operation| operation.join())
             .map_err(|_| speech_error("Windows Speech could not prepare dictation."))?;
         if compilation
             .Status()
@@ -255,15 +255,17 @@ impl PlatformImpl {
                 SpeechContinuousRecognitionSession,
                 SpeechContinuousRecognitionResultGeneratedEventArgs,
             >::new(move |_, args| {
-                if let Some(args) = args {
-                    if let Ok(text) = args.Result().and_then(|result| result.Text()) {
-                        let text = text.to_string();
-                        if !text.trim().is_empty() {
-                            if let Ok(mut transcript) = transcript_for_results.lock() {
-                                transcript.push(text);
-                                callback_for_results(SpeechEvent::Partial(transcript.join(" ")));
-                            }
-                        }
+                if let Ok(text) = args
+                    .ok()
+                    .and_then(|args| args.Result())
+                    .and_then(|result| result.Text())
+                {
+                    let text = text.to_string();
+                    if !text.trim().is_empty()
+                        && let Ok(mut transcript) = transcript_for_results.lock()
+                    {
+                        transcript.push(text);
+                        callback_for_results(SpeechEvent::Partial(transcript.join(" ")));
                     }
                 }
                 Ok(())
@@ -271,7 +273,7 @@ impl PlatformImpl {
             .map_err(|_| speech_error("Windows Speech could not attach its result handler."))?;
         session
             .StartAsync()
-            .and_then(|operation| operation.get())
+            .and_then(|operation| operation.join())
             .map_err(|_| speech_error("Windows Speech could not access the microphone."))?;
         callback(SpeechEvent::Listening);
         Ok(Box::new(WindowsSpeechSession {
@@ -301,7 +303,7 @@ impl SpeechSession for WindowsSpeechSession {
         }
         self.session
             .StopAsync()
-            .and_then(|operation| operation.get())
+            .and_then(|operation| operation.join())
             .map_err(|_| speech_error("Windows Speech could not finish dictation."))?;
         let transcript = self
             .transcript
@@ -317,7 +319,7 @@ impl SpeechSession for WindowsSpeechSession {
         if !self.finished {
             self.session
                 .CancelAsync()
-                .and_then(|operation| operation.get())
+                .and_then(|operation| operation.join())
                 .map_err(|_| speech_error("Windows Speech could not cancel dictation."))?;
             self.finished = true;
         }
@@ -331,7 +333,7 @@ impl Drop for WindowsSpeechSession {
             let _ = self
                 .session
                 .CancelAsync()
-                .and_then(|operation| operation.get());
+                .and_then(|operation| operation.join());
         }
         let _ = self.session.RemoveResultGenerated(self.result_token);
         let _ = self.recognizer.Close();
@@ -477,7 +479,7 @@ fn send_unicode(text: &str, operation: &'static str) -> PlatformResult<()> {
 
 fn keyboard_input(
     scan: u16,
-    flags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
+    flags: ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
 ) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
@@ -508,9 +510,8 @@ impl WindowsShortcutRegistration {
     fn start(callback: HoldShortcutCallback, suppress: bool) -> PlatformResult<Self> {
         let (sender, receiver) = std::sync::mpsc::channel();
         let thread = thread::spawn(move || unsafe {
-            let thread_id = windows::Win32::System::Threading::GetCurrentThreadId();
-            let hook =
-                SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), HINSTANCE::default(), 0);
+            let thread_id = ::windows::Win32::System::Threading::GetCurrentThreadId();
+            let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), None, 0);
             match hook {
                 Ok(hook) => {
                     let context = SHORTCUT_CONTEXT.get_or_init(|| Mutex::new(None));
@@ -583,32 +584,33 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
         let is_control = event.vkCode == u32::from(VK_CONTROL.0);
         let is_meta = event.vkCode == u32::from(VK_LWIN.0) || event.vkCode == u32::from(VK_RWIN.0);
         let is_escape = event.vkCode == u32::from(VK_ESCAPE.0);
-        if let Some(context) = SHORTCUT_CONTEXT.get() {
-            if let Ok(mut context) = context.lock() {
-                let control_down =
-                    unsafe { GetAsyncKeyState(VK_CONTROL.0.into()) } < 0 || (is_control && is_down);
-                let meta_down = unsafe { GetAsyncKeyState(VK_LWIN.0.into()) } < 0
-                    || unsafe { GetAsyncKeyState(VK_RWIN.0.into()) } < 0
-                    || (is_meta && is_down);
-                if !context.active && control_down && meta_down {
-                    context.active = true;
-                    (context.callback)(HoldShortcutEvent::Pressed);
-                    if context.suppress {
-                        return LRESULT(1);
-                    }
-                } else if context.active && is_escape && is_down {
-                    context.active = false;
-                    (context.callback)(HoldShortcutEvent::Cancelled);
-                    return LRESULT(1);
-                } else if context.active && is_up && (is_control || is_meta) {
-                    context.active = false;
-                    (context.callback)(HoldShortcutEvent::Released);
-                    if context.suppress {
-                        return LRESULT(1);
-                    }
-                } else if context.active && context.suppress && (is_control || is_meta) {
+        if let Some(context) = SHORTCUT_CONTEXT.get()
+            && let Ok(mut slot) = context.lock()
+            && let Some(context) = slot.as_mut()
+        {
+            let control_down =
+                unsafe { GetAsyncKeyState(VK_CONTROL.0.into()) } < 0 || (is_control && is_down);
+            let meta_down = unsafe { GetAsyncKeyState(VK_LWIN.0.into()) } < 0
+                || unsafe { GetAsyncKeyState(VK_RWIN.0.into()) } < 0
+                || (is_meta && is_down);
+            if !context.active && control_down && meta_down {
+                context.active = true;
+                (context.callback)(HoldShortcutEvent::Pressed);
+                if context.suppress {
                     return LRESULT(1);
                 }
+            } else if context.active && is_escape && is_down {
+                context.active = false;
+                (context.callback)(HoldShortcutEvent::Cancelled);
+                return LRESULT(1);
+            } else if context.active && is_up && (is_control || is_meta) {
+                context.active = false;
+                (context.callback)(HoldShortcutEvent::Released);
+                if context.suppress {
+                    return LRESULT(1);
+                }
+            } else if context.active && context.suppress && (is_control || is_meta) {
+                return LRESULT(1);
             }
         }
     }
