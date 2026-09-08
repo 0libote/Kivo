@@ -284,11 +284,10 @@ impl AppCore {
     }
 
     pub fn writing_context(&self) -> Result<WritingPopupContext, AppCoreError> {
-        let cursor = self
+        let cursor = *self
             .last_cursor
             .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .clone();
+            .map_err(|_| AppCoreError::Unavailable)?;
         match self
             .pending_selection
             .lock()

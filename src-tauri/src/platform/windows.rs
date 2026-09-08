@@ -575,8 +575,8 @@ fn set_clipboard_text(text: &str) -> PlatformResult<()> {
                 Some(HANDLE(memory.0 as *mut _)),
             )
             .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
-            // Ownership passes to the system on success; must not free.
-            std::mem::forget(memory);
+            // Ownership passes to the system on success; HGLOBAL is a plain
+            // handle with no Drop, so there is nothing to free here.
             Ok(())
         })();
         let _ = CloseClipboard();
