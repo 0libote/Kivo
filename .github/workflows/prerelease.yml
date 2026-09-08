@@ -1,0 +1,111 @@
+name: Pre-release (continuous)
+
+# Rolling pre-release rebuilt from every commit to main so testers and the
+# in-app updater always have something to install before the first stable
+# `app-v*` release is published.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: continuous-prerelease
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile
+      - run: bun typecheck
+      - run: bun test
+      - run: bun run prepare:release
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      - name: Ensure the continuous release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view continuous > /dev/null 2>&1 || \
+            gh release create continuous \
+              --prerelease \
+              --title "Kivo continuous" \
+              --notes "Rolling pre-release rebuilt from every commit to main."
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: continuous
+          releaseName: Kivo continuous
+          releaseBody: Rolling pre-release rebuilt from every commit to main. Prefer stable app-v* releases when available.
+          releaseDraft: false
+          prerelease: true
+          args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
+      - name: Stamp release notes with the built commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit continuous \
+            --prerelease \
+            --title "Kivo continuous" \
+            --notes "Rolling pre-release from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Prefer stable app-v* releases when available."
+
+  windows-msix:
+    needs: macos
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile
+      - name: Materialize the Windows signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE_BASE64) { throw "WINDOWS_CERTIFICATE_BASE64 is required." }
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\kivo.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+      - name: Build signed MSIX
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_PUBLISHER: ${{ secrets.WINDOWS_PUBLISHER }}
+        run: |
+          if (-not $env:WINDOWS_PUBLISHER) { throw "WINDOWS_PUBLISHER is required." }
+          .\packaging\windows\build-msix.ps1 `
+            -CertificatePath "$env:RUNNER_TEMP\kivo.pfx" `
+            -CertificatePassword $env:WINDOWS_CERTIFICATE_PASSWORD `
+            -Publisher $env:WINDOWS_PUBLISHER
+      - name: Attach MSIX to the continuous pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          gh release upload continuous "src-tauri\target\release\bundle\msix\Kivo_${version}_x64.msix" --clobber

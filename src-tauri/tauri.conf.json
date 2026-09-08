@@ -35,7 +35,8 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/0libote/Kivo/releases/latest/download/latest.json"
+        "https://github.com/0libote/Kivo/releases/latest/download/latest.json",
+        "https://github.com/0libote/Kivo/releases/download/continuous/latest.json"
       ],
       "pubkey": ""
     }

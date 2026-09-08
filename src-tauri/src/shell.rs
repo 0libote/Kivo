@@ -864,30 +864,78 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
             tag_name: String,
         }
 
-        let release = reqwest::Client::builder()
+        #[derive(serde::Deserialize)]
+        struct ContinuousManifest {
+            version: String,
+        }
+
+        let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(12))
             .build()
-            .map_err(|_| update_check_error())?
+            .map_err(|_| update_check_error())?;
+        let user_agent = "Kivo desktop updater";
+
+        // 1. Prefer the latest stable release. A 404 just means no stable
+        // release has been published yet, so fall through to continuous.
+        let stable = client
             .get("https://api.github.com/repos/0libote/Kivo/releases/latest")
             .header("accept", "application/vnd.github+json")
-            .header("user-agent", "Kivo desktop updater")
+            .header("user-agent", user_agent)
             .send()
             .await
-            .map_err(|_| update_check_error())?
-            .error_for_status()
-            .map_err(|_| update_check_error())?
-            .json::<GitHubRelease>()
+            .map_err(|_| update_check_error())?;
+        if stable.status().is_success() {
+            let release = stable
+                .json::<GitHubRelease>()
+                .await
+                .map_err(|_| update_check_error())?;
+            let available_version = stable_version_from_tag(&release.tag_name);
+            let available = available_version
+                .as_deref()
+                .is_some_and(|version| version_is_newer(version, &current_version));
+            if available {
+                return Ok(UpdateResult {
+                    current_version,
+                    available_version,
+                    available,
+                });
+            }
+        } else if stable.status() != reqwest::StatusCode::NOT_FOUND {
+            return Err(update_check_error());
+        }
+
+        // 2. Fall back to the rolling `continuous` pre-release so the updater
+        // works before the first stable `app-v*` release exists. Tauri
+        // publishes `latest.json` there with the built package version.
+        let continuous = client
+            .get("https://github.com/0libote/Kivo/releases/download/continuous/latest.json")
+            .header("accept", "application/json")
+            .header("user-agent", user_agent)
+            .send()
             .await
             .map_err(|_| update_check_error())?;
-        let available_version = release.tag_name.strip_prefix("app-v").map(str::to_owned);
-        let available = available_version
-            .as_deref()
-            .is_some_and(|version| version_is_newer(version, &current_version));
+        if continuous.status().is_success() {
+            let manifest = continuous
+                .json::<ContinuousManifest>()
+                .await
+                .map_err(|_| update_check_error())?;
+            let available = version_is_newer(&manifest.version, &current_version);
+            return Ok(UpdateResult {
+                current_version,
+                available_version: available.then_some(manifest.version),
+                available,
+            });
+        }
+        if continuous.status() != reqwest::StatusCode::NOT_FOUND {
+            return Err(update_check_error());
+        }
+
+        // No stable release and no continuous pre-release yet.
         Ok(UpdateResult {
             current_version,
-            available_version: available.then_some(release.tag_name.replace("app-v", "")),
-            available,
+            available_version: None,
+            available: false,
         })
     }
 
@@ -925,6 +973,11 @@ fn update_check_error() -> CommandError {
 }
 
 #[cfg(any(target_os = "windows", test))]
+fn stable_version_from_tag(tag: &str) -> Option<String> {
+    tag.strip_prefix("app-v").map(str::to_owned)
+}
+
+#[cfg(any(target_os = "windows", test))]
 fn version_is_newer(candidate: &str, current: &str) -> bool {
     fn parts(version: &str) -> Option<Vec<u64>> {
         version
@@ -957,12 +1010,21 @@ fn window_error(operation: &'static str) -> PlatformError {
 
 #[cfg(test)]
 mod tests {
-    use super::version_is_newer;
+    use super::{stable_version_from_tag, version_is_newer};
 
     #[test]
     fn github_release_versions_are_compared_without_lexical_ordering() {
         assert!(version_is_newer("1.10.0", "1.9.9"));
         assert!(!version_is_newer("1.2.3", "1.2.3"));
         assert!(!version_is_newer("not-a-version", "1.2.3"));
+    }
+
+    #[test]
+    fn stable_tags_resolve_to_a_version_while_continuous_does_not() {
+        assert_eq!(
+            stable_version_from_tag("app-v1.2.3"),
+            Some("1.2.3".to_owned())
+        );
+        assert_eq!(stable_version_from_tag("continuous"), None);
     }
 }
