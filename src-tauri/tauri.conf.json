@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Kivo",
+  "version": "0.1.0",
+  "identifier": "com.kivo.desktop",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "shortDescription": "A quiet, system-wide writing and dictation utility.",
+    "longDescription": "Kivo provides native system-wide dictation and focused Gemini-powered writing tools while keeping sensitive integration in the desktop core.",
+    "macOS": {
+      "minimumSystemVersion": "26.0",
+      "entitlements": "Entitlements.plist",
+      "signingIdentity": null
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/0libote/Kivo/releases/latest/download/latest.json"
+      ],
+      "pubkey": ""
+    }
+  }
+}

@@ -1,0 +1,51 @@
+[package]
+name = "kivo"
+version = "0.1.0"
+description = "A quiet, system-wide writing and dictation utility"
+authors = ["0libote"]
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "kivo_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.3", features = [] }
+
+[dependencies]
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "system-proxy"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-single-instance = "2.4.4"
+tauri-plugin-updater = "2.11.0"
+thiserror = "2.0"
+tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = [
+  "Foundation",
+  "Globalization",
+  "Media_SpeechRecognition",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Security_Credentials",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Ole",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging"
+] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

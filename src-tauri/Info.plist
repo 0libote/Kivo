@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>Kivo uses Accessibility access only when you invoke Writing Tools or insert dictated text.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Kivo needs microphone access while you hold the dictation shortcut.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Kivo uses Apple's speech recognition to turn your voice into text on this Mac.</string>
+</dict>
+</plist>

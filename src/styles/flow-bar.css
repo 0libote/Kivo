@@ -1,0 +1,37 @@
+.flow-stage { width: 100%; height: 100%; display: flex; justify-content: center; align-items: flex-end; padding: 2px; background: transparent; pointer-events: none; }
+.flow-bar {
+  min-width: 84px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 20px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: var(--shadow-overlay);
+  backdrop-filter: blur(22px) saturate(1.35);
+  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  pointer-events: auto;
+  overflow: hidden;
+  transform-origin: center bottom;
+  animation: flow-enter 170ms cubic-bezier(.2,.84,.26,1) both;
+  transition: min-width 170ms ease, opacity 120ms ease, transform 150ms ease;
+}
+.flow-bar[data-state="hidden"] { opacity: 0; transform: translateY(5px) scale(.92); pointer-events: none; }
+.flow-bar[data-state="idle"] { min-width: 34px; width: 34px; height: 34px; opacity: .82; pointer-events: none; }
+.flow-bar[data-state="processing"] { min-width: 116px; }
+.flow-bar[data-state="error"] { min-width: 174px; max-width: 240px; border-radius: 14px; }
+.flow-bar__content { height: 100%; display: flex; align-items: center; justify-content: center; padding: 0 12px; }
+.flow-bar__mic { color: var(--accent); margin-right: 9px; }
+.flow-bar__idle { display: grid; place-items: center; color: var(--text-secondary); }
+.waveform { height: 19px; display: flex; align-items: center; gap: 2px; }
+.waveform i { width: 2px; height: calc(3px + var(--level) * 15px); min-height: 3px; max-height: 18px; border-radius: 2px; background: currentColor; transition: height 75ms linear; }
+.flow-bar__processing { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.flow-bar__success { color: var(--success); animation: success-pop 180ms cubic-bezier(.2,.9,.25,1.2); }
+.flow-bar__error { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--danger); }
+.flow-bar__error span { color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.flow-bar__error button { padding: 3px 5px; border: 0; color: var(--accent); background: transparent; }
+@keyframes flow-enter { from { opacity: 0; transform: translateY(7px) scale(.9); } to { opacity: 1; transform: none; } }
+@keyframes success-pop { from { transform: scale(.65); opacity: .2; } to { transform: none; opacity: 1; } }
+
+:root[data-platform="windows"] .flow-bar { border-radius: 9px; }

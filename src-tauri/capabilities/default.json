@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-windows",
+  "description": "Minimal core window access. Sensitive operations remain validated in Rust commands.",
+  "windows": ["settings", "flow-bar", "writing-tools", "onboarding"],
+  "permissions": ["core:default"]
+}

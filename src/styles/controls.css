@@ -1,0 +1,66 @@
+.button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-strong);
+  cursor: default;
+  font-weight: 520;
+  transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+}
+.button:hover:not(:disabled) { background: var(--hover); }
+.button:active:not(:disabled) { transform: scale(.98); }
+.button:disabled { opacity: .48; }
+.button--compact { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.button--primary { border-color: transparent; background: var(--accent); color: var(--accent-text); }
+.button--primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--text)); }
+.button--danger { border-color: transparent; color: var(--danger); background: transparent; }
+
+.icon-button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  background: transparent;
+}
+.icon-button:hover { color: var(--text); background: var(--hover); }
+
+.spinner { width: 15px; height: 15px; border: 1.8px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; border-radius: 50%; animation: spin .75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.switch { width: 36px; height: 21px; position: relative; padding: 0; border: 0; border-radius: 11px; background: color-mix(in srgb, var(--text-tertiary) 52%, transparent); transition: background 150ms ease; }
+.switch[data-checked="true"] { background: var(--accent); }
+.switch:disabled { opacity: .45; }
+.switch__thumb { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.28); transition: transform 160ms cubic-bezier(.2,.8,.2,1); }
+.switch[data-checked="true"] .switch__thumb { transform: translateX(15px); }
+
+.segmented { display: inline-flex; padding: 2px; gap: 1px; border-radius: 7px; background: var(--surface-muted); }
+.segmented__item { min-height: 25px; padding: 0 10px; border: 0; border-radius: 5px; color: var(--text-secondary); background: transparent; }
+.segmented__item[aria-checked="true"] { color: var(--text); background: var(--surface-strong); box-shadow: 0 1px 3px rgba(0,0,0,.14); }
+
+.status-indicator { display: inline-flex; align-items: center; gap: 7px; color: var(--text-secondary); white-space: nowrap; }
+.status-indicator__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-tertiary); }
+.status-indicator[data-state="connected"] .status-indicator__dot,
+.status-indicator[data-state="granted"] .status-indicator__dot { background: var(--success); }
+.status-indicator[data-state="invalid"] .status-indicator__dot,
+.status-indicator[data-state="denied"] .status-indicator__dot { background: var(--danger); }
+.status-indicator[data-state="testing"] .status-indicator__dot { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.shortcut-recorder { min-width: 150px; display: grid; justify-items: end; gap: 5px; }
+.shortcut-recorder__button { min-height: 29px; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-strong); }
+.shortcut-recorder__button kbd, .shortcut-summary kbd { min-width: 23px; height: 21px; display: grid; place-items: center; padding: 0 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--surface-muted); font-size: 11px; }
+.shortcut-recorder__prompt { color: var(--accent); font-size: 11px; }
+.shortcut-recorder__error { color: var(--danger); font-size: 11px; }
+
+select, input { border: 1px solid var(--border-strong); border-radius: var(--radius-control); background: var(--surface-strong); }
+select { min-height: 30px; padding: 0 28px 0 9px; }
+input { min-height: 32px; padding: 0 10px; user-select: text; }
