@@ -5,6 +5,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::security::SecretString;
 
+mod link_summary;
+pub use link_summary::LinkSource;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkSourceKind {
+    Website,
+    Youtube,
+}
+
 pub const GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
@@ -60,6 +70,9 @@ pub fn writing_prompt(
     if source_text.trim().is_empty() {
         return Err(PromptError::EmptySource);
     }
+    if action == WritingAction::Summarize && source_text.chars().count() > 200_000 {
+        return Err(PromptError::SummaryTooLong);
+    }
 
     let instruction = match action {
         WritingAction::Proofread => {
@@ -82,7 +95,7 @@ pub fn writing_prompt(
             .filter(|value| !value.is_empty())
             .ok_or(PromptError::MissingCustomInstruction)?,
         WritingAction::Summarize => {
-            "Summarize the source concisely in Markdown. Do not add facts or opinions."
+            "Summarize the source concisely in Markdown with a short overview followed by useful key points. Preserve the source language, names, numbers, and qualifications. Include timestamps only when supplied in the source. Do not add facts or opinions."
         }
         WritingAction::KeyPoints => {
             "Extract the most important points as a concise Markdown bullet list. Do not add facts or opinions."
@@ -115,7 +128,11 @@ pub fn writing_prompt(
             "{WRITING_SYSTEM_PREFIX}\n\nTask: {instruction}\n{output_rule}"
         ),
         input: format!("<source_text>\n{source_text}\n</source_text>"),
-        max_output_tokens: output_limit_for(source_text),
+        max_output_tokens: if action == WritingAction::Summarize {
+            output_limit_for(source_text).clamp(1_024, 4_096)
+        } else {
+            output_limit_for(source_text)
+        },
     })
 }
 
@@ -146,6 +163,7 @@ fn output_limit_for(source: &str) -> u32 {
 pub enum PromptError {
     EmptySource,
     MissingCustomInstruction,
+    SummaryTooLong,
 }
 
 impl fmt::Display for PromptError {
@@ -153,6 +171,7 @@ impl fmt::Display for PromptError {
         formatter.write_str(match self {
             Self::EmptySource => "Select some text first.",
             Self::MissingCustomInstruction => "Describe the change you want.",
+            Self::SummaryTooLong => "That text is too long to summarize at once. Select or paste a shorter passage (up to 200,000 characters).",
         })
     }
 }
@@ -167,6 +186,13 @@ pub struct GeminiClient {
 }
 
 impl GeminiClient {
+    #[cfg(test)]
+    pub(crate) fn with_endpoint(endpoint: String) -> Result<Self, GeminiError> {
+        let mut client = Self::new()?;
+        client.endpoint = endpoint;
+        Ok(client)
+    }
+
     pub fn new() -> Result<Self, GeminiError> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -320,6 +346,8 @@ fn parse_interaction(response: InteractionResponse) -> Result<String, GeminiErro
 #[derive(Debug)]
 pub enum GeminiError {
     InvalidApiKey,
+    InvalidLink,
+    InaccessibleSource,
     Transport(reqwest::Error),
     InvalidResponse(reqwest::Error),
     Api {
@@ -334,6 +362,12 @@ impl GeminiError {
     pub fn user_message(&self) -> &'static str {
         match self {
             Self::InvalidApiKey => "The Gemini API key is invalid.",
+            Self::InvalidLink => {
+                "Enter a public website or YouTube video link, or paste the text or transcript instead."
+            }
+            Self::InaccessibleSource => {
+                "Couldn't read that source. It may be unavailable or require sign-in. Paste the text or transcript instead."
+            }
             Self::Api { status, code }
                 if *status == StatusCode::UNAUTHORIZED
                     || *status == StatusCode::FORBIDDEN
@@ -353,6 +387,8 @@ impl GeminiError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidApiKey => "invalid_api_key",
+            Self::InvalidLink => "invalid_link",
+            Self::InaccessibleSource => "inaccessible_source",
             Self::Transport(_) => "transport",
             Self::InvalidResponse(_) => "invalid_response",
             Self::Api { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS => "rate_limited",
@@ -420,6 +456,36 @@ mod tests {
         let prompt = writing_prompt(WritingAction::KeyPoints, "One. Two.", None).unwrap();
         assert!(prompt.system_instruction.contains("Markdown bullet list"));
         assert!(!WritingAction::KeyPoints.replaces_selection());
+    }
+
+    #[test]
+    fn summaries_preserve_source_details_and_have_a_useful_output_budget() {
+        let prompt = writing_prompt(WritingAction::Summarize, "Short source.", None).unwrap();
+        assert!(prompt.system_instruction.contains("short overview"));
+        assert!(prompt.system_instruction.contains("source language"));
+        assert!(
+            prompt
+                .system_instruction
+                .contains("timestamps only when supplied")
+        );
+        assert_eq!(prompt.max_output_tokens, 1_024);
+        let long = "a".repeat(200_000);
+        assert_eq!(
+            writing_prompt(WritingAction::Summarize, &long, None)
+                .unwrap()
+                .max_output_tokens,
+            4_096
+        );
+        assert!(matches!(
+            writing_prompt(WritingAction::Summarize, &(long + "a"), None),
+            Err(super::PromptError::SummaryTooLong)
+        ));
+        assert_eq!(
+            writing_prompt(WritingAction::Proofread, "Short source.", None)
+                .unwrap()
+                .max_output_tokens,
+            128
+        );
     }
 
     #[test]

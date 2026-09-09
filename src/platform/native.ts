@@ -59,7 +59,7 @@ export interface NativeBridge {
   copyText(text: string): Promise<void>;
   closeSurface(surface: Surface): Promise<void>;
   showSurface(surface: Surface): Promise<void>;
-  setSurfaceMode(surface: "writing-tools", mode: "menu" | "chat" | "custom" | "processing" | "result" | "error"): Promise<void>;
+  setSurfaceMode(surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error"): Promise<void>;
   completeOnboarding(): Promise<void>;
   setPaused(paused: boolean): Promise<void>;
   checkForUpdates(): Promise<UpdateResult>;
@@ -140,7 +140,7 @@ class TauriBridge implements NativeBridge {
   copyText = (text: string) => call<void>("copy_text", { text });
   closeSurface = (surface: Surface) => call<void>("close_surface", { surface });
   showSurface = (surface: Surface) => call<void>("show_surface", { surface });
-  setSurfaceMode = (surface: "writing-tools", mode: "menu" | "chat" | "custom" | "processing" | "result" | "error") => call<void>("set_surface_mode", { surface, mode });
+  setSurfaceMode = (surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error") => call<void>("set_surface_mode", { surface, mode });
   completeOnboarding = () => call<void>("complete_onboarding");
   setPaused = (paused: boolean) => call<void>("set_paused", { paused });
   checkForUpdates = () => call<UpdateResult>("check_for_updates");
@@ -287,6 +287,14 @@ class MockBridge implements NativeBridge {
     await delay(850);
     if (request.action === "chat") {
       return { kind: "result", text: `You asked: ${request.text ?? "(nothing)"}` };
+    }
+    if (request.action === "summarize" && request.sourceKind === "link") {
+      return {
+        kind: "result",
+        text: "This preview demonstrates the summary layout. Link content is retrieved only in the native app.",
+        source: { kind: new URL(request.text!).hostname.includes("youtu") ? "youtube" : "website", url: request.text! },
+        canReplace: false,
+      };
     }
     if (request.action === "summarize") {
       return { kind: "result", text: "A short greeting that asks how the other person is doing." };

@@ -43,3 +43,25 @@
 .writing-chat__footer { display: flex; justify-content: flex-end; padding: 0 8px 8px; }
 
 :root[data-platform="windows"] .writing-action { border-radius: 4px; }
+
+.writing-menu { max-height: calc(100vh - 6px); overflow-y: auto; }
+.writing-summary-actions { display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 0 8px 6px; }
+.writing-text-action { padding: 3px 4px; border: 0; background: transparent; color: var(--text-secondary); font-size: 11.5px; text-align: left; }
+.writing-text-action:hover { color: var(--text); text-decoration: underline; }
+.writing-chat__footer { align-items: center; justify-content: space-between; gap: 6px; }
+.writing-chat__footer > .button:only-child { margin-left: auto; }
+.writing-chat__footer .writing-summary-actions { padding: 0; }
+.writing-summary { max-height: calc(100vh - 6px); overflow-y: auto; }
+.writing-summary__input { display: grid; gap: 7px; padding: 12px; }
+.writing-summary__input label { color: var(--text-secondary); font-size: 12px; }
+.writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }
+.writing-summary__input input:focus, .writing-summary__input textarea:focus { outline: none; border-color: var(--accent); }
+.writing-summary__input p { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
+.writing-summary__footer { display: flex; justify-content: space-between; padding: 0 12px 12px; }
+.writing-result { display: flex; flex-direction: column; max-height: calc(100vh - 6px); }
+.writing-result__header, .writing-result__footer, .writing-result__source { flex-shrink: 0; }
+.writing-result__body { min-height: 0; overflow-wrap: anywhere; }
+.writing-result__source { display: flex; gap: 7px; min-width: 0; padding: 8px 15px 0; color: var(--text-secondary); font-size: 11px; }
+.writing-result__source > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.writing-error { grid-template-columns: 24px minmax(0, 1fr); max-height: calc(100vh - 6px); overflow-y: auto; }
+.writing-error__actions { grid-column: 2; flex-wrap: wrap; }

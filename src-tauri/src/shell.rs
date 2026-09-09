@@ -499,6 +499,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
             );
             Ok(())
         }
+        Err(crate::commands::AppCoreError::WritingCancelled) => Ok(()),
         Err(error) => {
             size_writing_surface(app, "error").map_err(platform_command_error)?;
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
