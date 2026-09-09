@@ -886,10 +886,10 @@ pub struct ApiKeyStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechLanguage {
-    code: &'static str,
-    name: &'static str,
-    installed: bool,
-    downloadable: bool,
+    pub code: String,
+    pub name: String,
+    pub installed: bool,
+    pub downloadable: bool,
 }
 
 #[derive(Serialize)]
@@ -1020,26 +1020,71 @@ pub async fn list_microphones(
 
 #[tauri::command]
 pub fn list_speech_languages() -> Vec<SpeechLanguage> {
+    #[cfg(target_os = "windows")]
+    if let Some(languages) = windows_speech_languages() {
+        return languages;
+    }
     vec![
         SpeechLanguage {
-            code: "auto",
-            name: "Automatic",
+            code: "auto".into(),
+            name: "Automatic".into(),
             installed: true,
             downloadable: false,
         },
         SpeechLanguage {
-            code: "en-GB",
-            name: "English (United Kingdom)",
+            code: "en-GB".into(),
+            name: "English (United Kingdom)".into(),
             installed: true,
             downloadable: false,
         },
         SpeechLanguage {
-            code: "en-US",
-            name: "English (United States)",
+            code: "en-US".into(),
+            name: "English (United States)".into(),
             installed: true,
             downloadable: false,
         },
     ]
+}
+
+// The hardcoded list above is macOS-centric: on Windows only the installed
+// speech packs work, and offering anything else hard-fails dictation at
+// hotkey time (e.g. en-US without its pack: 0x800455BC). Query the real
+// list; any failure falls back to the static list.
+#[cfg(target_os = "windows")]
+fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
+    use ::windows::{Globalization::Language, Media::SpeechRecognition::SpeechRecognizer};
+
+    let supported = SpeechRecognizer::SupportedTopicLanguages().ok()?;
+    let size = supported.Size().ok()?;
+    let mut languages = Vec::with_capacity(size as usize + 1);
+    languages.push(SpeechLanguage {
+        code: "auto".into(),
+        name: "Automatic".into(),
+        installed: true,
+        downloadable: false,
+    });
+    for index in 0..size {
+        let language: Language = supported.GetAt(index).ok()?;
+        let tag = language.LanguageTag().ok()?.to_string();
+        if tag.is_empty()
+            || languages
+                .iter()
+                .any(|existing: &SpeechLanguage| existing.code == tag)
+        {
+            continue;
+        }
+        let name = language
+            .DisplayName()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|_| tag.clone());
+        languages.push(SpeechLanguage {
+            code: tag,
+            name,
+            installed: true,
+            downloadable: false,
+        });
+    }
+    Some(languages)
 }
 
 #[tauri::command]

@@ -6,7 +6,17 @@ import { nativeBridge } from "../../platform/native";
 import type { DictationSnapshot, Platform } from "../../types";
 import { dictationReducer, initialDictationState, type DictationStatus } from "./state";
 
-const BAR_WEIGHTS = [0.34, 0.62, 0.84, 0.52, 1, 0.69, 0.88, 0.58, 0.3];
+const BARS: Array<{ readonly id: string; readonly weight: number; readonly odd: boolean }> = [
+  { id: "bar-0", weight: 0.34, odd: false },
+  { id: "bar-1", weight: 0.62, odd: true },
+  { id: "bar-2", weight: 0.84, odd: false },
+  { id: "bar-3", weight: 0.52, odd: true },
+  { id: "bar-4", weight: 1, odd: false },
+  { id: "bar-5", weight: 0.69, odd: true },
+  { id: "bar-6", weight: 0.88, odd: false },
+  { id: "bar-7", weight: 0.58, odd: true },
+  { id: "bar-8", weight: 0.3, odd: false },
+];
 
 function eventFromSnapshot(snapshot: DictationSnapshot) {
   switch (snapshot.status) {
@@ -38,7 +48,7 @@ function mockInitialStatus(): DictationStatus {
   return "listening";
 }
 
-export function FlowBar({ platform }: { platform: Platform }) {
+export function FlowBar({ platform }: { readonly platform: Platform }) {
   const [state, dispatch] = useReducer(dictationReducer, {
     ...initialDictationState,
     status: mockInitialStatus(),
@@ -69,7 +79,7 @@ export function FlowBar({ platform }: { platform: Platform }) {
   }, [state.status]);
 
   const levels = useMemo(
-    () => BAR_WEIGHTS.map((weight, index) => Math.max(0.18, state.level * weight + (index % 2 ? 0.08 : 0))),
+    () => BARS.map((bar) => ({ id: bar.id, value: Math.max(0.18, state.level * bar.weight + (bar.odd ? 0.08 : 0)) })),
     [state.level],
   );
 
@@ -92,8 +102,8 @@ export function FlowBar({ platform }: { platform: Platform }) {
             <>
               <span className="flow-bar__mic"><Icon name="microphone" size={15} /></span>
               <span aria-hidden="true" className="waveform">
-                {levels.map((level, index) => (
-                  <i key={index} style={{ "--level": level } as React.CSSProperties} />
+                {levels.map((bar) => (
+                  <i key={bar.id} style={{ "--level": bar.value } as React.CSSProperties} />
                 ))}
               </span>
             </>

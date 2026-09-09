@@ -462,3 +462,14 @@ async fn dismiss_cancels_network_work_immediately_and_reopen_ignores_late_respon
         assert!(core.last_result.lock().unwrap().is_none());
     }
 }
+
+#[cfg(target_os = "windows")]
+#[test]
+fn windows_lists_installed_speech_languages() {
+    // A machine without speech packs falls back to the static list.
+    if let Some(languages) = windows_speech_languages() {
+        assert!(!languages.is_empty());
+        assert_eq!(languages[0].code, "auto");
+        assert!(languages.iter().all(|language| language.installed));
+    }
+}

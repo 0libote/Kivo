@@ -12,9 +12,6 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 concurrency:
   group: continuous-prerelease
   cancel-in-progress: false
@@ -22,6 +19,8 @@ concurrency:
 jobs:
   macos:
     runs-on: macos-latest
+    permissions:
+      contents: write
     env:
       # Beta-only fast release tuning. Keeps output in target/release/ (what
       # the Tauri bundler expects) while skipping the fat-LTO single-codegen
@@ -31,17 +30,17 @@ jobs:
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
     steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: aarch64-apple-darwin
-      - uses: swatinem/rust-cache@v2
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
       - run: bun test
       - name: Reset the continuous release
@@ -56,7 +55,7 @@ jobs:
       # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
       # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
       # signed updater artifacts, so this ships a plain beta .dmg.
-      - uses: tauri-apps/tauri-action@v1
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -78,6 +77,8 @@ jobs:
   windows:
     needs: macos
     runs-on: windows-latest
+    permissions:
+      contents: write
     env:
       # Same beta-only fast release tuning as macos above. Single NSIS build
       # only (no second MSIX cargo invocation).
@@ -86,15 +87,15 @@ jobs:
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
     steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile --ignore-scripts
       # No signing keys: the NSIS .exe installs with a bypassable
       # SmartScreen warning ("More info" -> "Run anyway"). NSIS only: no
       # second MSIX cargo build (previously `build-msix.ps1` re-ran

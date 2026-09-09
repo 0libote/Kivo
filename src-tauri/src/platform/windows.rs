@@ -321,30 +321,32 @@ impl PlatformImpl {
         }
         let recognizer = match options.language.as_deref() {
             Some(language) => {
-                let language = Language::CreateLanguage(&HSTRING::from(language))
-                    .map_err(|_| speech_error("The selected dictation language is unavailable."))?;
+                let language =
+                    Language::CreateLanguage(&HSTRING::from(language)).map_err(|_| {
+                        speech_unavailable("The selected dictation language is unavailable.")
+                    })?;
                 SpeechRecognizer::Create(&language)
             }
             None => SpeechRecognizer::new(),
         }
-        .map_err(|_| speech_error("Windows Speech could not be initialized."))?;
+        .map_err(|_| speech_unavailable("Windows Speech could not be initialized."))?;
         let compilation = recognizer
             .CompileConstraintsAsync()
             .and_then(|operation| operation.join())
-            .map_err(|_| speech_error("Windows Speech could not prepare dictation."))?;
+            .map_err(|_| speech_unavailable("Windows Speech could not prepare dictation."))?;
         if compilation
             .Status()
             .unwrap_or(SpeechRecognitionResultStatus::Unknown)
             != SpeechRecognitionResultStatus::Success
         {
-            return Err(speech_error(
+            return Err(speech_unavailable(
                 "Windows Speech is unavailable for this language.",
             ));
         }
 
         let session = recognizer
             .ContinuousRecognitionSession()
-            .map_err(|_| speech_error("Windows Speech could not start a session."))?;
+            .map_err(|_| speech_unavailable("Windows Speech could not start a session."))?;
         let transcript = Arc::new(Mutex::new(Vec::<String>::new()));
         let callback_for_results = Arc::clone(&callback);
         let transcript_for_results = Arc::clone(&transcript);
@@ -372,7 +374,24 @@ impl PlatformImpl {
         session
             .StartAsync()
             .and_then(|operation| operation.join())
-            .map_err(|_| speech_error("Windows Speech could not access the microphone."))?;
+            .map_err(|error| {
+                // 0x80045509: the speech privacy policy was not accepted
+                // (Settings > Privacy & security > Speech). Every other
+                // StartAsync failure means the microphone itself is unusable.
+                if error.code().0 == 0x80045509u32 as i32 {
+                    PlatformError::new(
+                        PlatformErrorKind::PermissionDenied,
+                        "start_speech",
+                        "Windows Speech recognition consent has not been granted.",
+                    )
+                } else {
+                    PlatformError::new(
+                        PlatformErrorKind::NotFound,
+                        "start_speech",
+                        "Windows Speech could not access the microphone.",
+                    )
+                }
+            })?;
         callback(SpeechEvent::Listening);
         Ok(Box::new(WindowsSpeechSession {
             recognizer,
@@ -862,4 +881,12 @@ fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformErro
 
 fn speech_error(message: impl Into<String>) -> PlatformError {
     PlatformError::new(PlatformErrorKind::Speech, "start_speech", message)
+}
+
+// Setup failures (missing language pack, uncompilable grammar) mean
+// recognition itself is unavailable, not a backend crash: they map to
+// `RecognitionUnavailable` ("Speech recognition is currently
+// unavailable.", retryable) instead of "Dictation stopped unexpectedly."
+fn speech_unavailable(message: impl Into<String>) -> PlatformError {
+    PlatformError::new(PlatformErrorKind::Unsupported, "start_speech", message)
 }

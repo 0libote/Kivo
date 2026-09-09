@@ -61,8 +61,10 @@ for (const platform of ["macos", "windows"] as const) {
       await page.getByLabel("Webpage or YouTube URL").fill("https://www.youtube.com/watch?v=example1234");
       await page.screenshot({ path: testInfo.outputPath("link-input.png") });
       await page.getByRole("button", { name: "Summarize", exact: true }).click();
-      await page.evaluate(() => window.summaryTest.pending[1].resolve({ kind: "result", text: "A video overview.\n\n" + "- A useful detail.\n".repeat(30), source: { kind: "youtube", url: "https://www.youtube.com/watch?v=example1234" }, canReplace: false }));
+      await page.evaluate(() => window.summaryTest.pending[1].resolve({ kind: "result", text: "A video overview.\n\n" + "## Details\n\nRepeated paragraph.\n\n".repeat(2) + "- A useful detail.\n".repeat(30), source: { kind: "youtube", url: "https://www.youtube.com/watch?v=example1234" }, canReplace: false }));
       await expect(page.getByText("YouTube", { exact: true })).toBeVisible();
+      await expect(page.locator(".markdown-result").getByRole("heading", { name: "Details" })).toHaveCount(2);
+      await expect(page.locator(".markdown-result").getByText("Repeated paragraph.", { exact: true })).toHaveCount(2);
       await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeInViewport();
       expect(await page.locator(".writing-result__body").evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

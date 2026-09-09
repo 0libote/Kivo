@@ -1,13 +1,13 @@
 interface Segment<T extends string> {
-  label: string;
-  value: T;
+  readonly label: string;
+  readonly value: T;
 }
 
 interface SegmentedControlProps<T extends string> {
-  ariaLabel: string;
-  options: Segment<T>[];
-  value: T;
-  onChange: (value: T) => void;
+  readonly ariaLabel: string;
+  readonly options: Segment<T>[];
+  readonly value: T;
+  readonly onChange: (value: T) => void;
 }
 
 export function SegmentedControl<T extends string>({ ariaLabel, options, value, onChange }: SegmentedControlProps<T>) {

@@ -54,25 +54,103 @@ export const initialWritingToolsState: WritingToolsState = {
   canRetry: false,
 };
 
+function openState(event: Extract<WritingToolsEvent, { type: "OPEN" }>): WritingToolsState {
+  return {
+    ...initialWritingToolsState,
+    mode: event.context.hasSelection ? "menu" : "chat",
+    context: event.context,
+    enabledActions: event.enabledActions,
+    sourceText: event.context.initialText ?? "",
+  };
+}
+
+function moveState(state: WritingToolsState, delta: number): WritingToolsState {
+  if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
+  const length = state.enabledActions.length;
+  return { ...state, selectedIndex: (state.selectedIndex + delta + length) % length };
+}
+
+function selectState(state: WritingToolsState, index: number): WritingToolsState {
+  if (state.mode !== "menu") return state;
+  const maxIndex = Math.max(0, state.enabledActions.length - 1);
+  return { ...state, selectedIndex: Math.min(Math.max(0, index), maxIndex) };
+}
+
+function runState(state: WritingToolsState, action: WritingActionId): WritingToolsState {
+  if (!["menu", "custom", "chat", "summary", "error"].includes(state.mode)) return state;
+  if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
+  return { ...state, mode: "processing", activeAction: action, error: null, canRetry: false };
+}
+
+function backState(state: WritingToolsState): WritingToolsState {
+  if (state.mode === "error" && state.usesSummaryInput) {
+    return { ...state, mode: "summary", error: null, canRetry: false };
+  }
+  if (!["custom", "summary", "error", "result"].includes(state.mode)) return state;
+  return {
+    ...state,
+    mode: state.context?.hasSelection ? "menu" : "chat",
+    activeAction: null,
+    usesSummaryInput: false,
+    resultSource: undefined,
+    resultCanReplace: false,
+    error: null,
+    canRetry: false,
+    resultText: "",
+  };
+}
+
+function setSourceState(state: WritingToolsState, value: string): WritingToolsState {
+  if (state.mode !== "menu" && state.mode !== "chat") return state;
+  return { ...state, sourceText: value };
+}
+
+function summaryInputFor(state: WritingToolsState, kind: "text" | "link"): string {
+  if (kind === "text") return state.sourceText;
+  const candidate = state.sourceText.trim();
+  if (/\s/u.test(candidate)) return "";
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" || url.protocol === "http:" ? candidate : "";
+  } catch {
+    return "";
+  }
+}
+
+function openSummaryState(state: WritingToolsState, kind: "text" | "link"): WritingToolsState {
+  if (!state.enabledActions.includes("summarize")) return state;
+  return {
+    ...state,
+    mode: "summary",
+    activeAction: "summarize",
+    summaryKind: kind,
+    summaryInput: summaryInputFor(state, kind),
+    usesSummaryInput: true,
+    error: null,
+  };
+}
+
+function resultState(state: WritingToolsState, event: Extract<WritingToolsEvent, { type: "RESULT" }>): WritingToolsState {
+  if (state.mode !== "processing") return state;
+  const isLink = state.usesSummaryInput && state.summaryKind === "link";
+  return {
+    ...state,
+    mode: "result",
+    resultText: event.text,
+    resultSource: event.source,
+    resultCanReplace: !isLink && (event.canReplace ?? state.context?.canReplace ?? false),
+    error: null,
+  };
+}
+
 export function writingToolsReducer(state: WritingToolsState, event: WritingToolsEvent): WritingToolsState {
   switch (event.type) {
     case "OPEN":
-      return {
-        ...initialWritingToolsState,
-        mode: event.context.hasSelection ? "menu" : "chat",
-        context: event.context,
-        enabledActions: event.enabledActions,
-        sourceText: event.context.initialText ?? "",
-      };
-    case "MOVE": {
-      if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
-      const length = state.enabledActions.length;
-      return { ...state, selectedIndex: (state.selectedIndex + event.delta + length) % length };
-    }
+      return openState(event);
+    case "MOVE":
+      return moveState(state, event.delta);
     case "SELECT":
-      return state.mode === "menu"
-        ? { ...state, selectedIndex: Math.min(Math.max(0, event.index), Math.max(0, state.enabledActions.length - 1)) }
-        : state;
+      return selectState(state, event.index);
     case "OPEN_CUSTOM":
       return {
         ...state,
@@ -82,60 +160,23 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
         error: null,
       };
     case "OPEN_SUMMARY":
-      if (!state.enabledActions.includes("summarize")) return state;
-      return {
-        ...state,
-        mode: "summary",
-        activeAction: "summarize",
-        summaryKind: event.kind,
-        summaryInput: event.kind === "text" ? state.sourceText : (/^https?:\/\/\S+$/i.test(state.sourceText.trim()) ? state.sourceText.trim() : ""),
-        usesSummaryInput: true,
-        error: null,
-      };
+      return openSummaryState(state, event.kind);
     case "SET_SUMMARY_INPUT":
       return state.mode === "summary" ? { ...state, summaryInput: event.value } : state;
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
     case "SET_SOURCE":
-      return state.mode === "menu" || state.mode === "chat"
-        ? { ...state, sourceText: event.value }
-        : state;
+      return setSourceState(state, event.value);
     case "RUN":
-      if (state.mode !== "menu" && state.mode !== "custom" && state.mode !== "chat" && state.mode !== "summary" && state.mode !== "error") return state;
-      if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
-      return { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false };
+      return runState(state, event.action);
     case "RESULT":
-      if (state.mode !== "processing") return state;
-      return {
-        ...state,
-        mode: "result",
-        resultText: event.text,
-        resultSource: event.source,
-        resultCanReplace: !(state.usesSummaryInput && state.summaryKind === "link") && (event.canReplace ?? state.context?.canReplace ?? false),
-        error: null,
-      };
+      return resultState(state, event);
     case "REPLACED":
       return initialWritingToolsState;
     case "FAIL":
       return { ...state, mode: "error", error: event.message, canRetry: event.canRetry ?? false };
     case "BACK":
-      if (state.mode === "error" && state.usesSummaryInput) {
-        return { ...state, mode: "summary", error: null, canRetry: false };
-      }
-      if (state.mode === "custom" || state.mode === "summary" || state.mode === "error" || state.mode === "result") {
-        return {
-          ...state,
-          mode: state.context?.hasSelection ? "menu" : "chat",
-          activeAction: null,
-          usesSummaryInput: false,
-          resultSource: undefined,
-          resultCanReplace: false,
-          error: null,
-          canRetry: false,
-          resultText: "",
-        };
-      }
-      return state;
+      return backState(state);
     case "CLOSE":
       return initialWritingToolsState;
   }
