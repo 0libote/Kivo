@@ -216,12 +216,20 @@ function blockKey(block: Block): string {
   }
 }
 
+function occurrenceKey(content: string, occurrences: Map<string, number>): string {
+  const occurrence = occurrences.get(content) ?? 0;
+  occurrences.set(content, occurrence + 1);
+  return JSON.stringify([content, occurrence]);
+}
+
 export function SafeMarkdown({ children }: { readonly children: string }) {
   const blocks = parseMarkdown(children);
+  // Repeated paragraphs and list items are valid source content.
+  const blockOccurrences = new Map<string, number>();
   return (
     <div className="markdown-result">
       {blocks.map((block) => {
-        const key = blockKey(block);
+        const key = occurrenceKey(blockKey(block), blockOccurrences);
         switch (block.kind) {
           case "heading": {
             const Heading = headingTag(block.level);
@@ -239,10 +247,11 @@ export function SafeMarkdown({ children }: { readonly children: string }) {
             );
           case "list": {
             const List = block.ordered ? "ol" : "ul";
+            const itemOccurrences = new Map<string, number>();
             return (
               <List key={key}>
                 {block.items.map((item) => (
-                  <li key={item}>{inlineMarkdown(item)}</li>
+                  <li key={occurrenceKey(item, itemOccurrences)}>{inlineMarkdown(item)}</li>
                 ))}
               </List>
             );
