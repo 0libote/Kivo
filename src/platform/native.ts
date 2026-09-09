@@ -163,7 +163,7 @@ class MockBridge implements NativeBridge {
   private settings: AppSettings;
   private permissions: PermissionStatus[];
   private apiKeyStatus: ApiKeyStatus = { configured: false, connection: "untested" };
-  private listeners: ListenerMap = {};
+  private readonly listeners: ListenerMap = {};
 
   constructor() {
     const stored = window.localStorage.getItem("kivo-dev-settings");
@@ -212,7 +212,9 @@ class MockBridge implements NativeBridge {
     return structuredClone(this.permissions);
   }
 
-  async openPermissionSettings() {}
+  async openPermissionSettings() {
+    // Intentional no-op: browser harness has no OS settings screen to open.
+  }
 
   async listMicrophones() {
     return [
@@ -297,21 +299,29 @@ class MockBridge implements NativeBridge {
     return { kind: "replaced" };
   }
 
-  async replaceWritingResult() {}
+  async replaceWritingResult() {
+    // Intentional no-op: browser harness previews results instead of replacing text.
+  }
 
   async copyText(text: string) {
     await navigator.clipboard?.writeText(text);
   }
 
-  async closeSurface() {}
+  async closeSurface() {
+    // Intentional no-op: browser harness keeps surfaces visible for development.
+  }
   async showSurface(surface: Surface) {
     window.location.search = `?surface=${surface}&harness=1`;
   }
-  async setSurfaceMode() {}
+  async setSurfaceMode() {
+    // Intentional no-op: browser harness does not resize native windows.
+  }
   async completeOnboarding() {
     await this.updateSettings({ onboardingComplete: true });
   }
-  async setPaused() {}
+  async setPaused() {
+    // Intentional no-op: browser harness has no tray pause state to update.
+  }
   async checkForUpdates() {
     await delay(450);
     return { currentVersion: "0.1.0-dev", available: false };

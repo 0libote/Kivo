@@ -7,7 +7,7 @@ const surfaces: Array<{ id: Surface; label: string }> = [
   { id: "onboarding", label: "Onboarding" },
 ];
 
-export function DeveloperSurfaceMenu({ current }: { current: Surface }) {
+export function DeveloperSurfaceMenu({ current }: { readonly current: Surface }) {
   if (!import.meta.env.DEV || new URLSearchParams(window.location.search).get("harness") !== "1") return null;
   return (
     <nav aria-label="Development surfaces" className="developer-menu">
