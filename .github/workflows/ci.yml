@@ -1,9 +1,19 @@
-name: CI
+name: CI & Build
 
+# Unified pipeline: CI checks -> code/security review -> unsigned beta build.
+#
+# - pull_request: runs CI + review only (build jobs are skipped).
+# - push to main / workflow_dispatch: runs CI, then review, then the rolling
+#   unsigned beta (continuous pre-release) only if everything ahead passes.
+# Takes longer end-to-end, but a red check anywhere stops the build.
+#
+# The tag-based `Release` workflow remains the separate signed path for
+# stable `app-v*` releases.
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -43,3 +53,144 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  # Automated code review / security gate. Must pass before any beta
+  # build starts. Fails the pipeline on: CodeQL findings, known-vulnerable
+  # dependencies (bun + cargo), leaked secrets, or risky PR dependencies.
+  security-gate:
+    name: Code review / security gate
+    needs: [frontend, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          # Full history so secret scanning can see introduced commits.
+          fetch-depth: 0
+      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
+        with:
+          languages: javascript-typescript
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Audit frontend dependencies (bun)
+        run: bun audit
+      - name: Audit Rust dependencies (cargo-audit)
+        working-directory: src-tauri
+        run: |
+          cargo install --locked cargo-audit
+          cargo audit
+      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
+      - name: Scan for leaked secrets (gitleaks)
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+      - name: Review PR dependency changes
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+
+  macos-beta:
+    needs: [frontend, native, security-gate]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      # Beta-only fast release tuning. Keeps output in target/release/ (what
+      # the Tauri bundler expects) while skipping the fat-LTO single-codegen
+      # link from Cargo.toml [profile.release] (stable keeps that).
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+      CARGO_PROFILE_RELEASE_STRIP: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun typecheck
+      - run: bun test
+      - name: Reset the continuous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
+          gh release create continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+      # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
+      # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
+      # signed updater artifacts, so this ships a plain beta .dmg.
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: continuous
+          releaseName: Kivo continuous (beta)
+          releaseBody: Rolling unsigned beta pre-release rebuilt from every commit to main. Prefer stable app-v* releases when available.
+          releaseDraft: false
+          prerelease: true
+          args: --target aarch64-apple-darwin
+      - name: Stamp release notes with the built commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+
+  windows-beta:
+    needs: [macos-beta]
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      # Same beta-only fast release tuning as macos-beta above. Single NSIS
+      # build only (no second MSIX cargo invocation).
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+      CARGO_PROFILE_RELEASE_STRIP: "false"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile --ignore-scripts
+      # No signing keys: the NSIS .exe installs with a bypassable
+      # SmartScreen warning ("More info" -> "Run anyway"). NSIS only: no
+      # second MSIX cargo build (previously `build-msix.ps1` re-ran
+      # `tauri build --no-bundle`, paying the LTO link twice).
+      - name: Build unsigned NSIS installer (beta, untrusted)
+        run: bun tauri build --bundles nsis
+      - name: Attach Windows artifacts to the continuous pre-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          gh release upload continuous "src-tauri\target\release\bundle\nsis\Kivo_${version}_x64-setup.exe" --clobber

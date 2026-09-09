@@ -54,7 +54,7 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
-# Beta / continuous builds (prerelease.yml) intentionally override this profile
+# Beta / continuous builds (ci.yml macos-beta/windows-beta) intentionally override this profile
 # via CARGO_PROFILE_RELEASE_* env vars (thin LTO, 16 codegen units, no strip)
 # so the output stays in target/release/ (Tauri bundler + upload paths assume
 # that) while skipping the ~2min fat-LTO link. Do not add a separate
