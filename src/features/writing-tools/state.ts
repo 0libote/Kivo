@@ -43,25 +43,59 @@ export const initialWritingToolsState: WritingToolsState = {
   canRetry: false,
 };
 
+function openState(event: Extract<WritingToolsEvent, { type: "OPEN" }>): WritingToolsState {
+  return {
+    ...initialWritingToolsState,
+    mode: event.context.hasSelection ? "menu" : "chat",
+    context: event.context,
+    enabledActions: event.enabledActions,
+    sourceText: event.context.initialText ?? "",
+  };
+}
+
+function moveState(state: WritingToolsState, delta: number): WritingToolsState {
+  if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
+  const length = state.enabledActions.length;
+  return { ...state, selectedIndex: (state.selectedIndex + delta + length) % length };
+}
+
+function selectState(state: WritingToolsState, index: number): WritingToolsState {
+  if (state.mode !== "menu") return state;
+  const maxIndex = Math.max(0, state.enabledActions.length - 1);
+  return { ...state, selectedIndex: Math.min(Math.max(0, index), maxIndex) };
+}
+
+function runState(state: WritingToolsState, action: WritingActionId): WritingToolsState {
+  if (state.mode !== "menu" && state.mode !== "custom" && state.mode !== "chat") return state;
+  if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
+  return { ...state, mode: "processing", activeAction: action, error: null, canRetry: false };
+}
+
+function backState(state: WritingToolsState): WritingToolsState {
+  if (state.mode !== "custom" && state.mode !== "error" && state.mode !== "result") return state;
+  return {
+    ...state,
+    mode: state.context?.hasSelection ? "menu" : "chat",
+    activeAction: null,
+    error: null,
+    canRetry: false,
+    resultText: "",
+  };
+}
+
+function setSourceState(state: WritingToolsState, value: string): WritingToolsState {
+  if (state.mode !== "menu" && state.mode !== "chat") return state;
+  return { ...state, sourceText: value };
+}
+
 export function writingToolsReducer(state: WritingToolsState, event: WritingToolsEvent): WritingToolsState {
   switch (event.type) {
     case "OPEN":
-      return {
-        ...initialWritingToolsState,
-        mode: event.context.hasSelection ? "menu" : "chat",
-        context: event.context,
-        enabledActions: event.enabledActions,
-        sourceText: event.context.initialText ?? "",
-      };
-    case "MOVE": {
-      if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
-      const length = state.enabledActions.length;
-      return { ...state, selectedIndex: (state.selectedIndex + event.delta + length) % length };
-    }
+      return openState(event);
+    case "MOVE":
+      return moveState(state, event.delta);
     case "SELECT":
-      return state.mode === "menu"
-        ? { ...state, selectedIndex: Math.min(Math.max(0, event.index), Math.max(0, state.enabledActions.length - 1)) }
-        : state;
+      return selectState(state, event.index);
     case "OPEN_CUSTOM":
       return {
         ...state,
@@ -73,32 +107,17 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
     case "SET_SOURCE":
-      return state.mode === "menu" || state.mode === "chat"
-        ? { ...state, sourceText: event.value }
-        : state;
+      return setSourceState(state, event.value);
     case "RUN":
-      if (state.mode !== "menu" && state.mode !== "custom" && state.mode !== "chat") return state;
-      if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
-      return { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false };
+      return runState(state, event.action);
     case "RESULT":
-      if (state.mode !== "processing") return state;
-      return { ...state, mode: "result", resultText: event.text, error: null };
+      return state.mode === "processing" ? { ...state, mode: "result", resultText: event.text, error: null } : state;
     case "REPLACED":
       return initialWritingToolsState;
     case "FAIL":
       return { ...state, mode: "error", error: event.message, canRetry: event.canRetry ?? false };
     case "BACK":
-      if (state.mode === "custom" || state.mode === "error" || state.mode === "result") {
-        return {
-          ...state,
-          mode: state.context?.hasSelection ? "menu" : "chat",
-          activeAction: null,
-          error: null,
-          canRetry: false,
-          resultText: "",
-        };
-      }
-      return state;
+      return backState(state);
     case "CLOSE":
       return initialWritingToolsState;
   }

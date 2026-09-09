@@ -2,10 +2,10 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  children: ReactNode;
-  icon?: IconName;
-  tone?: "default" | "primary" | "danger";
-  compact?: boolean;
+  readonly children: ReactNode;
+  readonly icon?: IconName;
+  readonly tone?: "default" | "primary" | "danger";
+  readonly compact?: boolean;
 }
 
 export function Button({ children, icon, tone = "default", compact = false, className = "", ...props }: ButtonProps) {

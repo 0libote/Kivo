@@ -1,8 +1,8 @@
 interface SwitchProps {
-  checked: boolean;
-  disabled?: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
+  readonly checked: boolean;
+  readonly disabled?: boolean;
+  readonly label: string;
+  readonly onChange: (checked: boolean) => void;
 }
 
 export function Switch({ checked, disabled, label, onChange }: SwitchProps) {

@@ -2,13 +2,19 @@ import { useEffect, useRef, useState } from "react";
 import type { Platform } from "../types";
 
 interface ShortcutRecorderProps {
-  label: string;
-  platform: Platform;
-  value: string;
-  onChange: (shortcut: string) => Promise<unknown> | unknown;
+  readonly label: string;
+  readonly platform: Platform;
+  readonly value: string;
+  readonly onChange: (shortcut: string) => unknown;
 }
 
 const MODIFIERS = new Set(["Control", "Shift", "Alt", "Meta"]);
+
+function displayKey(event: KeyboardEvent): string {
+  if (event.code === "Space") return "Space";
+  if (event.key.length === 1) return event.key.toUpperCase();
+  return event.key;
+}
 
 function shortcutFromEvent(event: KeyboardEvent): string | null {
   const values: string[] = [];
@@ -18,8 +24,7 @@ function shortcutFromEvent(event: KeyboardEvent): string | null {
   if (event.metaKey) values.push("Meta");
 
   if (!MODIFIERS.has(event.key)) {
-    const key = event.code === "Space" ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.key;
-    values.push(key);
+    values.push(displayKey(event));
   }
 
   return values.length >= 2 || (values.length === 1 && !MODIFIERS.has(event.key)) ? values.join("+") : null;

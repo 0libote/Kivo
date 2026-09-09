@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button } from "../../components/Button";
 import { Icon, type IconName } from "../../components/Icon";
 import { SegmentedControl } from "../../components/SegmentedControl";
@@ -20,10 +20,10 @@ import { writingAction } from "../writing-tools/actions";
 type SettingsSection = "general" | "dictation" | "writing" | "ai" | "about";
 
 interface SettingsWindowProps {
-  context: AppContext;
-  settings: AppSettings;
-  loading: boolean;
-  updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
+  readonly context: AppContext;
+  readonly settings: AppSettings;
+  readonly loading: boolean;
+  readonly updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
@@ -33,6 +33,8 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = 
   { id: "ai", label: "AI", icon: "spark" },
   { id: "about", label: "About", icon: "audio" },
 ];
+
+type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
 
 export function SettingsWindow({ context, settings, loading, updateSettings }: SettingsWindowProps) {
   const [section, setSection] = useState<SettingsSection>("general");
@@ -59,231 +61,17 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
     };
   }, []);
 
-  const save = useCallback(async (patch: Partial<AppSettings>) => {
-    setNotice(null);
-    try {
-      await updateSettings(patch);
-    } catch (error) {
-      setNotice(error instanceof NativeError ? error.message : "The setting couldn’t be saved.");
-    }
-  }, [updateSettings]);
-
-  const activeContent = useMemo(() => {
-    switch (section) {
-      case "general":
-        return (
-          <SettingsContent title="General" subtitle="Choose how Kivo behaves when you sign in and while it is idle.">
-            <SettingsGroup>
-              <SettingRow label="Launch at login" description="Start Kivo automatically after you sign in.">
-                <Switch checked={settings.launchAtLogin} label="Launch at login" onChange={(value) => void save({ launchAtLogin: value })} />
-              </SettingRow>
-              <SettingRow label="Appearance">
-                <SegmentedControl
-                  ariaLabel="Appearance"
-                  onChange={(theme) => void save({ theme })}
-                  options={[{ label: "System", value: "system" }, { label: "Light", value: "light" }, { label: "Dark", value: "dark" }]}
-                  value={settings.theme}
-                />
-              </SettingRow>
-              <SettingRow label="Show Flow Bar while idle" description="Keep a quiet indicator visible between dictations.">
-                <Switch checked={settings.showIdleFlowBar} label="Show Flow Bar while idle" onChange={(value) => void save({ showIdleFlowBar: value })} />
-              </SettingRow>
-              <SettingRow label="Start in background" description="Open without showing Settings.">
-                <Switch checked={settings.startInBackground} label="Start in background" onChange={(value) => void save({ startInBackground: value })} />
-              </SettingRow>
-            </SettingsGroup>
-          </SettingsContent>
-        );
-      case "dictation":
-        return (
-          <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release to insert text in the active app.">
-            <SettingsGroup>
-              <SettingRow label="Shortcut" description={context.platform === "macos" && settings.dictationShortcut === "Fn" ? "Fn is best-effort when macOS assigns the Globe key to another action." : undefined}>
-                <ShortcutRecorder label="Dictation shortcut" onChange={(dictationShortcut) => save({ dictationShortcut })} platform={context.platform} value={settings.dictationShortcut} />
-              </SettingRow>
-              <SettingRow label="Microphone">
-                <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={settings.microphoneId ?? ""}>
-                  <option value="">System Default</option>
-                  {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
-                </select>
-              </SettingRow>
-              <SettingRow label="Language" description="Automatic follows the current input language when supported.">
-                <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={settings.dictationLanguage}>
-                  {languages.map((language) => <option key={language.code} value={language.code}>{language.name}{language.downloadable && !language.installed ? " — download required" : ""}</option>)}
-                </select>
-              </SettingRow>
-            </SettingsGroup>
-            <SettingsGroup>
-              <SettingRow label="Improve dictated text with AI" description="Cleans punctuation and obvious filler words without changing your meaning.">
-                <Switch checked={settings.improveDictationWithAi} label="Improve dictated text with AI" onChange={(value) => void save({ improveDictationWithAi: value })} />
-              </SettingRow>
-              <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
-                <Switch checked={settings.soundFeedback} label="Sound feedback" onChange={(value) => void save({ soundFeedback: value })} />
-              </SettingRow>
-            </SettingsGroup>
-          </SettingsContent>
-        );
-      case "writing":
-        return (
-          <SettingsContent title="Writing Tools" subtitle="Choose the actions shown when you work with selected text.">
-            <SettingsGroup>
-              <SettingRow label="Shortcut">
-                <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
-              </SettingRow>
-              <SettingRow label="Popup follows" description="Cursor anchors beside the mouse; selection anchors under the highlight; fixed always opens in one place.">
-                <SegmentedControl
-                  ariaLabel="Popup placement"
-                  onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
-                  options={[{ label: "Cursor", value: "cursor" }, { label: "Selection", value: "selection" }, { label: "Fixed", value: "fixed" }]}
-                  value={settings.writingPopupAnchor}
-                />
-              </SettingRow>
-              {settings.writingPopupAnchor === "fixed" ? (
-                <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
-                  <div className="popup-geometry">
-                    <label>X<input aria-label="Fixed popup X" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupX: value }); }} type="number" value={settings.writingPopupX} /></label>
-                    <label>Y<input aria-label="Fixed popup Y" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupY: value }); }} type="number" value={settings.writingPopupY} /></label>
-                  </div>
-                </SettingRow>
-              ) : null}
-              <SettingRow label="Popup size" description="Width and height in pixels. One size for every Writing Tools view.">
-                <div className="popup-geometry">
-                  <label>W<input aria-label="Popup width" max={800} min={280} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupWidth: value }); }} type="number" value={settings.writingPopupWidth} /></label>
-                  <label>H<input aria-label="Popup height" max={800} min={200} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupHeight: value }); }} type="number" value={settings.writingPopupHeight} /></label>
-                </div>
-              </SettingRow>
-              <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
-                <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
-              </SettingRow>
-            </SettingsGroup>
-            <SettingsGroup header="Actions">
-              {DEFAULT_WRITING_ACTIONS.map((id) => {
-                const action = writingAction(id);
-                const checked = settings.enabledWritingActions.includes(id);
-                return (
-                  <SettingRow key={id} label={action.label} description={action.description}>
-                    <Switch
-                      checked={checked}
-                      disabled={checked && settings.enabledWritingActions.length === 1}
-                      label={`Show ${action.label}`}
-                      onChange={(enabled) => {
-                        const next = enabled
-                          ? [...settings.enabledWritingActions, id]
-                          : settings.enabledWritingActions.filter((actionId) => actionId !== id);
-                        void save({ enabledWritingActions: next });
-                      }}
-                    />
-                  </SettingRow>
-                );
-              })}
-              <div className="settings-group__footer"><Button compact onClick={() => void save({ enabledWritingActions: [...DEFAULT_WRITING_ACTIONS] })}>Reset actions</Button></div>
-            </SettingsGroup>
-          </SettingsContent>
-        );
-      case "ai":
-        return (
-          <SettingsContent title="AI" subtitle="Kivo sends only the text needed for your request directly to Google Gemini.">
-            <SettingsGroup>
-              <SettingRow label="Google AI Studio API key" description={apiStatus.configured ? "A key is stored securely by the operating system." : "Required for writing actions and optional dictation cleanup."} stacked>
-                <div className="api-key-editor">
-                  <input
-                    aria-label="Google AI Studio API key"
-                    autoCapitalize="none"
-                    autoComplete="off"
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder={apiStatus.configured ? "Enter a replacement key" : "Enter API key"}
-                    spellCheck={false}
-                    type="password"
-                    value={apiKey}
-                  />
-                  <Button
-                    compact
-                    disabled={apiKey.trim().length < 8 || busy !== null}
-                    onClick={() => {
-                      setBusy("save-key");
-                      setNotice(null);
-                      void nativeBridge.saveApiKey(apiKey.trim())
-                        .then((status) => {
-                          setApiStatus(status);
-                          setApiKey("");
-                          setNotice("API key saved securely.");
-                        })
-                        .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be saved."))
-                        .finally(() => setBusy(null));
-                    }}
-                    tone="primary"
-                  >
-                    {busy === "save-key" ? "Saving…" : "Save key"}
-                  </Button>
-                </div>
-              </SettingRow>
-              <SettingRow label="Connection" description={connectionDescription(apiStatus)}>
-                <StatusIndicator label={connectionLabel(apiStatus)} state={apiStatus.connection} />
-              </SettingRow>
-              <div className="settings-group__footer settings-group__footer--split">
-                <Button
-                  compact
-                  disabled={!apiStatus.configured || busy !== null}
-                  onClick={() => {
-                    setBusy("test-key");
-                    setNotice(null);
-                    setApiStatus((current) => ({ ...current, connection: "testing" }));
-                    void nativeBridge.testApiKey()
-                      .then(setApiStatus)
-                      .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Couldn’t connect to Gemini."))
-                      .finally(() => setBusy(null));
-                  }}
-                >
-                  {busy === "test-key" ? "Testing…" : "Test connection"}
-                </Button>
-                {apiStatus.configured ? (
-                  <Button
-                    compact
-                    onClick={() => {
-                      setBusy("clear-key");
-                      setNotice(null);
-                      void nativeBridge.clearApiKey()
-                        .then(setApiStatus)
-                        .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be removed."))
-                        .finally(() => setBusy(null));
-                    }}
-                    tone="danger"
-                  >Remove key</Button>
-                ) : null}
-              </div>
-            </SettingsGroup>
-            <button className="text-link" onClick={() => void nativeBridge.openExternal("https://aistudio.google.com/app/apikey").catch(() => setNotice("Google AI Studio couldn’t be opened."))} type="button">Get an API key from Google AI Studio</button>
-          </SettingsContent>
-        );
-      case "about":
-        return (
-          <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
-            <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
-            <SettingsGroup>
-              <SettingRow label="Software updates" description={updateResult ? (updateResult.available ? `Version ${updateResult.availableVersion} is available.` : "Kivo is up to date.") : "Check manually for a newer version."}>
-                <Button
-                  compact
-                  disabled={busy !== null}
-                  onClick={() => {
-                    setBusy("updates");
-                    setNotice(null);
-                    void nativeBridge.checkForUpdates()
-                      .then(setUpdateResult)
-                      .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Kivo couldn’t check for updates right now."))
-                      .finally(() => setBusy(null));
-                  }}
-                >{busy === "updates" ? "Checking…" : "Check now"}</Button>
-              </SettingRow>
-            </SettingsGroup>
-            <div className="about-links" aria-label="Project links">
-              <span>Project website <small>Available at release</small></span>
-              <span>Source repository <small>Available at release</small></span>
-            </div>
-            <p className="privacy-note">No accounts, analytics, or telemetry. Your text is processed only when you invoke Kivo.</p>
-          </SettingsContent>
-        );
-    }
-  }, [apiKey, apiStatus, busy, context.platform, context.version, languages, microphones, save, section, settings, updateResult]);
+  const save = useCallback<SaveSettings>(
+    async (patch) => {
+      setNotice(null);
+      try {
+        await updateSettings(patch);
+      } catch (error) {
+        setNotice(error instanceof NativeError ? error.message : "The setting couldn’t be saved.");
+      }
+    },
+    [updateSettings],
+  );
 
   return (
     <main className="settings-window" data-loading={loading} data-platform={context.platform}>
@@ -299,22 +87,385 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
         <p className="settings-sidebar__status"><span />Running in the background</p>
       </aside>
       <div className="settings-main" tabIndex={-1}>
-        {activeContent}
+        <SectionContent
+          apiKey={apiKey}
+          apiStatus={apiStatus}
+          busy={busy}
+          context={context}
+          languages={languages}
+          microphones={microphones}
+          section={section}
+          setApiKey={setApiKey}
+          setApiStatus={setApiStatus}
+          setBusy={setBusy}
+          setNotice={setNotice}
+          setUpdateResult={setUpdateResult}
+          settings={settings}
+          save={save}
+          updateResult={updateResult}
+        />
         {notice ? <div aria-live="polite" className="settings-notice">{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)} type="button"><Icon name="close" size={12} /></button></div> : null}
       </div>
     </main>
   );
 }
 
-function SettingsContent({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+interface SectionContentProps {
+  readonly apiKey: string;
+  readonly apiStatus: ApiKeyStatus;
+  readonly busy: string | null;
+  readonly context: AppContext;
+  readonly languages: SpeechLanguage[];
+  readonly microphones: MicrophoneDevice[];
+  readonly section: SettingsSection;
+  readonly setApiKey: (value: string) => void;
+  readonly setApiStatus: (value: ApiKeyStatus | ((current: ApiKeyStatus) => ApiKeyStatus)) => void;
+  readonly setBusy: (value: string | null) => void;
+  readonly setNotice: (value: string | null) => void;
+  readonly setUpdateResult: (value: UpdateResult) => void;
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+  readonly updateResult: UpdateResult | null;
+}
+
+function SectionContent(props: SectionContentProps) {
+  switch (props.section) {
+    case "general":
+      return <GeneralSection settings={props.settings} save={props.save} />;
+    case "dictation":
+      return (
+        <DictationSection
+          context={props.context}
+          languages={props.languages}
+          microphones={props.microphones}
+          settings={props.settings}
+          save={props.save}
+        />
+      );
+    case "writing":
+      return <WritingSection context={props.context} settings={props.settings} save={props.save} />;
+    case "ai":
+      return (
+        <AiSection
+          apiKey={props.apiKey}
+          apiStatus={props.apiStatus}
+          busy={props.busy}
+          setApiKey={props.setApiKey}
+          setApiStatus={props.setApiStatus}
+          setBusy={props.setBusy}
+          setNotice={props.setNotice}
+        />
+      );
+    case "about":
+      return (
+        <AboutSection
+          busy={props.busy}
+          context={props.context}
+          setBusy={props.setBusy}
+          setNotice={props.setNotice}
+          setUpdateResult={props.setUpdateResult}
+          updateResult={props.updateResult}
+        />
+      );
+  }
+}
+
+function GeneralSection({ settings, save }: { readonly settings: AppSettings; readonly save: SaveSettings }) {
+  return (
+    <SettingsContent title="General" subtitle="Choose how Kivo behaves when you sign in and while it is idle.">
+      <SettingsGroup>
+        <SettingRow label="Launch at login" description="Start Kivo automatically after you sign in.">
+          <Switch checked={settings.launchAtLogin} label="Launch at login" onChange={(value) => void save({ launchAtLogin: value })} />
+        </SettingRow>
+        <SettingRow label="Appearance">
+          <SegmentedControl
+            ariaLabel="Appearance"
+            onChange={(theme) => void save({ theme })}
+            options={[{ label: "System", value: "system" }, { label: "Light", value: "light" }, { label: "Dark", value: "dark" }]}
+            value={settings.theme}
+          />
+        </SettingRow>
+        <SettingRow label="Show Flow Bar while idle" description="Keep a quiet indicator visible between dictations.">
+          <Switch checked={settings.showIdleFlowBar} label="Show Flow Bar while idle" onChange={(value) => void save({ showIdleFlowBar: value })} />
+        </SettingRow>
+        <SettingRow label="Start in background" description="Open without showing Settings.">
+          <Switch checked={settings.startInBackground} label="Start in background" onChange={(value) => void save({ startInBackground: value })} />
+        </SettingRow>
+      </SettingsGroup>
+    </SettingsContent>
+  );
+}
+
+function DictationSection({
+  context,
+  languages,
+  microphones,
+  settings,
+  save,
+}: {
+  readonly context: AppContext;
+  readonly languages: SpeechLanguage[];
+  readonly microphones: MicrophoneDevice[];
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+}) {
+  const shortcutNote =
+    context.platform === "macos" && settings.dictationShortcut === "Fn"
+      ? "Fn is best-effort when macOS assigns the Globe key to another action."
+      : undefined;
+  return (
+    <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release to insert text in the active app.">
+      <SettingsGroup>
+        <SettingRow label="Shortcut" description={shortcutNote}>
+          <ShortcutRecorder label="Dictation shortcut" onChange={(dictationShortcut) => save({ dictationShortcut })} platform={context.platform} value={settings.dictationShortcut} />
+        </SettingRow>
+        <SettingRow label="Microphone">
+          <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={settings.microphoneId ?? ""}>
+            <option value="">System Default</option>
+            {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+          </select>
+        </SettingRow>
+        <SettingRow label="Language" description="Automatic follows the current input language when supported.">
+          <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={settings.dictationLanguage}>
+            {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
+          </select>
+        </SettingRow>
+      </SettingsGroup>
+      <SettingsGroup>
+        <SettingRow label="Improve dictated text with AI" description="Cleans punctuation and obvious filler words without changing your meaning.">
+          <Switch checked={settings.improveDictationWithAi} label="Improve dictated text with AI" onChange={(value) => void save({ improveDictationWithAi: value })} />
+        </SettingRow>
+        <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
+          <Switch checked={settings.soundFeedback} label="Sound feedback" onChange={(value) => void save({ soundFeedback: value })} />
+        </SettingRow>
+      </SettingsGroup>
+    </SettingsContent>
+  );
+}
+
+function languageName(language: SpeechLanguage): string {
+  if (language.downloadable && !language.installed) return `${language.name} — download required`;
+  return language.name;
+}
+
+function WritingSection({
+  context,
+  settings,
+  save,
+}: {
+  readonly context: AppContext;
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+}) {
+  return (
+    <SettingsContent title="Writing Tools" subtitle="Choose the actions shown when you work with selected text.">
+      <SettingsGroup>
+        <SettingRow label="Shortcut">
+          <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
+        </SettingRow>
+        <SettingRow label="Popup follows" description="Cursor anchors beside the mouse; selection anchors under the highlight; fixed always opens in one place.">
+          <SegmentedControl
+            ariaLabel="Popup placement"
+            onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
+            options={[{ label: "Cursor", value: "cursor" }, { label: "Selection", value: "selection" }, { label: "Fixed", value: "fixed" }]}
+            value={settings.writingPopupAnchor}
+          />
+        </SettingRow>
+        {settings.writingPopupAnchor === "fixed" ? (
+          <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
+            <div className="popup-geometry">
+              <label>X<input aria-label="Fixed popup X" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupX: value }); }} type="number" value={settings.writingPopupX} /></label>
+              <label>Y<input aria-label="Fixed popup Y" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupY: value }); }} type="number" value={settings.writingPopupY} /></label>
+            </div>
+          </SettingRow>
+        ) : null}
+        <SettingRow label="Popup size" description="Width and height in pixels. One size for every Writing Tools view.">
+          <div className="popup-geometry">
+            <label>W<input aria-label="Popup width" max={800} min={280} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupWidth: value }); }} type="number" value={settings.writingPopupWidth} /></label>
+            <label>H<input aria-label="Popup height" max={800} min={200} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupHeight: value }); }} type="number" value={settings.writingPopupHeight} /></label>
+          </div>
+        </SettingRow>
+        <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
+          <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
+        </SettingRow>
+      </SettingsGroup>
+      <SettingsGroup header="Actions">
+        {DEFAULT_WRITING_ACTIONS.map((id) => {
+          const action = writingAction(id);
+          const checked = settings.enabledWritingActions.includes(id);
+          return (
+            <SettingRow key={id} label={action.label} description={action.description}>
+              <Switch
+                checked={checked}
+                disabled={checked && settings.enabledWritingActions.length === 1}
+                label={`Show ${action.label}`}
+                onChange={(enabled) => {
+                  const next = enabled
+                    ? [...settings.enabledWritingActions, id]
+                    : settings.enabledWritingActions.filter((actionId) => actionId !== id);
+                  void save({ enabledWritingActions: next });
+                }}
+              />
+            </SettingRow>
+          );
+        })}
+        <div className="settings-group__footer"><Button compact onClick={() => void save({ enabledWritingActions: [...DEFAULT_WRITING_ACTIONS] })}>Reset actions</Button></div>
+      </SettingsGroup>
+    </SettingsContent>
+  );
+}
+
+function AiSection({
+  apiKey,
+  apiStatus,
+  busy,
+  setApiKey,
+  setApiStatus,
+  setBusy,
+  setNotice,
+}: {
+  readonly apiKey: string;
+  readonly apiStatus: ApiKeyStatus;
+  readonly busy: string | null;
+  readonly setApiKey: (value: string) => void;
+  readonly setApiStatus: (value: ApiKeyStatus | ((current: ApiKeyStatus) => ApiKeyStatus)) => void;
+  readonly setBusy: (value: string | null) => void;
+  readonly setNotice: (value: string | null) => void;
+}) {
+  return (
+    <SettingsContent title="AI" subtitle="Kivo sends only the text needed for your request directly to Google Gemini.">
+      <SettingsGroup>
+        <SettingRow label="Google AI Studio API key" description={apiStatus.configured ? "A key is stored securely by the operating system." : "Required for writing actions and optional dictation cleanup."} stacked>
+          <div className="api-key-editor">
+            <input
+              aria-label="Google AI Studio API key"
+              autoCapitalize="none"
+              autoComplete="off"
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={apiStatus.configured ? "Enter a replacement key" : "Enter API key"}
+              spellCheck={false}
+              type="password"
+              value={apiKey}
+            />
+            <Button
+              compact
+              disabled={apiKey.trim().length < 8 || busy !== null}
+              onClick={() => {
+                setBusy("save-key");
+                setNotice(null);
+                void nativeBridge.saveApiKey(apiKey.trim())
+                  .then((status) => {
+                    setApiStatus(status);
+                    setApiKey("");
+                    setNotice("API key saved securely.");
+                  })
+                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be saved."))
+                  .finally(() => setBusy(null));
+              }}
+              tone="primary"
+            >
+              {busy === "save-key" ? "Saving…" : "Save key"}
+            </Button>
+          </div>
+        </SettingRow>
+        <SettingRow label="Connection" description={connectionDescription(apiStatus)}>
+          <StatusIndicator label={connectionLabel(apiStatus)} state={apiStatus.connection} />
+        </SettingRow>
+        <div className="settings-group__footer settings-group__footer--split">
+          <Button
+            compact
+            disabled={!apiStatus.configured || busy !== null}
+            onClick={() => {
+              setBusy("test-key");
+              setNotice(null);
+              setApiStatus((current) => ({ ...current, connection: "testing" }));
+              void nativeBridge.testApiKey()
+                .then(setApiStatus)
+                .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Couldn’t connect to Gemini."))
+                .finally(() => setBusy(null));
+            }}
+          >
+            {busy === "test-key" ? "Testing…" : "Test connection"}
+          </Button>
+          {apiStatus.configured ? (
+            <Button
+              compact
+              onClick={() => {
+                setBusy("clear-key");
+                setNotice(null);
+                void nativeBridge.clearApiKey()
+                  .then(setApiStatus)
+                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be removed."))
+                  .finally(() => setBusy(null));
+              }}
+              tone="danger"
+            >Remove key</Button>
+          ) : null}
+        </div>
+      </SettingsGroup>
+      <button className="text-link" onClick={() => void nativeBridge.openExternal("https://aistudio.google.com/app/apikey").catch(() => setNotice("Google AI Studio couldn’t be opened."))} type="button">Get an API key from Google AI Studio</button>
+    </SettingsContent>
+  );
+}
+
+function AboutSection({
+  busy,
+  context,
+  setBusy,
+  setNotice,
+  setUpdateResult,
+  updateResult,
+}: {
+  readonly busy: string | null;
+  readonly context: AppContext;
+  readonly setBusy: (value: string | null) => void;
+  readonly setNotice: (value: string | null) => void;
+  readonly setUpdateResult: (value: UpdateResult) => void;
+  readonly updateResult: UpdateResult | null;
+}) {
+  return (
+    <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
+      <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
+      <SettingsGroup>
+        <SettingRow label="Software updates" description={updateDescription(updateResult)}>
+          <Button
+            compact
+            disabled={busy !== null}
+            onClick={() => {
+              setBusy("updates");
+              setNotice(null);
+              void nativeBridge.checkForUpdates()
+                .then(setUpdateResult)
+                .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Kivo couldn’t check for updates right now."))
+                .finally(() => setBusy(null));
+            }}
+          >{busy === "updates" ? "Checking…" : "Check now"}</Button>
+        </SettingRow>
+      </SettingsGroup>
+      <div className="about-links" aria-label="Project links">
+        <span>Project website <small>Available at release</small></span>
+        <span>Source repository <small>Available at release</small></span>
+      </div>
+      <p className="privacy-note">No accounts, analytics, or telemetry. Your text is processed only when you invoke Kivo.</p>
+    </SettingsContent>
+  );
+}
+
+function updateDescription(updateResult: UpdateResult | null): string {
+  if (updateResult === null) return "Check manually for a newer version.";
+  if (updateResult.available) return `Version ${updateResult.availableVersion} is available.`;
+  return "Kivo is up to date.";
+}
+
+function SettingsContent({ title, subtitle, children }: { readonly title: string; readonly subtitle: string; readonly children: ReactNode }) {
   return <section className="settings-content"><header><h1>{title}</h1><p>{subtitle}</p></header>{children}</section>;
 }
 
-function SettingsGroup({ header, children }: { header?: string; children: ReactNode }) {
+function SettingsGroup({ header, children }: { readonly header?: string; readonly children: ReactNode }) {
   return <section className="settings-group">{header ? <h2>{header}</h2> : null}<div className="settings-group__body">{children}</div></section>;
 }
 
-function SettingRow({ label, description, children, stacked = false }: { label: string; description?: string; children: ReactNode; stacked?: boolean }) {
+function SettingRow({ label, description, children, stacked = false }: { readonly label: string; readonly description?: string; readonly children: ReactNode; readonly stacked?: boolean }) {
   return <div className="setting-row" data-stacked={stacked}><div className="setting-row__label"><strong>{label}</strong>{description ? <span>{description}</span> : null}</div><div className="setting-row__control">{children}</div></div>;
 }
 

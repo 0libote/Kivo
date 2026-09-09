@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { Spinner } from "../../components/Spinner";
@@ -7,18 +7,114 @@ import { nativeBridge } from "../../platform/native";
 import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type WritingActionId } from "../../types";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { WRITING_ACTIONS, writingAction } from "./actions";
-import { initialWritingToolsState, writingToolsReducer } from "./state";
+import { initialWritingToolsState, writingToolsReducer, type WritingToolsEvent, type WritingToolsState } from "./state";
 
 interface WritingToolsPopupProps {
-  platform: Platform;
-  settings: AppSettings;
+  readonly platform: Platform;
+  readonly settings: AppSettings;
+}
+
+type RunAction = (actionId: WritingActionId, sourceText?: string) => Promise<void>;
+type PopupDispatch = Dispatch<WritingToolsEvent>;
+
+function getActiveDefinition(activeAction: WritingActionId | null): { label: string } | null {
+  if (activeAction === null) return null;
+  if (activeAction === "chat") return { label: "Quick chat" };
+  return writingAction(activeAction);
+}
+
+const MENU_MOVEMENT: Readonly<Record<string, number>> = {
+  ArrowRight: 1,
+  ArrowLeft: -1,
+  ArrowDown: 2,
+  ArrowUp: -2,
+};
+
+function isClosableMode(mode: WritingToolsState["mode"]): boolean {
+  return mode === "menu" || mode === "processing" || mode === "chat";
+}
+
+function handleEscape(
+  mode: WritingToolsState["mode"],
+  close: () => void,
+  dispatch: PopupDispatch,
+): void {
+  if (isClosableMode(mode)) {
+    close();
+  } else {
+    dispatch({ type: "BACK" });
+  }
+}
+
+function handleChatKey(
+  event: KeyboardEvent,
+  runAction: RunAction,
+): void {
+  if (event.key !== "Enter" || event.shiftKey) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.tagName === "TEXTAREA") {
+    event.preventDefault();
+    void runAction("chat");
+  }
+}
+
+function handleMenuKey(
+  event: KeyboardEvent,
+  enabledActions: WritingActionId[],
+  selectedIndex: number,
+  runAction: RunAction,
+  dispatch: PopupDispatch,
+): void {
+  const target = event.target as HTMLElement | null;
+  if (target?.matches("input, textarea")) return;
+  const delta = MENU_MOVEMENT[event.key];
+  if (delta !== undefined) {
+    event.preventDefault();
+    dispatch({ type: "MOVE", delta });
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const action = enabledActions[selectedIndex];
+    if (action) void runAction(action);
+    return;
+  }
+  if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    event.preventDefault();
+    dispatch({ type: "OPEN_CUSTOM", initialValue: event.key });
+  }
+}
+
+function useWritingHotkeys(options: {
+  readonly mode: WritingToolsState["mode"];
+  readonly enabledActions: WritingActionId[];
+  readonly selectedIndex: number;
+  readonly close: () => void;
+  readonly runAction: RunAction;
+  readonly dispatch: PopupDispatch;
+}): void {
+  const { mode, enabledActions, selectedIndex, close, runAction, dispatch } = options;
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        handleEscape(mode, close, dispatch);
+        return;
+      }
+      if (mode === "chat") {
+        handleChatKey(event, runAction);
+        return;
+      }
+      if (mode !== "menu") return;
+      handleMenuKey(event, enabledActions, selectedIndex, runAction, dispatch);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [close, runAction, enabledActions, mode, selectedIndex, dispatch]);
 }
 
 export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps) {
   const [state, dispatch] = useReducer(writingToolsReducer, initialWritingToolsState);
-  const [copied, setCopied] = useState(false);
-  const customInputRef = useRef<HTMLInputElement>(null);
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const actions = useMemo(
     () => WRITING_ACTIONS.filter((action) => settings.enabledWritingActions.includes(action.id)),
     [settings.enabledWritingActions],
@@ -52,11 +148,6 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   }, [openWithContext]);
 
   useEffect(() => {
-    if (state.mode === "custom") customInputRef.current?.focus();
-    if (state.mode === "chat") chatInputRef.current?.focus();
-  }, [state.mode]);
-
-  useEffect(() => {
     if (state.mode === "closed") return;
     void nativeBridge.setSurfaceMode("writing-tools", state.mode);
   }, [state.mode]);
@@ -66,252 +157,347 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     void nativeBridge.closeSurface("writing-tools");
   }, []);
 
-  const runAction = useCallback(async (actionId: WritingActionId, sourceText?: string) => {
-    if (actionId === "custom" && state.mode !== "custom") {
-      dispatch({ type: "OPEN_CUSTOM" });
-      return;
-    }
-    if (actionId === "custom" && !state.customInstruction.trim()) return;
-    if (actionId === "chat" && !(sourceText ?? state.sourceText).trim()) return;
-
-    dispatch({ type: "RUN", action: actionId });
-    try {
-      const response = await nativeBridge.runWritingAction({
-        action: actionId,
-        instruction: actionId === "custom" ? state.customInstruction.trim() : undefined,
-        text: (sourceText ?? state.sourceText).trim() || undefined,
-      });
-      if (response.kind === "result" && typeof response.text === "string") {
-        dispatch({ type: "RESULT", text: response.text });
-      } else {
-        dispatch({ type: "REPLACED" });
-        void nativeBridge.closeSurface("writing-tools");
-      }
-    } catch (error) {
-      const nativeError = error instanceof NativeError ? error : null;
-      dispatch({ type: "FAIL", message: messageForError(error), canRetry: nativeError?.recoverable });
-    }
-  }, [state.customInstruction, state.mode, state.sourceText]);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (state.mode === "menu" || state.mode === "processing" || state.mode === "chat") close();
-        else dispatch({ type: "BACK" });
+  const runAction = useCallback(
+    async (actionId: WritingActionId, sourceText?: string) => {
+      if (actionId === "custom" && state.mode !== "custom") {
+        dispatch({ type: "OPEN_CUSTOM" });
         return;
       }
-      if (state.mode === "chat") {
-        if (event.key === "Enter" && !event.shiftKey) {
-          const target = event.target as HTMLElement | null;
-          if (target?.tagName === "TEXTAREA") {
-            event.preventDefault();
-            void runAction("chat");
-          }
+      if (actionId === "custom" && !state.customInstruction.trim()) return;
+      if (actionId === "chat" && !(sourceText ?? state.sourceText).trim()) return;
+
+      dispatch({ type: "RUN", action: actionId });
+      try {
+        const response = await nativeBridge.runWritingAction({
+          action: actionId,
+          instruction: actionId === "custom" ? state.customInstruction.trim() : undefined,
+          text: (sourceText ?? state.sourceText).trim() || undefined,
+        });
+        if (response.kind === "result" && typeof response.text === "string") {
+          dispatch({ type: "RESULT", text: response.text });
+        } else {
+          dispatch({ type: "REPLACED" });
+          void nativeBridge.closeSurface("writing-tools");
         }
-        return;
+      } catch (error) {
+        const nativeError = error instanceof NativeError ? error : null;
+        dispatch({ type: "FAIL", message: messageForError(error), canRetry: nativeError?.recoverable });
       }
-      if (state.mode !== "menu") return;
-      const target = event.target as HTMLElement | null;
-      if (target?.matches("input, textarea")) return;
+    },
+    [state.customInstruction, state.mode, state.sourceText],
+  );
 
-      const movement: Record<string, number> = {
-        ArrowRight: 1,
-        ArrowLeft: -1,
-        ArrowDown: 2,
-        ArrowUp: -2,
-      };
-      if (event.key in movement) {
-        event.preventDefault();
-        dispatch({ type: "MOVE", delta: movement[event.key] });
-      } else if (event.key === "Enter") {
-        event.preventDefault();
-        const action = state.enabledActions[state.selectedIndex];
-        if (action) void runAction(action);
-      } else if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        event.preventDefault();
-        dispatch({ type: "OPEN_CUSTOM", initialValue: event.key });
-      }
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [close, runAction, state.enabledActions, state.mode, state.selectedIndex]);
+  useWritingHotkeys({
+    mode: state.mode,
+    enabledActions: state.enabledActions,
+    selectedIndex: state.selectedIndex,
+    close,
+    runAction,
+    dispatch,
+  });
 
-  const activeDefinition = state.activeAction
-    ? state.activeAction === "chat"
-      ? { label: "Quick chat" }
-      : writingAction(state.activeAction)
-    : null;
+  const activeDefinition = getActiveDefinition(state.activeAction);
+  const isOpen = state.mode !== "closed";
 
   return (
     <main className="writing-stage" data-platform={platform}>
-      <section
+      <dialog
         aria-label="Writing Tools"
         className="writing-popup"
         data-mode={state.mode}
-        role="dialog"
+        onCancel={(event) => event.preventDefault()}
+        open={isOpen}
       >
-        {state.mode === "closed" ? null : (
+        {isOpen ? (
           <>
             {state.mode === "menu" ? (
-              <div className="writing-menu">
-                <header className="writing-popup__header" data-tauri-drag-region>
-                  <span>Writing Tools</span>
-                  <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
-                    <Icon name="close" size={14} />
-                  </button>
-                </header>
-                {settings.writingAllowManualText ? (
-                  <div className="writing-source">
-                    <label htmlFor="writing-source-text">
-                      {state.context?.applicationName ? `Selected in ${state.context.applicationName}` : "Selected text"}
-                    </label>
-                    <textarea
-                      id="writing-source-text"
-                      onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
-                      rows={3}
-                      spellCheck
-                      value={state.sourceText}
-                    />
-                  </div>
-                ) : null}
-                <div aria-label="Writing actions" className="writing-actions" role="listbox">
-                  {actions.map((action, index) => (
-                    <button
-                      aria-selected={index === state.selectedIndex}
-                      className="writing-action"
-                      data-selected={index === state.selectedIndex}
-                      key={action.id}
-                      onClick={() => void runAction(action.id)}
-                      onFocus={() => dispatch({ type: "SELECT", index })}
-                      role="option"
-                      type="button"
-                    >
-                      <Icon name={action.icon} size={16} />
-                      <span>{action.label}</span>
-                    </button>
-                  ))}
-                </div>
-                <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
-                  <Icon name="pencil" size={15} />
-                  <span>Describe your change…</span>
-                  <kbd>↵</kbd>
-                </button>
-              </div>
+              <MenuView
+                actions={actions}
+                allowManualText={settings.writingAllowManualText}
+                applicationName={state.context?.applicationName}
+                close={close}
+                dispatch={dispatch}
+                runAction={runAction}
+                selectedIndex={state.selectedIndex}
+                sourceText={state.sourceText}
+              />
             ) : null}
-
             {state.mode === "chat" ? (
-              <form
-                className="writing-chat"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void runAction("chat");
-                }}
-              >
-                <header className="writing-popup__header" data-tauri-drag-region>
-                  <span>Quick chat</span>
-                  <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
-                    <Icon name="close" size={14} />
-                  </button>
-                </header>
-                <p className="writing-chat__hint">Nothing selected — ask anything.</p>
-                <textarea
-                  aria-label="Chat message"
-                  onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
-                  placeholder="Ask anything…"
-                  ref={chatInputRef}
-                  rows={4}
-                  spellCheck
-                  value={state.sourceText}
-                />
-                <div className="writing-chat__footer">
-                  <Button compact disabled={!state.sourceText.trim()} tone="primary" type="submit">Ask</Button>
-                </div>
-              </form>
+              <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} />
             ) : null}
-
             {state.mode === "custom" ? (
-              <form
-                className="custom-instruction"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void runAction("custom");
-                }}
-              >
-                <button aria-label="Back to writing actions" className="icon-button custom-instruction__back" onClick={() => dispatch({ type: "BACK" })} type="button">‹</button>
-                <input
-                  aria-label="Custom writing instruction"
-                  autoComplete="off"
-                  onChange={(event) => dispatch({ type: "SET_CUSTOM", value: event.target.value })}
-                  placeholder="Describe your change"
-                  ref={customInputRef}
-                  spellCheck
-                  value={state.customInstruction}
-                />
-                <button aria-label="Run instruction" className="custom-instruction__submit" disabled={!state.customInstruction.trim()} type="submit">↵</button>
-              </form>
+              <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />
             ) : null}
-
-            {state.mode === "processing" ? (
-              <div aria-live="polite" className="writing-processing">
-                <Spinner label={`Running ${activeDefinition?.label ?? "writing action"}`} />
-                <span>{activeDefinition?.label ?? "Working"}</span>
-                <button aria-label="Cancel" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
-              </div>
-            ) : null}
-
+            {state.mode === "processing" ? <ProcessingView close={close} label={activeDefinition?.label} /> : null}
             {state.mode === "result" ? (
-              <div className="writing-result">
-                <header className="writing-result__header" data-tauri-drag-region>
-                  <div>
-                    <span className="writing-result__eyebrow">Writing Tools</span>
-                    <h1>{activeDefinition?.label ?? "Result"}</h1>
-                  </div>
-                  <button aria-label="Close result" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
-                </header>
-                <div className="writing-result__body"><SafeMarkdown>{state.resultText}</SafeMarkdown></div>
-                <footer className="writing-result__footer">
-                  <Button
-                    compact
-                    icon={copied ? "check" : "copy"}
-                    onClick={() => {
-                      void nativeBridge.copyText(state.resultText).then(() => {
-                        setCopied(true);
-                        window.setTimeout(() => setCopied(false), 1000);
-                      });
-                    }}
-                  >
-                    {copied ? "Copied" : "Copy"}
-                  </Button>
-                  {state.context?.canReplace ? (
-                    <Button
-                      compact
-                      onClick={() => {
-                        void nativeBridge.replaceWritingResult(state.resultText).then(close);
-                      }}
-                      tone="primary"
-                    >
-                      Replace
-                    </Button>
-                  ) : null}
-                </footer>
-              </div>
+              <ResultView
+                close={close}
+                canReplace={state.context?.canReplace ?? false}
+                label={activeDefinition?.label}
+                resultText={state.resultText}
+              />
             ) : null}
-
             {state.mode === "error" ? (
-              <div aria-live="assertive" className="writing-error">
-                <Icon name="error" size={20} />
-                <div><strong>Writing Tools</strong><span>{state.error}</span></div>
-                <div className="writing-error__actions">
-                  {state.canRetry && state.activeAction ? <Button compact onClick={() => void runAction(state.activeAction!)}>Retry</Button> : null}
-                  <Button compact onClick={state.context ? () => dispatch({ type: "BACK" }) : close}>Close</Button>
-                </div>
-              </div>
+              <ErrorView
+                activeAction={state.activeAction}
+                canRetry={state.canRetry}
+                close={close}
+                dispatch={dispatch}
+                hasContext={state.context !== null}
+                message={state.error ?? ""}
+                runAction={runAction}
+              />
             ) : null}
           </>
-        )}
-      </section>
+        ) : null}
+      </dialog>
     </main>
+  );
+}
+
+interface MenuViewProps {
+  readonly actions: typeof WRITING_ACTIONS;
+  readonly allowManualText: boolean;
+  readonly applicationName: string | undefined;
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+  readonly selectedIndex: number;
+  readonly sourceText: string;
+}
+
+function MenuView(props: MenuViewProps) {
+  const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText } = props;
+  return (
+    <div className="writing-menu">
+      <header className="writing-popup__header" data-tauri-drag-region>
+        <span>Writing Tools</span>
+        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
+          <Icon name="close" size={14} />
+        </button>
+      </header>
+      {allowManualText ? (
+        <div className="writing-source">
+          <label htmlFor="writing-source-text">
+            {applicationName ? `Selected in ${applicationName}` : "Selected text"}
+          </label>
+          <textarea
+            id="writing-source-text"
+            onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
+            rows={3}
+            spellCheck
+            value={sourceText}
+          />
+        </div>
+      ) : null}
+      <div aria-label="Writing actions" className="writing-actions" role="listbox">
+        {actions.map((action, index) => (
+          <button
+            aria-selected={index === selectedIndex}
+            className="writing-action"
+            data-selected={index === selectedIndex}
+            key={action.id}
+            onClick={() => void runAction(action.id)}
+            onFocus={() => dispatch({ type: "SELECT", index })}
+            role="option"
+            type="button"
+          >
+            <Icon name={action.icon} size={16} />
+            <span>{action.label}</span>
+          </button>
+        ))}
+      </div>
+      <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
+        <Icon name="pencil" size={15} />
+        <span>Describe your change…</span>
+        <kbd>↵</kbd>
+      </button>
+    </div>
+  );
+}
+
+interface ChatViewProps {
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+  readonly sourceText: string;
+}
+
+function ChatView({ close, dispatch, runAction, sourceText }: ChatViewProps) {
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    chatInputRef.current?.focus();
+  }, []);
+  return (
+    <form
+      className="writing-chat"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void runAction("chat");
+      }}
+    >
+      <header className="writing-popup__header" data-tauri-drag-region>
+        <span>Quick chat</span>
+        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
+          <Icon name="close" size={14} />
+        </button>
+      </header>
+      <p className="writing-chat__hint">Nothing selected — ask anything.</p>
+      <textarea
+        aria-label="Chat message"
+        onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
+        placeholder="Ask anything…"
+        ref={chatInputRef}
+        rows={4}
+        spellCheck
+        value={sourceText}
+      />
+      <div className="writing-chat__footer">
+        <Button compact disabled={!sourceText.trim()} tone="primary" type="submit">
+          Ask
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+interface CustomViewProps {
+  readonly customInstruction: string;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+}
+
+function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps) {
+  const customInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    customInputRef.current?.focus();
+  }, []);
+  return (
+    <form
+      className="custom-instruction"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void runAction("custom");
+      }}
+    >
+      <button
+        aria-label="Back to writing actions"
+        className="icon-button custom-instruction__back"
+        onClick={() => dispatch({ type: "BACK" })}
+        type="button"
+      >
+        ‹
+      </button>
+      <input
+        aria-label="Custom writing instruction"
+        autoComplete="off"
+        onChange={(event) => dispatch({ type: "SET_CUSTOM", value: event.target.value })}
+        placeholder="Describe your change"
+        ref={customInputRef}
+        spellCheck
+        value={customInstruction}
+      />
+      <button aria-label="Run instruction" className="custom-instruction__submit" disabled={!customInstruction.trim()} type="submit">
+        ↵
+      </button>
+    </form>
+  );
+}
+
+function ProcessingView({ close, label }: { readonly close: () => void; readonly label: string | undefined }) {
+  return (
+    <div aria-live="polite" className="writing-processing">
+      <Spinner label={`Running ${label ?? "writing action"}`} />
+      <span>{label ?? "Working"}</span>
+      <button aria-label="Cancel" className="icon-button" onClick={close} type="button">
+        <Icon name="close" size={14} />
+      </button>
+    </div>
+  );
+}
+
+interface ResultViewProps {
+  readonly close: () => void;
+  readonly canReplace: boolean;
+  readonly label: string | undefined;
+  readonly resultText: string;
+}
+
+function ResultView({ close, canReplace, label, resultText }: ResultViewProps) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="writing-result">
+      <header className="writing-result__header" data-tauri-drag-region>
+        <div>
+          <span className="writing-result__eyebrow">Writing Tools</span>
+          <h1>{label ?? "Result"}</h1>
+        </div>
+        <button aria-label="Close result" className="icon-button" onClick={close} type="button">
+          <Icon name="close" size={14} />
+        </button>
+      </header>
+      <div className="writing-result__body">
+        <SafeMarkdown>{resultText}</SafeMarkdown>
+      </div>
+      <footer className="writing-result__footer">
+        <Button
+          compact
+          icon={copied ? "check" : "copy"}
+          onClick={() => {
+            void nativeBridge.copyText(resultText).then(() => {
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 1000);
+            });
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+        {canReplace ? (
+          <Button
+            compact
+            onClick={() => {
+              void nativeBridge.replaceWritingResult(resultText).then(close);
+            }}
+            tone="primary"
+          >
+            Replace
+          </Button>
+        ) : null}
+      </footer>
+    </div>
+  );
+}
+
+interface ErrorViewProps {
+  readonly activeAction: WritingActionId | null;
+  readonly canRetry: boolean;
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly hasContext: boolean;
+  readonly message: string;
+  readonly runAction: RunAction;
+}
+
+function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, message, runAction }: ErrorViewProps) {
+  const canShowRetry = canRetry && activeAction !== null;
+  return (
+    <div aria-live="assertive" className="writing-error">
+      <Icon name="error" size={20} />
+      <div>
+        <strong>Writing Tools</strong>
+        <span>{message}</span>
+      </div>
+      <div className="writing-error__actions">
+        {canShowRetry && activeAction ? (
+          <Button compact onClick={() => void runAction(activeAction)}>
+            Retry
+          </Button>
+        ) : null}
+        <Button compact onClick={hasContext ? () => dispatch({ type: "BACK" }) : close}>
+          Close
+        </Button>
+      </div>
+    </div>
   );
 }
 

@@ -1,13 +1,59 @@
 import { Fragment, type ReactNode } from "react";
 
 function inlineMarkdown(text: string): ReactNode[] {
-  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|_[^_]+_)/g).filter(Boolean);
-  return tokens.map((token, index) => {
-    if (token.startsWith("`") && token.endsWith("`")) return <code key={index}>{token.slice(1, -1)}</code>;
-    if (token.startsWith("**") && token.endsWith("**")) return <strong key={index}>{token.slice(2, -2)}</strong>;
-    if (token.startsWith("_") && token.endsWith("_")) return <em key={index}>{token.slice(1, -1)}</em>;
-    return <Fragment key={index}>{token}</Fragment>;
-  });
+  const nodes: ReactNode[] = [];
+  let key = 0;
+  let plain = "";
+  const flushPlain = () => {
+    if (plain) {
+      nodes.push(<Fragment key={`text-${key++}-${plain.length}`}>{plain}</Fragment>);
+      plain = "";
+    }
+  };
+
+  let i = 0;
+  while (i < text.length) {
+    const codeEnd = matchCodeSpan(text, i);
+    if (codeEnd !== null) {
+      flushPlain();
+      nodes.push(<code key={`code-${key++}`}>{text.slice(i + 1, codeEnd)}</code>);
+      i = codeEnd + 1;
+      continue;
+    }
+    const strongEnd = matchDelimitedRun(text, i, "**");
+    if (strongEnd !== null) {
+      flushPlain();
+      nodes.push(<strong key={`strong-${key++}`}>{text.slice(i + 2, strongEnd)}</strong>);
+      i = strongEnd + 2;
+      continue;
+    }
+    const emEnd = matchDelimitedRun(text, i, "_");
+    if (emEnd !== null) {
+      flushPlain();
+      nodes.push(<em key={`em-${key++}`}>{text.slice(i + 1, emEnd)}</em>);
+      i = emEnd + 1;
+      continue;
+    }
+    plain += text[i];
+    i += 1;
+  }
+  flushPlain();
+  return nodes;
+}
+
+function matchCodeSpan(text: string, start: number): number | null {
+  if (text[start] !== "`") return null;
+  const end = text.indexOf("`", start + 1);
+  if (end > start + 1) return end;
+  return null;
+}
+
+function matchDelimitedRun(text: string, start: number, delimiter: string): number | null {
+  if (!text.startsWith(delimiter, start)) return null;
+  const contentStart = start + delimiter.length;
+  const end = text.indexOf(delimiter, contentStart);
+  if (end > contentStart) return end;
+  return null;
 }
 
 type Block =
@@ -18,7 +64,7 @@ type Block =
   | { kind: "code"; text: string };
 
 export function parseMarkdown(markdown: string): Block[] {
-  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const lines = markdown.replaceAll("\r\n", "\n").split("\n");
   const blocks: Block[] = [];
   let index = 0;
 
@@ -28,64 +74,178 @@ export function parseMarkdown(markdown: string): Block[] {
       index += 1;
       continue;
     }
-    if (line.startsWith("```")) {
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !lines[index].startsWith("```")) code.push(lines[index++]);
-      index += 1;
-      blocks.push({ kind: "code", text: code.join("\n") });
+    const codeBlock = tryParseCodeBlock(lines, index);
+    if (codeBlock) {
+      blocks.push(codeBlock.block);
+      index = codeBlock.nextIndex;
       continue;
     }
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    const heading = tryParseHeading(line);
     if (heading) {
-      blocks.push({ kind: "heading", level: heading[1].length, text: heading[2] });
+      blocks.push(heading);
       index += 1;
       continue;
     }
-    if (line.startsWith("> ")) {
-      blocks.push({ kind: "quote", text: line.slice(2) });
+    const quote = tryParseQuote(line);
+    if (quote) {
+      blocks.push(quote);
       index += 1;
       continue;
     }
-    const unordered = /^[-*]\s+(.+)$/.exec(line);
-    const ordered = /^\d+\.\s+(.+)$/.exec(line);
-    if (unordered || ordered) {
-      const orderedList = Boolean(ordered);
-      const items: string[] = [];
-      while (index < lines.length) {
-        const match = orderedList ? /^\d+\.\s+(.+)$/.exec(lines[index]) : /^[-*]\s+(.+)$/.exec(lines[index]);
-        if (!match) break;
-        items.push(match[1]);
-        index += 1;
-      }
-      blocks.push({ kind: "list", ordered: orderedList, items });
+    const list = tryParseList(lines, index);
+    if (list) {
+      blocks.push(list.block);
+      index = list.nextIndex;
       continue;
     }
-    const paragraph = [line];
-    index += 1;
-    while (index < lines.length && lines[index].trim() && !/^(#{1,3})\s|^[-*]\s|^\d+\.\s|^>\s|^```/.test(lines[index])) {
-      paragraph.push(lines[index++]);
-    }
-    blocks.push({ kind: "paragraph", text: paragraph.join(" ") });
+    const paragraph = parseParagraph(lines, index);
+    blocks.push(paragraph.block);
+    index = paragraph.nextIndex;
   }
   return blocks;
 }
 
-export function SafeMarkdown({ children }: { children: string }) {
+function tryParseCodeBlock(lines: string[], start: number): { block: Block; nextIndex: number } | null {
+  if (!lines[start].startsWith("```")) return null;
+  const code: string[] = [];
+  let index = start + 1;
+  while (index < lines.length && !lines[index].startsWith("```")) {
+    code.push(lines[index]);
+    index += 1;
+  }
+  return { block: { kind: "code", text: code.join("\n") }, nextIndex: index + 1 };
+}
+
+function tryParseHeading(line: string): Block | null {
+  for (const level of [3, 2, 1]) {
+    const prefix = "#".repeat(level) + " ";
+    if (line.startsWith(prefix)) {
+      return { kind: "heading", level, text: line.slice(prefix.length) };
+    }
+  }
+  return null;
+}
+
+function tryParseQuote(line: string): Block | null {
+  if (line.startsWith("> ")) {
+    return { kind: "quote", text: line.slice(2) };
+  }
+  return null;
+}
+
+function tryParseList(lines: string[], start: number): { block: Block; nextIndex: number } | null {
+  const firstUnordered = parseUnorderedItem(lines[start]);
+  const firstOrdered = parseOrderedItem(lines[start]);
+  if (firstUnordered === null && firstOrdered === null) return null;
+  const orderedList = firstOrdered !== null;
+  const items: string[] = [];
+  let index = start;
+  while (index < lines.length) {
+    const item = orderedList ? parseOrderedItem(lines[index]) : parseUnorderedItem(lines[index]);
+    if (item === null) break;
+    items.push(item);
+    index += 1;
+  }
+  return { block: { kind: "list", ordered: orderedList, items }, nextIndex: index };
+}
+
+function parseUnorderedItem(line: string): string | null {
+  if (line.startsWith("- ") || line.startsWith("* ")) {
+    return line.slice(2);
+  }
+  return null;
+}
+
+function parseOrderedItem(line: string): string | null {
+  let cursor = 0;
+  while (cursor < line.length && isAsciiDigit(line[cursor])) {
+    cursor += 1;
+  }
+  if (cursor === 0) return null;
+  if (line.startsWith(". ", cursor)) {
+    return line.slice(cursor + 2);
+  }
+  return null;
+}
+
+function isAsciiDigit(char: string): boolean {
+  return char >= "0" && char <= "9";
+}
+
+function parseParagraph(lines: string[], start: number): { block: Block; nextIndex: number } {
+  const paragraph = [lines[start]];
+  let index = start + 1;
+  while (index < lines.length && isParagraphContinuation(lines[index])) {
+    paragraph.push(lines[index]);
+    index += 1;
+  }
+  return { block: { kind: "paragraph", text: paragraph.join(" ") }, nextIndex: index };
+}
+
+function isParagraphContinuation(line: string): boolean {
+  if (!line.trim()) return false;
+  return !isBlockStart(line);
+}
+
+function isBlockStart(line: string): boolean {
+  if (line.startsWith("```")) return true;
+  if (line.startsWith("# ") || line.startsWith("## ") || line.startsWith("### ")) return true;
+  if (line.startsWith("> ")) return true;
+  if (line.startsWith("- ") || line.startsWith("* ")) return true;
+  return parseOrderedItem(line) !== null;
+}
+
+function headingTag(level: number): "h2" | "h3" | "h4" {
+  if (level === 1) return "h2";
+  if (level === 2) return "h3";
+  return "h4";
+}
+
+function blockKey(block: Block): string {
+  switch (block.kind) {
+    case "heading":
+      return `heading-${block.level}-${block.text}`;
+    case "paragraph":
+      return `paragraph-${block.text}`;
+    case "quote":
+      return `quote-${block.text}`;
+    case "code":
+      return `code-${block.text}`;
+    case "list":
+      return `list-${block.ordered ? "ol" : "ul"}-${block.items.join("\n")}`;
+  }
+}
+
+export function SafeMarkdown({ children }: { readonly children: string }) {
+  const blocks = parseMarkdown(children);
   return (
     <div className="markdown-result">
-      {parseMarkdown(children).map((block, index) => {
+      {blocks.map((block) => {
+        const key = blockKey(block);
         switch (block.kind) {
           case "heading": {
-            const Heading = block.level === 1 ? "h2" : block.level === 2 ? "h3" : "h4";
-            return <Heading key={index}>{inlineMarkdown(block.text)}</Heading>;
+            const Heading = headingTag(block.level);
+            return <Heading key={key}>{inlineMarkdown(block.text)}</Heading>;
           }
-          case "paragraph": return <p key={index}>{inlineMarkdown(block.text)}</p>;
-          case "quote": return <blockquote key={index}>{inlineMarkdown(block.text)}</blockquote>;
-          case "code": return <pre key={index}><code>{block.text}</code></pre>;
+          case "paragraph":
+            return <p key={key}>{inlineMarkdown(block.text)}</p>;
+          case "quote":
+            return <blockquote key={key}>{inlineMarkdown(block.text)}</blockquote>;
+          case "code":
+            return (
+              <pre key={key}>
+                <code>{block.text}</code>
+              </pre>
+            );
           case "list": {
             const List = block.ordered ? "ol" : "ul";
-            return <List key={index}>{block.items.map((item, itemIndex) => <li key={itemIndex}>{inlineMarkdown(item)}</li>)}</List>;
+            return (
+              <List key={key}>
+                {block.items.map((item) => (
+                  <li key={item}>{inlineMarkdown(item)}</li>
+                ))}
+              </List>
+            );
           }
         }
       })}
