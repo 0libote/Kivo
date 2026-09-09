@@ -194,8 +194,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
       }
     } catch (error) {
       if (generation !== requestGeneration.current) return;
-      const nativeError = error instanceof NativeError ? error : null;
-      dispatch({ type: "FAIL", message: messageForError(error), canRetry: nativeError?.recoverable });
+      dispatch(failureForError(error));
     } finally {
       if (generation === requestGeneration.current) requestInFlight.current = false;
     }
@@ -210,9 +209,6 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     dispatch,
   });
 
-  const activeDefinition = getActiveDefinition(state.activeAction);
-  const isOpen = state.mode !== "closed";
-
   return (
     <main className="writing-stage" data-platform={platform}>
       <dialog
@@ -220,59 +216,75 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         className="writing-popup"
         data-mode={state.mode}
         onCancel={(event) => event.preventDefault()}
-        open={isOpen}
+        open={state.mode !== "closed"}
       >
-        {isOpen ? (
-          <>
-            {state.mode === "menu" ? (
-              <MenuView
-                actions={actions}
-                allowManualText={settings.writingAllowManualText}
-                applicationName={state.context?.applicationName}
-                close={close}
-                dispatch={dispatch}
-                runAction={runAction}
-                selectedIndex={state.selectedIndex}
-                sourceText={state.sourceText}
-                summarizeEnabled={summarizeEnabled}
-              />
-            ) : null}
-            {state.mode === "chat" ? (
-              <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} summarizeEnabled={summarizeEnabled} />
-            ) : null}
-            {state.mode === "summary" ? (
-              <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} />
-            ) : null}
-            {state.mode === "custom" ? (
-              <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />
-            ) : null}
-            {state.mode === "processing" ? <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} /> : null}
-            {state.mode === "result" ? (
-              <ResultView
-                close={close}
-                canReplace={state.resultCanReplace}
-                source={state.resultSource}
-                label={activeDefinition?.label}
-                resultText={state.resultText}
-              />
-            ) : null}
-            {state.mode === "error" ? (
-              <ErrorView
-                activeAction={state.activeAction}
-                canRetry={state.canRetry}
-                close={close}
-                dispatch={dispatch}
-                hasContext={state.context !== null}
-                showTextFallback={state.usesSummaryInput && state.summaryKind === "link"}
-                message={state.error ?? ""}
-                runAction={runAction}
-              />
-            ) : null}
-          </>
-        ) : null}
+        <PopupContent state={state} actions={actions} settings={settings} close={close} dispatch={dispatch} runAction={runAction} summarizeEnabled={summarizeEnabled} />
       </dialog>
     </main>
   );
+}
+
+interface PopupContentProps {
+  readonly state: WritingToolsState;
+  readonly actions: typeof WRITING_ACTIONS;
+  readonly settings: AppSettings;
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+  readonly summarizeEnabled: boolean;
+}
+
+function PopupContent({ state, actions, settings, close, dispatch, runAction, summarizeEnabled }: PopupContentProps) {
+  const activeDefinition = getActiveDefinition(state.activeAction);
+  switch (state.mode) {
+    case "menu":
+      return (
+        <MenuView
+          actions={actions}
+          allowManualText={settings.writingAllowManualText}
+          applicationName={state.context?.applicationName}
+          close={close}
+          dispatch={dispatch}
+          runAction={runAction}
+          selectedIndex={state.selectedIndex}
+          sourceText={state.sourceText}
+          summarizeEnabled={summarizeEnabled}
+        />
+      );
+    case "chat":
+      return <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} summarizeEnabled={summarizeEnabled} />;
+    case "summary":
+      return <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} />;
+    case "custom":
+      return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
+    case "processing":
+      return <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} />;
+    case "result":
+      return (
+        <ResultView
+          close={close}
+          canReplace={state.resultCanReplace}
+          source={state.resultSource}
+          label={activeDefinition?.label}
+          resultText={state.resultText}
+        />
+      );
+    case "error":
+      return (
+        <ErrorView
+          activeAction={state.activeAction}
+          canRetry={state.canRetry}
+          close={close}
+          dispatch={dispatch}
+          hasContext={state.context !== null}
+          showTextFallback={state.usesSummaryInput && state.summaryKind === "link"}
+          message={state.error ?? ""}
+          runAction={runAction}
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 interface MenuViewProps {
@@ -537,6 +549,14 @@ function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, showTe
 function messageForError(error: unknown) {
   if (error instanceof NativeError) return error.message;
   return "Writing Tools couldn’t complete that request.";
+}
+
+function failureForError(error: unknown): WritingToolsEvent {
+  return {
+    type: "FAIL",
+    message: messageForError(error),
+    canRetry: error instanceof NativeError ? error.recoverable : undefined,
+  };
 }
 
 function SummaryActions({ dispatch, includeText }: { readonly dispatch: PopupDispatch; readonly includeText: boolean }) {
