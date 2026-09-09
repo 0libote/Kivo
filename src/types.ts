@@ -89,11 +89,19 @@ export interface WritingRequest {
   instruction?: string;
   /** Edited text-box content, or the quick-chat message. */
   text?: string;
+  sourceKind?: "text" | "link";
+}
+
+export interface SummarySource {
+  kind: "website" | "youtube";
+  url: string;
 }
 
 export interface WritingResponse {
   kind: "replaced" | "result";
   text?: string;
+  source?: SummarySource;
+  canReplace?: boolean;
 }
 
 export interface DictationSnapshot {

@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        GeminiClient, GeminiError, PromptError, WritingAction, dictation_cleanup_prompt,
-        writing_prompt,
+        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
+        dictation_cleanup_prompt, writing_prompt,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
@@ -40,9 +40,10 @@ pub struct AppCore {
     dictation: Mutex<DictationMachine>,
     writing: Mutex<WritingPopupMachine>,
     pending_selection: Mutex<Option<Arc<CapturedSelection>>>,
-    last_result: Mutex<Option<Arc<str>>>,
+    last_result: Mutex<Option<StoredWritingResult>>,
     last_cursor: Mutex<Option<ScreenPoint>>,
     writing_generation: AtomicU64,
+    writing_cancel: tokio::sync::watch::Sender<()>,
 }
 
 impl AppCore {
@@ -69,6 +70,7 @@ impl AppCore {
             last_result: Mutex::new(None),
             last_cursor: Mutex::new(None),
             writing_generation: AtomicU64::new(0),
+            writing_cancel: tokio::sync::watch::channel(()).0,
         })
     }
 
@@ -224,15 +226,23 @@ impl AppCore {
     }
 
     pub async fn open_writing_tools(&self) -> Result<WritingPopupContext, AppCoreError> {
-        // Cursor first: cheapest and most accurate at hotkey time. It never
-        // depends on window focus, unlike the text capture below.
+        // Invalidate the previous request before capture can yield or fail.
+        let generation = {
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            let generation = self.invalidate_writing();
+            machine.dismiss();
+            self.clear_writing_context()?;
+            generation
+        };
         let cursor = self.text.cursor_position();
+        let captured = self.text.capture_selection().await;
+        let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+        self.check_writing_generation(generation)?;
         *self
             .last_cursor
             .lock()
             .map_err(|_| AppCoreError::Unavailable)? = cursor;
-
-        match self.text.capture_selection().await {
+        let context = match captured {
             Ok(selection) => {
                 let selection = Arc::new(selection);
                 let context = WritingPopupContext {
@@ -246,36 +256,15 @@ impl AppCore {
                     .pending_selection
                     .lock()
                     .map_err(|_| AppCoreError::Unavailable)? = Some(selection);
-                *self
-                    .last_result
-                    .lock()
-                    .map_err(|_| AppCoreError::Unavailable)? = None;
-                self.writing
-                    .lock()
-                    .map_err(|_| AppCoreError::Unavailable)?
-                    .show();
-                Ok(context)
+                context
             }
-            // Nothing highlighted (or the app exposes no readable text):
-            // open quick chat with an empty input box instead of an error.
-            // Permission failures still propagate so onboarding can prompt.
             Err(TextError::NoSelection | TextError::UnsupportedApplication) => {
-                *self
-                    .pending_selection
-                    .lock()
-                    .map_err(|_| AppCoreError::Unavailable)? = None;
-                *self
-                    .last_result
-                    .lock()
-                    .map_err(|_| AppCoreError::Unavailable)? = None;
-                self.writing
-                    .lock()
-                    .map_err(|_| AppCoreError::Unavailable)?
-                    .show();
-                Ok(WritingPopupContext::chat(cursor))
+                WritingPopupContext::chat(cursor)
             }
-            Err(error) => Err(error.into()),
-        }
+            Err(error) => return Err(error.into()),
+        };
+        machine.show();
+        Ok(context)
     }
 
     pub fn writing_context(&self) -> Result<WritingPopupContext, AppCoreError> {
@@ -306,6 +295,7 @@ impl AppCore {
         action: WritingAction,
         custom_instruction: Option<String>,
         source_override: Option<String>,
+        source_kind: WritingSourceKind,
     ) -> Result<WritingOutcome, AppCoreError> {
         if action != WritingAction::Chat
             && !self
@@ -316,126 +306,167 @@ impl AppCore {
         {
             return Err(AppCoreError::ActionDisabled);
         }
-
-        self.writing
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .begin(action)?;
-        let generation = self.writing_generation.fetch_add(1, Ordering::AcqRel) + 1;
-
-        let edited = source_override
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
-        let source_text = match self
-            .pending_selection
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .clone()
-        {
-            // An edited manual text box wins over the captured highlight.
-            Some(selection) => edited.unwrap_or_else(|| selection.text().to_owned()),
-            // Quick chat and manually supplied text need no selection.
-            None => edited.ok_or(AppCoreError::SelectionExpired)?,
-        };
-        // Chat input counts as the instruction, not a source document.
-        let prompt = match writing_prompt(action, &source_text, custom_instruction.as_deref()) {
-            Ok(prompt) => prompt,
-            Err(error) => {
-                self.fail_writing();
-                return Err(error.into());
-            }
-        };
-        let api_key = match self.credentials.load_api_key()? {
-            Some(api_key) => api_key,
-            None => {
-                self.fail_writing();
-                return Err(AppCoreError::AiNotConfigured);
-            }
-        };
-        let result = match self.ai.generate(&api_key, &prompt).await {
-            Ok(result) => result,
-            Err(error) => {
-                self.fail_writing();
-                return Err(error.into());
-            }
-        };
-        if self.writing_generation.load(Ordering::Acquire) != generation {
-            return Err(AppCoreError::WritingCancelled);
+        if source_kind == WritingSourceKind::Link && action != WritingAction::Summarize {
+            return Err(AppCoreError::ActionDisabled);
         }
-
-        // Replacement always targets the original highlight in the host app,
-        // even when the user edited the text box before running the action.
-        let pending = self
-            .pending_selection
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .clone();
-        if action.replaces_selection() {
-            let selection = pending.as_deref().ok_or(AppCoreError::SelectionExpired)?;
-            if let Err(error) = self.text.replace_selected_text(selection, &result).await {
-                self.fail_writing();
-                return Err(error.into());
-            }
-            self.writing
-                .lock()
-                .map_err(|_| AppCoreError::Unavailable)?
-                .complete_replacement()?;
-            self.clear_writing_context()?;
-            Ok(WritingOutcome::Replaced)
-        } else {
-            self.writing
-                .lock()
-                .map_err(|_| AppCoreError::Unavailable)?
-                .show_result()?;
+        let (generation, mut cancellation, selection) = {
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            machine.begin(action)?;
             *self
                 .last_result
                 .lock()
-                .map_err(|_| AppCoreError::Unavailable)? = Some(Arc::from(result.as_str()));
-            Ok(WritingOutcome::Result { markdown: result })
+                .map_err(|_| AppCoreError::Unavailable)? = None;
+            (
+                self.writing_generation.fetch_add(1, Ordering::AcqRel) + 1,
+                self.writing_cancel.subscribe(),
+                self.pending_selection
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)?
+                    .clone(),
+            )
+        };
+        let generate = async {
+            let source_text = source_override
+                .as_deref()
+                .or_else(|| selection.as_ref().map(|value| value.text()))
+                .ok_or(PromptError::EmptySource)?;
+            let api_key = self
+                .credentials
+                .load_api_key()?
+                .ok_or(AppCoreError::AiNotConfigured)?;
+            if source_kind == WritingSourceKind::Link {
+                let source = LinkSource::parse(source_text)?;
+                let result = self.ai.summarize_link(&api_key, &source).await?;
+                Ok::<_, AppCoreError>((result, Some(source)))
+            } else {
+                let prompt = writing_prompt(action, source_text, custom_instruction.as_deref())?;
+                let result = self.ai.generate(&api_key, &prompt).await?;
+                Ok((result, None))
+            }
+        };
+        let generated = tokio::select! {
+            biased;
+            _ = cancellation.changed() => return Err(AppCoreError::WritingCancelled),
+            result = generate => result,
+        };
+        let (result, source) = {
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            self.check_writing_generation(generation)?;
+            match generated {
+                Ok(value) => value,
+                Err(error) => {
+                    machine.fail();
+                    return Err(error);
+                }
+            }
+        };
+        if action.replaces_selection() {
+            // The captured ticket belongs to this request, never a later popup.
+            let replacement = match selection.as_deref() {
+                Some(selection) => self
+                    .text
+                    .replace_selected_text(selection, &result)
+                    .await
+                    .map_err(AppCoreError::from),
+                None => Err(AppCoreError::SelectionExpired),
+            };
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            self.check_writing_generation(generation)?;
+            if let Err(error) = replacement {
+                machine.fail();
+                return Err(error);
+            }
+            machine.complete_replacement()?;
+            self.clear_writing_context()?;
+            Ok(WritingOutcome::Replaced)
+        } else {
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            self.check_writing_generation(generation)?;
+            machine.show_result()?;
+            let can_replace = source.is_none() && selection.is_some();
+            *self
+                .last_result
+                .lock()
+                .map_err(|_| AppCoreError::Unavailable)? = Some(StoredWritingResult {
+                text: Arc::from(result.as_str()),
+                can_replace,
+            });
+            Ok(WritingOutcome::Result {
+                markdown: result,
+                source,
+                can_replace,
+            })
         }
     }
 
     pub async fn replace_with_last_result(&self) -> Result<WritingOutcome, AppCoreError> {
-        let selection = self
-            .pending_selection
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .clone()
-            .ok_or(AppCoreError::SelectionExpired)?;
-        let result = self
-            .last_result
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .clone()
-            .ok_or(AppCoreError::NoResult)?;
-
-        self.text
+        let (selection, result, generation) = {
+            let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+            if !matches!(machine.phase(), WritingPopupPhase::Result(_)) {
+                return Err(AppCoreError::NoResult);
+            }
+            let stored = self
+                .last_result
+                .lock()
+                .map_err(|_| AppCoreError::Unavailable)?;
+            let stored = stored
+                .as_ref()
+                .filter(|result| result.can_replace)
+                .ok_or(AppCoreError::NoResult)?;
+            let selection = self
+                .pending_selection
+                .lock()
+                .map_err(|_| AppCoreError::Unavailable)?
+                .clone()
+                .ok_or(AppCoreError::SelectionExpired)?;
+            // Reserve the result so repeated clicks cannot paste twice.
+            machine.begin(WritingAction::Rewrite)?;
+            (
+                selection,
+                Arc::clone(&stored.text),
+                self.writing_generation.load(Ordering::Acquire),
+            )
+        };
+        let replacement = self
+            .text
             .replace_selected_text(&selection, result.as_ref())
-            .await?;
-        self.dismiss_writing_tools()?;
+            .await;
+        let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+        self.check_writing_generation(generation)?;
+        if let Err(error) = replacement {
+            machine.fail();
+            return Err(error.into());
+        }
+        machine.dismiss();
+        self.invalidate_writing();
+        self.clear_writing_context()?;
         Ok(WritingOutcome::Replaced)
     }
 
     pub fn dismiss_writing_tools(&self) -> Result<WritingPopupPhase, AppCoreError> {
-        self.writing_generation.fetch_add(1, Ordering::AcqRel);
-        self.writing
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .dismiss();
+        let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
+        self.invalidate_writing();
+        machine.dismiss();
         self.clear_writing_context()?;
         Ok(WritingPopupPhase::Hidden)
     }
 
-    fn fail_dictation(&self) {
-        if let Ok(mut machine) = self.dictation.lock() {
-            machine.fail();
-        }
+    // Call while holding `writing`, including when committing a response or error.
+    fn invalidate_writing(&self) -> u64 {
+        let generation = self.writing_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        self.writing_cancel.send_replace(());
+        generation
     }
 
-    fn fail_writing(&self) {
-        if let Ok(mut machine) = self.writing.lock() {
+    fn check_writing_generation(&self, generation: u64) -> Result<(), AppCoreError> {
+        if self.writing_generation.load(Ordering::Acquire) != generation {
+            return Err(AppCoreError::WritingCancelled);
+        }
+        Ok(())
+    }
+
+    fn fail_dictation(&self) {
+        if let Ok(mut machine) = self.dictation.lock() {
             machine.fail();
         }
     }
@@ -484,7 +515,24 @@ impl WritingPopupContext {
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum WritingOutcome {
     Replaced,
-    Result { markdown: String },
+    Result {
+        markdown: String,
+        source: Option<LinkSource>,
+        can_replace: bool,
+    },
+}
+
+struct StoredWritingResult {
+    text: Arc<str>,
+    can_replace: bool,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum WritingSourceKind {
+    #[default]
+    Text,
+    Link,
 }
 
 #[derive(Debug)]
@@ -833,10 +881,10 @@ pub struct ApiKeyStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechLanguage {
-    code: &'static str,
-    name: &'static str,
-    installed: bool,
-    downloadable: bool,
+    pub code: String,
+    pub name: String,
+    pub installed: bool,
+    pub downloadable: bool,
 }
 
 #[derive(Serialize)]
@@ -850,18 +898,27 @@ pub struct SelectionContext {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WritingRequest {
     action: String,
     instruction: Option<String>,
-    /// Edited manual text-box content, or the quick-chat message.
+    /// Edited manual text-box content, quick-chat message, or explicit summary URL.
     text: Option<String>,
+    #[serde(default)]
+    source_kind: WritingSourceKind,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum WritingResponse {
     Replaced,
-    Result { text: String },
+    Result {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<LinkSource>,
+        #[serde(rename = "canReplace")]
+        can_replace: bool,
+    },
 }
 
 #[tauri::command]
@@ -956,26 +1013,71 @@ pub async fn list_microphones(
 
 #[tauri::command]
 pub fn list_speech_languages() -> Vec<SpeechLanguage> {
+    #[cfg(target_os = "windows")]
+    if let Some(languages) = windows_speech_languages() {
+        return languages;
+    }
     vec![
         SpeechLanguage {
-            code: "auto",
-            name: "Automatic",
+            code: "auto".into(),
+            name: "Automatic".into(),
             installed: true,
             downloadable: false,
         },
         SpeechLanguage {
-            code: "en-GB",
-            name: "English (United Kingdom)",
+            code: "en-GB".into(),
+            name: "English (United Kingdom)".into(),
             installed: true,
             downloadable: false,
         },
         SpeechLanguage {
-            code: "en-US",
-            name: "English (United States)",
+            code: "en-US".into(),
+            name: "English (United States)".into(),
             installed: true,
             downloadable: false,
         },
     ]
+}
+
+// The hardcoded list above is macOS-centric: on Windows only the installed
+// speech packs work, and offering anything else hard-fails dictation at
+// hotkey time (e.g. en-US without its pack: 0x800455BC). Query the real
+// list; any failure falls back to the static list.
+#[cfg(target_os = "windows")]
+fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
+    use ::windows::{Globalization::Language, Media::SpeechRecognition::SpeechRecognizer};
+
+    let supported = SpeechRecognizer::SupportedTopicLanguages().ok()?;
+    let size = supported.Size().ok()?;
+    let mut languages = Vec::with_capacity(size as usize + 1);
+    languages.push(SpeechLanguage {
+        code: "auto".into(),
+        name: "Automatic".into(),
+        installed: true,
+        downloadable: false,
+    });
+    for index in 0..size {
+        let language: Language = supported.GetAt(index).ok()?;
+        let tag = language.LanguageTag().ok()?.to_string();
+        if tag.is_empty()
+            || languages
+                .iter()
+                .any(|existing: &SpeechLanguage| existing.code == tag)
+        {
+            continue;
+        }
+        let name = language
+            .DisplayName()
+            .map(|name| name.to_string())
+            .unwrap_or_else(|_| tag.clone());
+        languages.push(SpeechLanguage {
+            code: tag,
+            name,
+            installed: true,
+            downloadable: false,
+        });
+    }
+    Some(languages)
 }
 
 #[tauri::command]
@@ -1072,12 +1174,25 @@ pub async fn run_writing_action(
 ) -> Result<WritingResponse, CommandError> {
     let action = parse_action(&request.action)?;
     match core
-        .run_writing_action(action, request.instruction, request.text)
+        .run_writing_action(
+            action,
+            request.instruction,
+            request.text,
+            request.source_kind,
+        )
         .await
         .map_err(CommandError::from)?
     {
         WritingOutcome::Replaced => Ok(WritingResponse::Replaced),
-        WritingOutcome::Result { markdown } => Ok(WritingResponse::Result { text: markdown }),
+        WritingOutcome::Result {
+            markdown,
+            source,
+            can_replace,
+        } => Ok(WritingResponse::Result {
+            text: markdown,
+            source,
+            can_replace,
+        }),
     }
 }
 
@@ -1289,3 +1404,6 @@ fn platform_command_error(error: crate::platform::PlatformError) -> CommandError
 fn invalid_settings_json() -> serde_json::Error {
     serde_json::from_str::<serde_json::Value>("{").unwrap_err()
 }
+
+#[cfg(test)]
+mod tests;

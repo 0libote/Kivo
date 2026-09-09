@@ -66,6 +66,24 @@ The native client uses the pinned `gemini-3.8-flash` model with low thinking for
 
 Without a key, native dictation still works and inserts the raw operating-system transcript; Gemini-dependent writing actions display a concise configuration error.
 
+## Website and YouTube summaries
+
+Use the existing Writing Tools shortcut with webpage text or a YouTube transcript selected, then choose **Summarize**. The result stays in the popup until you copy it or explicitly choose Replace. Text summaries accept up to 200,000 characters; longer content must be split into shorter passages. With nothing selected, choose **Summarize text…** in Quick chat to paste an article or transcript; the normal Ask action still starts quick chat.
+
+Choose **Summarize link…** from either the selection menu or Quick chat to enter a public webpage or YouTube video URL. A selected URL is prefilled. Kivo sends the link to Gemini only when you press Summarize. Webpages use Gemini's URL-context retrieval; YouTube links use its video input. These requests use the existing API key and model, with `store: false`, and do not require another service, a browser extension, or a local downloader. The result shows its source URL and can be copied; link summaries cannot replace the selection, including through the native command. Disabling Summarize in Settings disables both new entry points too.
+
+Link requests have a 90-second deadline; ordinary writing requests retain their 20-second deadline. Closing the popup cancels Kivo's pending request and discards late results. A request already received by Gemini may still consume quota. Public content may be unavailable to Gemini, and URL-context retrieval may use cached content. Private/unlisted YouTube videos and pages requiring sign-in or payment are unsupported. If retrieval fails or the request times out, use **Paste text instead** to supply the article or transcript. Kivo requires successful URL retrieval evidence before displaying a webpage summary.
+
+URLs, supplied text, and summaries are kept in the current writing session, not saved as history or logged. Only the invoked source is sent; Kivo does not read browser tabs, cookies, or browsing history. Gemini's normal API usage limits and billing apply, and processing long videos can use more quota than summarizing pasted text.
+
+For isolated browser verification while another worktree is running:
+
+```sh
+KIVO_UI_TEST_PORT=1437 bun run test:ui
+```
+
+The browser harness uses illustrative responses and never calls Gemini. Release verification must also exercise a real public article and public video with a configured key, along with native selection, focus, clipboard, and placement checks on macOS and Windows.
+
 ## Architecture
 
 The app is one Tauri process with four pre-created webview surfaces:

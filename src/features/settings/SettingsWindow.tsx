@@ -225,7 +225,7 @@ function DictationSection({
             {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
           </select>
         </SettingRow>
-        <SettingRow label="Language" description="Automatic follows the current input language when supported.">
+        <SettingRow label="Language" description={context.platform === "windows" ? "Automatic uses the system speech language. Only installed languages can start dictation." : "Automatic follows the current input language when supported."}>
           <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={settings.dictationLanguage}>
             {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
           </select>
@@ -442,6 +442,9 @@ function AboutSection({
           >{busy === "updates" ? "Checking…" : "Check now"}</Button>
         </SettingRow>
       </SettingsGroup>
+      {updateResult?.available ? (
+        <button className="text-link" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">Download the latest release from GitHub</button>
+      ) : null}
       <div className="about-links" aria-label="Project links">
         <span>Project website <small>Available at release</small></span>
         <span>Source repository <small>Available at release</small></span>

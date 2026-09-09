@@ -254,10 +254,11 @@ pub(crate) fn register_shortcuts(
     settings: &FrontendSettings,
 ) -> Result<(), PlatformError> {
     let shell = app.state::<ShellState>();
-    register_writing_shortcut(app, &shell, &settings.writing_shortcut)?;
-
-    register_dictation_shortcut(app, &shell, &settings.dictation_shortcut)?;
-    Ok(())
+    // Independent: a conflicting writing shortcut (e.g. Ctrl+Space grabbed
+    // by an IME) must not take the dictation shortcut down with it.
+    let writing = register_writing_shortcut(app, &shell, &settings.writing_shortcut);
+    let dictation = register_dictation_shortcut(app, &shell, &settings.dictation_shortcut);
+    writing.and(dictation)
 }
 
 fn register_dictation_shortcut(
@@ -434,13 +435,18 @@ pub(crate) fn apply_settings(
         }
         .map_err(|_| SettingsRuntimeError::AutostartUnavailable)?;
     }
-    register_writing_shortcut(app, &app.state::<ShellState>(), &settings.writing_shortcut)
-        .map_err(|_| SettingsRuntimeError::ShortcutUnavailable)?;
-    if let Err(error) = register_dictation_shortcut(
+    // Independent like `register_shortcuts`: one conflicting shortcut must
+    // not block the other from (re-)registering.
+    let writing =
+        register_writing_shortcut(app, &app.state::<ShellState>(), &settings.writing_shortcut);
+    let dictation = register_dictation_shortcut(
         app,
         &app.state::<ShellState>(),
         &settings.dictation_shortcut,
-    ) && error.kind != PlatformErrorKind::PermissionDenied
+    );
+    writing.map_err(|_| SettingsRuntimeError::ShortcutUnavailable)?;
+    if let Err(error) = dictation
+        && error.kind != PlatformErrorKind::PermissionDenied
     {
         return Err(SettingsRuntimeError::ShortcutUnavailable.into());
     }
@@ -498,6 +504,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
             );
             Ok(())
         }
+        Err(crate::commands::AppCoreError::WritingCancelled) => Ok(()),
         Err(error) => {
             size_writing_surface(app, "error").map_err(platform_command_error)?;
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
@@ -882,8 +889,6 @@ pub(crate) fn hide_surface(app: &AppHandle, surface: &str) {
 }
 
 pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(), PlatformError> {
-    #[cfg(target_os = "windows")]
-    let _ = &permission;
     #[cfg(target_os = "macos")]
     let url = match permission {
         PermissionKind::Accessibility => {
@@ -900,7 +905,12 @@ pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(),
         }
     };
     #[cfg(target_os = "windows")]
-    let url = "ms-settings:privacy-microphone";
+    let url = match permission {
+        // Speech-privacy denials (online speech recognition) live under
+        // Speech, not the microphone page.
+        PermissionKind::Microphone => "ms-settings:privacy-microphone",
+        _ => "ms-settings:privacy-speech",
+    };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let url = "";
     open_url(url)

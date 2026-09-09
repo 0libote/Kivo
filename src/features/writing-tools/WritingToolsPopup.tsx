@@ -4,7 +4,7 @@ import { Icon } from "../../components/Icon";
 import { Spinner } from "../../components/Spinner";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type WritingActionId } from "../../types";
+import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type SummarySource, type WritingActionId, type WritingRequest } from "../../types";
 import { SafeMarkdown } from "./SafeMarkdown";
 import { WRITING_ACTIONS, writingAction } from "./actions";
 import { initialWritingToolsState, writingToolsReducer, type WritingToolsEvent, type WritingToolsState } from "./state";
@@ -14,7 +14,7 @@ interface WritingToolsPopupProps {
   readonly settings: AppSettings;
 }
 
-type RunAction = (actionId: WritingActionId, sourceText?: string) => Promise<void>;
+type RunAction = (actionId: WritingActionId) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
 
 function getActiveDefinition(activeAction: WritingActionId | null): { label: string } | null {
@@ -66,7 +66,7 @@ function handleMenuKey(
   dispatch: PopupDispatch,
 ): void {
   const target = event.target as HTMLElement | null;
-  if (target?.matches("input, textarea")) return;
+  if (target?.matches("input, textarea") || target?.closest("button:not(.writing-action)")) return;
   const delta = MENU_MOVEMENT[event.key];
   if (delta !== undefined) {
     event.preventDefault();
@@ -115,6 +115,9 @@ function useWritingHotkeys(options: {
 
 export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps) {
   const [state, dispatch] = useReducer(writingToolsReducer, initialWritingToolsState);
+  const requestGeneration = useRef(0);
+  const requestInFlight = useRef(false);
+  const summarizeEnabled = settings.enabledWritingActions.includes("summarize");
   const actions = useMemo(
     () => WRITING_ACTIONS.filter((action) => settings.enabledWritingActions.includes(action.id)),
     [settings.enabledWritingActions],
@@ -122,6 +125,8 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 
   const openWithContext = useCallback(
     (context: SelectionContext) => {
+      requestGeneration.current += 1;
+      requestInFlight.current = false;
       dispatch({ type: "OPEN", context, enabledActions: actions.map((action) => action.id) });
     },
     [actions],
@@ -131,6 +136,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   useNativeEvent<NativeErrorShape>("writing-error", (error) => {
     dispatch({ type: "FAIL", message: error.message, canRetry: error.recoverable });
   });
+
+  useEffect(() => () => {
+    requestGeneration.current += 1;
+    requestInFlight.current = false;
+  }, []);
 
   useEffect(() => {
     if (nativeBridge.isNative) return;
@@ -153,39 +163,42 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   }, [state.mode]);
 
   const close = useCallback(() => {
+    requestGeneration.current += 1;
+    requestInFlight.current = false;
     dispatch({ type: "CLOSE" });
     void nativeBridge.closeSurface("writing-tools");
   }, []);
 
-  const runAction = useCallback(
-    async (actionId: WritingActionId, sourceText?: string) => {
-      if (actionId === "custom" && state.mode !== "custom") {
-        dispatch({ type: "OPEN_CUSTOM" });
-        return;
-      }
-      if (actionId === "custom" && !state.customInstruction.trim()) return;
-      if (actionId === "chat" && !(sourceText ?? state.sourceText).trim()) return;
+  const runAction = useCallback(async (actionId: WritingActionId) => {
+    if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
+    if (actionId === "summarize" && !summarizeEnabled) return;
+    if (actionId === "custom" && state.mode !== "custom" && state.mode !== "error") {
+      dispatch({ type: "OPEN_CUSTOM" });
+      return;
+    }
+    const request = prepareWritingRequest(state, actionId);
+    if (!request) return;
 
-      dispatch({ type: "RUN", action: actionId });
-      try {
-        const response = await nativeBridge.runWritingAction({
-          action: actionId,
-          instruction: actionId === "custom" ? state.customInstruction.trim() : undefined,
-          text: (sourceText ?? state.sourceText).trim() || undefined,
-        });
-        if (response.kind === "result" && typeof response.text === "string") {
-          dispatch({ type: "RESULT", text: response.text });
-        } else {
-          dispatch({ type: "REPLACED" });
-          void nativeBridge.closeSurface("writing-tools");
-        }
-      } catch (error) {
-        const nativeError = error instanceof NativeError ? error : null;
-        dispatch({ type: "FAIL", message: messageForError(error), canRetry: nativeError?.recoverable });
+    const generation = ++requestGeneration.current;
+    requestInFlight.current = true;
+
+    dispatch({ type: "RUN", action: actionId });
+    try {
+      const response = await nativeBridge.runWritingAction(request);
+      if (generation !== requestGeneration.current) return;
+      if (response.kind === "result" && typeof response.text === "string") {
+        dispatch({ type: "RESULT", text: response.text, source: response.source, canReplace: response.canReplace });
+      } else {
+        dispatch({ type: "REPLACED" });
+        void nativeBridge.closeSurface("writing-tools");
       }
-    },
-    [state.customInstruction, state.mode, state.sourceText],
-  );
+    } catch (error) {
+      if (generation !== requestGeneration.current) return;
+      dispatch(failureForError(error));
+    } finally {
+      if (generation === requestGeneration.current) requestInFlight.current = false;
+    }
+  }, [state, summarizeEnabled]);
 
   useWritingHotkeys({
     mode: state.mode,
@@ -196,9 +209,6 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     dispatch,
   });
 
-  const activeDefinition = getActiveDefinition(state.activeAction);
-  const isOpen = state.mode !== "closed";
-
   return (
     <main className="writing-stage" data-platform={platform}>
       <dialog
@@ -206,53 +216,75 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         className="writing-popup"
         data-mode={state.mode}
         onCancel={(event) => event.preventDefault()}
-        open={isOpen}
+        open={state.mode !== "closed"}
       >
-        {isOpen ? (
-          <>
-            {state.mode === "menu" ? (
-              <MenuView
-                actions={actions}
-                allowManualText={settings.writingAllowManualText}
-                applicationName={state.context?.applicationName}
-                close={close}
-                dispatch={dispatch}
-                runAction={runAction}
-                selectedIndex={state.selectedIndex}
-                sourceText={state.sourceText}
-              />
-            ) : null}
-            {state.mode === "chat" ? (
-              <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} />
-            ) : null}
-            {state.mode === "custom" ? (
-              <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />
-            ) : null}
-            {state.mode === "processing" ? <ProcessingView close={close} label={activeDefinition?.label} /> : null}
-            {state.mode === "result" ? (
-              <ResultView
-                close={close}
-                canReplace={state.context?.canReplace ?? false}
-                label={activeDefinition?.label}
-                resultText={state.resultText}
-              />
-            ) : null}
-            {state.mode === "error" ? (
-              <ErrorView
-                activeAction={state.activeAction}
-                canRetry={state.canRetry}
-                close={close}
-                dispatch={dispatch}
-                hasContext={state.context !== null}
-                message={state.error ?? ""}
-                runAction={runAction}
-              />
-            ) : null}
-          </>
-        ) : null}
+        <PopupContent state={state} actions={actions} settings={settings} close={close} dispatch={dispatch} runAction={runAction} summarizeEnabled={summarizeEnabled} />
       </dialog>
     </main>
   );
+}
+
+interface PopupContentProps {
+  readonly state: WritingToolsState;
+  readonly actions: typeof WRITING_ACTIONS;
+  readonly settings: AppSettings;
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+  readonly summarizeEnabled: boolean;
+}
+
+function PopupContent({ state, actions, settings, close, dispatch, runAction, summarizeEnabled }: PopupContentProps) {
+  const activeDefinition = getActiveDefinition(state.activeAction);
+  switch (state.mode) {
+    case "menu":
+      return (
+        <MenuView
+          actions={actions}
+          allowManualText={settings.writingAllowManualText}
+          applicationName={state.context?.applicationName}
+          close={close}
+          dispatch={dispatch}
+          runAction={runAction}
+          selectedIndex={state.selectedIndex}
+          sourceText={state.sourceText}
+          summarizeEnabled={summarizeEnabled}
+        />
+      );
+    case "chat":
+      return <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} summarizeEnabled={summarizeEnabled} />;
+    case "summary":
+      return <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} />;
+    case "custom":
+      return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
+    case "processing":
+      return <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} />;
+    case "result":
+      return (
+        <ResultView
+          close={close}
+          canReplace={state.resultCanReplace}
+          source={state.resultSource}
+          label={activeDefinition?.label}
+          resultText={state.resultText}
+        />
+      );
+    case "error":
+      return (
+        <ErrorView
+          activeAction={state.activeAction}
+          canRetry={state.canRetry}
+          close={close}
+          dispatch={dispatch}
+          hasContext={state.context !== null}
+          showTextFallback={state.usesSummaryInput && state.summaryKind === "link"}
+          message={state.error ?? ""}
+          runAction={runAction}
+        />
+      );
+    default:
+      return null;
+  }
 }
 
 interface MenuViewProps {
@@ -264,10 +296,11 @@ interface MenuViewProps {
   readonly runAction: RunAction;
   readonly selectedIndex: number;
   readonly sourceText: string;
+  readonly summarizeEnabled: boolean;
 }
 
 function MenuView(props: MenuViewProps) {
-  const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText } = props;
+  const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText, summarizeEnabled } = props;
   return (
     <div className="writing-menu">
       <header className="writing-popup__header" data-tauri-drag-region>
@@ -307,6 +340,7 @@ function MenuView(props: MenuViewProps) {
           </button>
         ))}
       </div>
+      {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText={false} /> : null}
       <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
         <Icon name="pencil" size={15} />
         <span>Describe your change…</span>
@@ -321,9 +355,10 @@ interface ChatViewProps {
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
   readonly sourceText: string;
+  readonly summarizeEnabled: boolean;
 }
 
-function ChatView({ close, dispatch, runAction, sourceText }: ChatViewProps) {
+function ChatView({ close, dispatch, runAction, sourceText, summarizeEnabled }: ChatViewProps) {
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
     chatInputRef.current?.focus();
@@ -353,6 +388,7 @@ function ChatView({ close, dispatch, runAction, sourceText }: ChatViewProps) {
         value={sourceText}
       />
       <div className="writing-chat__footer">
+        {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText /> : null}
         <Button compact disabled={!sourceText.trim()} tone="primary" type="submit">
           Ask
         </Button>
@@ -421,9 +457,10 @@ interface ResultViewProps {
   readonly canReplace: boolean;
   readonly label: string | undefined;
   readonly resultText: string;
+  readonly source: SummarySource | undefined;
 }
 
-function ResultView({ close, canReplace, label, resultText }: ResultViewProps) {
+function ResultView({ close, canReplace, label, resultText, source }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="writing-result">
@@ -436,6 +473,12 @@ function ResultView({ close, canReplace, label, resultText }: ResultViewProps) {
           <Icon name="close" size={14} />
         </button>
       </header>
+      {source ? (
+        <div className="writing-result__source">
+          <span>{source.kind === "youtube" ? "YouTube" : "Website"}</span>
+          <span title={source.url}>{source.url}</span>
+        </div>
+      ) : null}
       <div className="writing-result__body">
         <SafeMarkdown>{resultText}</SafeMarkdown>
       </div>
@@ -474,11 +517,12 @@ interface ErrorViewProps {
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly hasContext: boolean;
+  readonly showTextFallback: boolean;
   readonly message: string;
   readonly runAction: RunAction;
 }
 
-function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, message, runAction }: ErrorViewProps) {
+function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, showTextFallback, message, runAction }: ErrorViewProps) {
   const canShowRetry = canRetry && activeAction !== null;
   return (
     <div aria-live="assertive" className="writing-error">
@@ -493,8 +537,9 @@ function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, messag
             Retry
           </Button>
         ) : null}
+        {showTextFallback ? <Button compact onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })}>Paste text instead</Button> : null}
         <Button compact onClick={hasContext ? () => dispatch({ type: "BACK" }) : close}>
-          Close
+          {hasContext ? "Back" : "Close"}
         </Button>
       </div>
     </div>
@@ -504,4 +549,81 @@ function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, messag
 function messageForError(error: unknown) {
   if (error instanceof NativeError) return error.message;
   return "Writing Tools couldn’t complete that request.";
+}
+
+function failureForError(error: unknown): WritingToolsEvent {
+  return {
+    type: "FAIL",
+    message: messageForError(error),
+    canRetry: error instanceof NativeError ? error.recoverable : undefined,
+  };
+}
+
+function SummaryActions({ dispatch, includeText }: { readonly dispatch: PopupDispatch; readonly includeText: boolean }) {
+  return (
+    <div className="writing-summary-actions">
+      {includeText ? <button className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })} type="button">Summarize text…</button> : null}
+      <button className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "link" })} type="button">Summarize link…</button>
+    </div>
+  );
+}
+
+interface SummaryViewProps {
+  readonly close: () => void;
+  readonly dispatch: PopupDispatch;
+  readonly runAction: RunAction;
+  readonly kind: "text" | "link";
+  readonly input: string;
+  readonly enabled: boolean;
+}
+
+function SummaryView({ close, dispatch, runAction, kind, input, enabled }: SummaryViewProps) {
+  const summaryInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+  useEffect(() => {
+    summaryInputRef.current?.focus();
+  }, []);
+  return (
+    <form className="writing-summary" onSubmit={(event) => { event.preventDefault(); void runAction("summarize"); }}>
+      <header className="writing-popup__header" data-tauri-drag-region>
+        <span>{kind === "link" ? "Summarize link" : "Summarize text"}</span>
+        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
+      </header>
+      <div className="writing-summary__input">
+        <label htmlFor="summary-input">{kind === "link" ? "Webpage or YouTube URL" : "Webpage text or video transcript"}</label>
+        {kind === "link" ? (
+          <input id="summary-input" type="url" autoComplete="off" spellCheck={false} placeholder="https://…" ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
+        ) : (
+          <textarea id="summary-input" rows={5} placeholder="Paste text to summarize…" ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
+        )}
+        {kind === "link" ? <p>Public pages and YouTube videos. The link is sent to Gemini to retrieve and summarize its content.</p> : null}
+      </div>
+      <footer className="writing-summary__footer">
+        <Button compact onClick={() => dispatch({ type: "BACK" })}>Back</Button>
+        <Button compact tone="primary" type="submit" disabled={!enabled || !input.trim() || (kind === "link" && !isWebUrl(input.trim()))}>Summarize</Button>
+      </footer>
+    </form>
+  );
+}
+
+function prepareWritingRequest(state: WritingToolsState, action: WritingActionId): WritingRequest | undefined {
+  if (action === "custom" && !state.customInstruction.trim()) return undefined;
+  const text = (state.usesSummaryInput ? state.summaryInput : state.sourceText).trim();
+  if ((action === "chat" || state.usesSummaryInput) && !text) return undefined;
+  if (state.usesSummaryInput && state.summaryKind === "link" && !isWebUrl(text)) return undefined;
+  const sourceKind = state.usesSummaryInput ? state.summaryKind : "text";
+  return {
+    action,
+    instruction: action === "custom" ? state.customInstruction.trim() : undefined,
+    text,
+    sourceKind: action === "summarize" ? sourceKind : undefined,
+  };
+}
+
+function isWebUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
+  } catch {
+    return false;
+  }
 }

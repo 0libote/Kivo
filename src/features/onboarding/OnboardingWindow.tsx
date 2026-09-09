@@ -46,7 +46,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
     try {
       setPermissions(await nativeBridge.requestPermission(kind));
     } catch {
-      setMessage("Permission wasn’t granted. You can open System Settings and try again.");
+      setMessage("Permission wasn’t granted. You can open Settings and try again.");
     } finally {
       setBusyPermission(null);
     }
@@ -190,6 +190,9 @@ function DictationStep({ busyPermission, platform, request, statusByKind }: Omit
           />
         ) : null}
       </div>
+      {platform === "windows" ? (
+        <p className="onboarding-copy">If dictation can’t start, turn on Online speech recognition under Settings → Privacy &amp; security → Speech.</p>
+      ) : null}
     </div>
   );
 }
