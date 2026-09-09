@@ -224,14 +224,16 @@ public func kivoSpeechAuthorizationStatus() -> Int32 {
 
 @_cdecl("kivo_request_microphone_authorization")
 public func kivoRequestMicrophoneAuthorization() {
-    // Intentional no-op callback: status is polled via kivo_microphone_authorization_status.
-    AVCaptureDevice.requestAccess(for: .audio) { _ in }
+    AVCaptureDevice.requestAccess(for: .audio) { _ in
+        // Intentional no-op: authorization status is polled via kivo_microphone_authorization_status.
+    }
 }
 
 @_cdecl("kivo_request_speech_authorization")
 public func kivoRequestSpeechAuthorization() {
-    // Intentional no-op callback: status is polled via kivo_speech_authorization_status.
-    SFSpeechRecognizer.requestAuthorization { _ in }
+    SFSpeechRecognizer.requestAuthorization { _ in
+        // Intentional no-op: authorization status is polled via kivo_speech_authorization_status.
+    }
 }
 
 @_cdecl("kivo_speech_start")
