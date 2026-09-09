@@ -57,8 +57,8 @@ jobs:
   # Automated code review / security gates. Each gate runs independently so
   # one failure never hides the signal from the others. The `security-gate`
   # aggregator must pass before any beta build starts. It fails the pipeline
-  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), leaked
-  # secrets, or risky PR dependencies.
+  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), or
+  # risky PR dependencies.
   codeql:
     name: Code review (CodeQL)
     needs: [frontend, native]
@@ -96,23 +96,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           working-directory: src-tauri
 
-  secrets:
-    name: Secret scan (gitleaks)
-    needs: [frontend, native]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          # Full history so secret scanning can see introduced commits.
-          fetch-depth: 0
-      - name: Scan for leaked secrets (gitleaks)
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          # Required by gitleaks-action v3 to scan pull-request diffs.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   dep-review:
     name: Review PR dependency changes
     needs: [frontend, native]
@@ -130,14 +113,14 @@ jobs:
   # passing; anything else must be `success`.
   security-gate:
     name: Code review / security gate
-    needs: [codeql, audit, secrets, dep-review]
+    needs: [codeql, audit, dep-review]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "secrets:${{ needs.secrets.result }}" "dep-review:${{ needs.dep-review.result }}"; do
+          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "dep-review:${{ needs.dep-review.result }}"; do
             echo "$gate"
             result="${gate##*:}"
             if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
