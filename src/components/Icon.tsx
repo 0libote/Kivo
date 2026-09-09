@@ -21,7 +21,7 @@ interface IconProps extends SVGProps<SVGSVGElement> {
 }
 
 const paths: Record<IconName, React.ReactNode> = {
-  audio: <><path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4" /></>,
+  audio: <path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4" />,
   check: <path d="m5 12 4 4L19 6" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   copy: <><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
