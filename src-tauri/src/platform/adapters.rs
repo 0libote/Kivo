@@ -347,11 +347,18 @@ impl SpeechEngine for PlatformSpeechEngine {
 fn text_error_from_platform(error: PlatformError) -> TextError {
     match (error.kind, error.operation) {
         (PlatformErrorKind::PermissionDenied, _) => TextError::AccessibilityPermissionRequired,
-        (PlatformErrorKind::NotFound, "get_selected_text") => TextError::NoSelection,
-        (PlatformErrorKind::InvalidState, "replace_selected_text") => TextError::SelectionExpired,
-        (PlatformErrorKind::Unsupported, "replace_selected_text") => TextError::ReplacementFailed,
+        // The clipboard fallback reports the same "nothing to copy" outcome
+        // under its own operation; without this the quick-chat fallback in
+        // `open_writing_tools` is unreachable and every empty selection
+        // surfaces as "Text integration stopped unexpectedly."
+        (PlatformErrorKind::NotFound, "get_selected_text" | "capture_selection_via_clipboard") => {
+            TextError::NoSelection
+        }
+        (PlatformErrorKind::InvalidState, "replace_selected_text" | "paste_replacement") => {
+            TextError::SelectionExpired
+        }
+        (_, "replace_selected_text" | "paste_replacement") => TextError::ReplacementFailed,
         (PlatformErrorKind::Unsupported, _) => TextError::UnsupportedApplication,
-        (_, "replace_selected_text") => TextError::ReplacementFailed,
         (_, "insert_text_at_cursor") => TextError::InsertionFailed,
         _ => TextError::Backend,
     }
@@ -368,5 +375,41 @@ fn speech_error_from_platform(error: PlatformError) -> SpeechError {
         PlatformErrorKind::InvalidState => SpeechError::AlreadyRunning,
         PlatformErrorKind::Speech | PlatformErrorKind::Os => SpeechError::Backend,
         _ => SpeechError::Backend,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PlatformError, PlatformErrorKind, text_error_from_platform};
+    use crate::text::TextError;
+
+    #[test]
+    fn clipboard_fallback_errors_stay_actionable() {
+        // ponytail: guards the Windows hotkey path where UIA is unsupported
+        // and every capture goes through the clipboard fallback.
+        let empty = PlatformError::new(
+            PlatformErrorKind::NotFound,
+            "capture_selection_via_clipboard",
+            "Select some text first.",
+        );
+        assert_eq!(text_error_from_platform(empty), TextError::NoSelection);
+        let expired = PlatformError::new(
+            PlatformErrorKind::InvalidState,
+            "paste_replacement",
+            "The original application is no longer available.",
+        );
+        assert_eq!(
+            text_error_from_platform(expired),
+            TextError::SelectionExpired
+        );
+        let failed = PlatformError::new(
+            PlatformErrorKind::Os,
+            "paste_replacement",
+            "The original application could not be focused.",
+        );
+        assert_eq!(
+            text_error_from_platform(failed),
+            TextError::ReplacementFailed
+        );
     }
 }
