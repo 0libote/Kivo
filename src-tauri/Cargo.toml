@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A quiet, system-wide writing and dictation utility"
 authors = ["0libote"]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [lib]
 name = "kivo_lib"

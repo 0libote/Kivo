@@ -22,7 +22,7 @@ jobs:
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
@@ -39,7 +39,7 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
@@ -54,44 +54,94 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
-  # Automated code review / security gate. Must pass before any beta
-  # build starts. Fails the pipeline on: CodeQL findings, known-vulnerable
-  # dependencies (bun + cargo), leaked secrets, or risky PR dependencies.
-  security-gate:
-    name: Code review / security gate
+  # Automated code review / security gates. Each gate runs independently so
+  # one failure never hides the signal from the others. The `security-gate`
+  # aggregator must pass before any beta build starts. It fails the pipeline
+  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), leaked
+  # secrets, or risky PR dependencies.
+  codeql:
+    name: Code review (CodeQL)
     needs: [frontend, native]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
       security-events: write
-      pull-requests: write
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          # Full history so secret scanning can see introduced commits.
-          fetch-depth: 0
-      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
           languages: javascript-typescript
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+
+  audit:
+    name: Dependency audit (bun + cargo)
+    needs: [frontend, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Audit frontend dependencies (bun)
         run: bun audit
+      # Prebuilt audit-check: no 3-minute cargo-audit compile, results cached
+      # against the RustSec advisory DB.
       - name: Audit Rust dependencies (cargo-audit)
-        working-directory: src-tauri
-        run: |
-          cargo install --locked cargo-audit
-          cargo audit
-      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          working-directory: src-tauri
+
+  secrets:
+    name: Secret scan (gitleaks)
+    needs: [frontend, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Full history so secret scanning can see introduced commits.
+          fetch-depth: 0
       - name: Scan for leaked secrets (gitleaks)
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-      - name: Review PR dependency changes
-        if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+
+  dep-review:
+    name: Review PR dependency changes
+    needs: [frontend, native]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+
+  # Aggregator: keeps one required check and one `needs` target for the beta
+  # builds. A skipped gate (dep-review outside pull requests) counts as
+  # passing; anything else must be `success`.
+  security-gate:
+    name: Code review / security gate
+    needs: [codeql, audit, secrets, dep-review]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify all gates passed
+        run: |
+          fail=0
+          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "secrets:${{ needs.secrets.result }}" "dep-review:${{ needs.dep-review.result }}"; do
+            echo "$gate"
+            result="${gate##*:}"
+            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+              fail=1
+            fi
+          done
+          exit $fail
 
   macos-beta:
     needs: [frontend, native, security-gate]
@@ -111,7 +161,7 @@ jobs:
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
@@ -172,7 +222,7 @@ jobs:
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2

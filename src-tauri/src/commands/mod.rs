@@ -186,19 +186,14 @@ impl AppCore {
 
         let settings = self.settings()?.dictation;
         let mut final_text = transcript.into_text();
-        if settings.improve_with_ai {
-            if let Ok(Some(api_key)) = self.credentials.load_api_key() {
-                if let Ok(prompt) = dictation_cleanup_prompt(&final_text) {
-                    if let Ok(Ok(cleaned)) = tokio::time::timeout(
-                        DICTATION_AI_DEADLINE,
-                        self.ai.generate(&api_key, &prompt),
-                    )
+        if settings.improve_with_ai
+            && let Ok(Some(api_key)) = self.credentials.load_api_key()
+            && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
+            && let Ok(Ok(cleaned)) =
+                tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate(&api_key, &prompt))
                     .await
-                    {
-                        final_text = cleaned;
-                    }
-                }
-            }
+        {
+            final_text = cleaned;
         }
 
         if let Err(error) = self.text.insert_text_at_cursor(&final_text).await {
@@ -942,10 +937,8 @@ fn refresh_shortcuts_after_permission(
     let input_ready = statuses
         .iter()
         .any(|status| status.kind == "input-monitoring" && status.state == "granted");
-    if input_ready {
-        if let Ok(settings) = core.settings().map(FrontendSettings::from) {
-            let _ = crate::shell::register_shortcuts(app, &settings);
-        }
+    if input_ready && let Ok(settings) = core.settings().map(FrontendSettings::from) {
+        let _ = crate::shell::register_shortcuts(app, &settings);
     }
 }
 
