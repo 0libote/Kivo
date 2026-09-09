@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # Keep pinned GitHub Actions SHAs fresh (CodeQL, audits, builds).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Frontend dependencies (bun lockfile).
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      frontend:
+        patterns: ["*"]
+
+  # Rust dependencies (Cargo.lock) – surfaces the next plist/quick-xml/time
+  # style advisory as a PR before it can red the security gate.
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: weekly
+    groups:
+      rust:
+        patterns: ["*"]

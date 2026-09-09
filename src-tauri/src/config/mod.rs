@@ -106,15 +106,15 @@ impl Default for DictationSettings {
 impl DictationSettings {
     fn validate(&self) -> Result<(), SettingsError> {
         self.shortcut.validate()?;
-        if let Some(id) = &self.microphone_id {
-            if id.trim().is_empty() || id.len() > 512 {
-                return Err(SettingsError::InvalidMicrophone);
-            }
+        if let Some(id) = &self.microphone_id
+            && (id.trim().is_empty() || id.len() > 512)
+        {
+            return Err(SettingsError::InvalidMicrophone);
         }
-        if let LanguagePreference::Locale { tag } = &self.language {
-            if tag.trim().is_empty() || tag.len() > 64 {
-                return Err(SettingsError::InvalidLanguage);
-            }
+        if let LanguagePreference::Locale { tag } = &self.language
+            && (tag.trim().is_empty() || tag.len() > 64)
+        {
+            return Err(SettingsError::InvalidLanguage);
         }
         Ok(())
     }

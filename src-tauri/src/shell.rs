@@ -318,10 +318,10 @@ fn register_dictation_shortcut(
     let registration = match registration_result {
         Ok(registration) => registration,
         Err(error) => {
-            if error.kind == PlatformErrorKind::PermissionDenied {
-                if let Some(mut previous) = current.take() {
-                    let _ = previous.registration.stop();
-                }
+            if error.kind == PlatformErrorKind::PermissionDenied
+                && let Some(mut previous) = current.take()
+            {
+                let _ = previous.registration.stop();
             }
             return Err(error);
         }
@@ -445,10 +445,10 @@ pub(crate) fn apply_settings(
         &settings.dictation_shortcut,
     );
     writing.map_err(|_| SettingsRuntimeError::ShortcutUnavailable)?;
-    if let Err(error) = dictation {
-        if error.kind != PlatformErrorKind::PermissionDenied {
-            return Err(SettingsRuntimeError::ShortcutUnavailable.into());
-        }
+    if let Err(error) = dictation
+        && error.kind != PlatformErrorKind::PermissionDenied
+    {
+        return Err(SettingsRuntimeError::ShortcutUnavailable.into());
     }
     if settings.show_idle_flow_bar {
         emit_dictation(app, "idle", None, false);
