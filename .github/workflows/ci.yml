@@ -177,9 +177,11 @@ jobs:
   macos-beta:
     needs: [frontend, native, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
-    concurrency:
-      group: continuous-prerelease
-      cancel-in-progress: false
+    # NOTE: no job-level concurrency here (see windows-beta). An earlier
+    # revision had `group: continuous-prerelease` on both beta jobs and
+    # they never started (always skipped) on green main pushes or
+    # dispatches. Cross-run `continuous` release races are covered by the
+    # workflow-level concurrency (same workflow+ref queues whole runs).
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
@@ -240,9 +242,7 @@ jobs:
   windows-beta:
     needs: [macos-beta]
     if: needs.macos-beta.result == 'success'
-    concurrency:
-      group: continuous-prerelease
-      cancel-in-progress: false
+    # No job-level concurrency (see macos-beta note above).
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
