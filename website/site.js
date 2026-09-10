@@ -6,7 +6,7 @@
   try {
     var saved = localStorage.getItem("kivo-theme");
     if (saved === "light" || saved === "dark") root.setAttribute("data-theme", saved);
-  } catch (e) { /* private mode */ }
+  } catch { /* private mode */ }
 
   function syncToggle() {
     document.querySelectorAll("[data-theme-toggle]").forEach(function (btn) {
@@ -25,7 +25,7 @@
         (!root.getAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
       var next = dark ? "light" : "dark";
       root.setAttribute("data-theme", next);
-      try { localStorage.setItem("kivo-theme", next); } catch (e) { /* ignore */ }
+      try { localStorage.setItem("kivo-theme", next); } catch { /* ignore */ }
       syncToggle();
     });
   });
@@ -61,7 +61,7 @@
         ta.value = text;
         document.body.appendChild(ta);
         ta.select();
-        try { document.execCommand("copy"); } catch (e) { /* ignore */ }
+        try { document.execCommand("copy"); } catch { /* ignore */ }
         document.body.removeChild(ta);
         done();
       }
