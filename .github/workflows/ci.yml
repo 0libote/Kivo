@@ -18,9 +18,16 @@ on:
 permissions:
   contents: read
 
+# Cancel outdated PR runs; main pushes queue (cancel=false) so the
+# `continuous` beta release never races itself.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -38,6 +45,7 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -63,6 +71,7 @@ jobs:
     name: Code review (CodeQL)
     needs: [frontend, native]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       actions: read
@@ -78,6 +87,7 @@ jobs:
     name: Dependency audit (bun + cargo)
     needs: [frontend, native]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -88,45 +98,64 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Audit frontend dependencies (bun)
         run: bun audit
-      # Prebuilt audit-check: no 3-minute cargo-audit compile, results cached
-      # against the RustSec advisory DB.
-      - name: Audit Rust dependencies (cargo-audit)
-        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
+      # Prebuilt cargo-audit binary (~10s). Replaces rustsec/audit-check,
+      # which compiled cargo-audit from source (~3min), runs on deprecated
+      # Node 20, and needs `checks: write` to post its Check Run (that
+      # missing permission failed main as "Resource not accessible by
+      # integration"). Plain `cargo audit` fails on vulnerabilities but
+      # exits 0 on informational warnings (6x unmaintained unic/
+      # proc-macro-error, 1x unsound glib RUSTSEC-2024-0429, transitive via
+      # Tauri's Linux tray stack -> gtk 0.18, unfixable short of a GTK 0.20
+      # / Tauri upgrade; tracked separately).
+      - name: Install cargo-audit (prebuilt)
+        uses: taiki-e/install-action@c3ec0de9ae7f1019cea21aa96aa0a895b9552063 # v2.87.9
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          working-directory: src-tauri
+          tool: cargo-audit
+      - name: Audit Rust dependencies (cargo-audit)
+        run: cargo audit --file src-tauri/Cargo.lock
 
   dep-review:
     name: Review PR dependency changes
     needs: [frontend, native]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   # Aggregator: keeps one required check and one `needs` target for the beta
-  # builds. A skipped gate (dep-review outside pull requests) counts as
-  # passing; anything else must be `success`.
+  # builds. codeql/audit run on every event and must be `success` — a
+  # `skipped` there means an upstream CI job failed and must not look
+  # green. dep-review only runs on pull requests, so `skipped` elsewhere
+  # is the expected pass.
   security-gate:
     name: Code review / security gate
     needs: [codeql, audit, dep-review]
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "dep-review:${{ needs.dep-review.result }}"; do
+          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}"; do
             echo "$gate"
             result="${gate##*:}"
-            if [ "$result" != "success" ] && [ "$result" != "skipped" ]; then
+            if [ "$result" != "success" ]; then
               fail=1
             fi
           done
+          echo "dep-review:${{ needs.dep-review.result }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if [ "${{ needs.dep-review.result }}" != "success" ]; then
+              fail=1
+            fi
+          elif [ "${{ needs.dep-review.result }}" != "success" ] && [ "${{ needs.dep-review.result }}" != "skipped" ]; then
+            fail=1
+          fi
           exit $fail
 
   macos-beta:
@@ -136,6 +165,7 @@ jobs:
       group: continuous-prerelease
       cancel-in-progress: false
     runs-on: macos-latest
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -198,6 +228,7 @@ jobs:
       group: continuous-prerelease
       cancel-in-progress: false
     runs-on: windows-latest
+    timeout-minutes: 45
     permissions:
       contents: write
     env:
@@ -229,4 +260,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
-          gh release upload continuous "src-tauri\target\release\bundle\nsis\Kivo_${version}_x64-setup.exe" --clobber
+          # Forward slashes: PowerShell accepts them and they avoid YAML
+          # backslash-escape confusion.
+          gh release upload continuous "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
