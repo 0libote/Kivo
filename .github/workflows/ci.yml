@@ -137,6 +137,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      beta_ready: ${{ steps.decide.outputs.beta_ready }}
     steps:
       - name: Verify all gates passed
         run: |
@@ -157,10 +159,24 @@ jobs:
             fail=1
           fi
           exit $fail
+      # Beta eligibility decided here in shell (visible in the gate log)
+      # so the beta jobs only do a trivial output comparison. Betas run on
+      # manual dispatch (any branch) and on pushes to main — never on PRs.
+      - id: decide
+        if: always()
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "beta_ready=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "beta_ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "beta_ready=false" >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
 
   macos-beta:
     needs: [frontend, native, security-gate]
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: needs.security-gate.outputs.beta_ready == 'true'
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
@@ -223,7 +239,7 @@ jobs:
 
   windows-beta:
     needs: [macos-beta]
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    if: needs.macos-beta.result == 'success'
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
