@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="Kivo user guide — setup, dictation, Writing Tools, summaries, settings, and troubleshooting." />
+  <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)" />
+  <title>Kivo Docs — User guide</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231c1c1e'/%3E%3Cpath d='M11 9v14M16 9v14M21 12v8' stroke='%23f7f7f5' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="index.html" aria-label="Kivo home">
+        <span class="brand__mark" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 5v14M11 5v14M16 8v8M21 10v4"/></svg>
+        </span>
+        Kivo
+      </a>
+      <nav class="nav__links" data-nav-links aria-label="Primary">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#how">How it works</a>
+        <a href="index.html#privacy">Privacy</a>
+        <a href="docs.html" aria-current="page">Docs</a>
+        <a href="dev.html">Developers</a>
+      </nav>
+      <span class="nav__spacer"></span>
+      <button class="theme-toggle" data-theme-toggle type="button" aria-label="Toggle theme"></button>
+      <button class="nav__menu-btn" data-menu-btn type="button" aria-label="Open menu" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <a class="nav__cta" href="https://github.com/0libote/Kivo" target="_blank" rel="noopener">Get Kivo</a>
+    </div>
+  </header>
+
+  <div class="wrap docs">
+    <aside class="sidebar" aria-label="User guide contents">
+      <div>
+        <h4>Guide</h4>
+        <a href="#getting-started">Getting started</a>
+        <a href="#gemini-key">Adding your AI key</a>
+        <a href="#dictation">Dictation</a>
+        <a href="#writing-tools">Writing Tools</a>
+        <a href="#summarize">Summaries</a>
+        <a href="#settings">Settings tour</a>
+      </div>
+      <div>
+        <h4>Reference</h4>
+        <a href="#how-it-works">How it works</a>
+        <a href="#shortcuts">Shortcuts</a>
+        <a href="#limits">Limits &amp; timing</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </div>
+    </aside>
+
+    <article class="prose">
+      <p class="breadcrumb"><a href="index.html">Home</a> / Docs</p>
+      <h1>User guide</h1>
+      <p class="lede">Everything you need to dictate, polish, and summarize — and a plain-English explanation of what happens under the hood. Developers: the <a href="dev.html">developer guide</a> covers the codebase.</p>
+
+      <h2 id="getting-started">Getting started</h2>
+      <p><strong>1. Install.</strong> macOS 26 or later (signed DMG), or Windows 11 24H2+ (MSIX). Kivo runs in the background — look for it in the menu bar / system tray.</p>
+      <p><strong>2. Walk through onboarding.</strong> First launch shows a short setup flow: permissions, shortcut overview, and the optional AI key. Closing Settings never quits Kivo — it keeps running quietly.</p>
+      <p><strong>3. Grant permissions only when asked.</strong> Kivo never asks up front for everything. It prompts in context:</p>
+      <table>
+        <thead><tr><th>Permission</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>Accessibility</td><td>Reads your current selection and inserts or replaces text.</td></tr>
+          <tr><td>Input Monitoring</td><td>Sees the modifier-only dictation gesture (e.g. holding <kbd>Fn</kbd>).</td></tr>
+          <tr><td>Microphone</td><td>Records only while dictation is active — never in the background.</td></tr>
+          <tr><td>Speech Recognition</td><td>Sends audio to the operating system’s speech engine. Audio is never sent to Gemini.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="gemini-key">Adding your AI key</h2>
+      <p>Dictation works with no key at all — you get the raw OS transcript. Writing actions (proofread, rewrite, summarize…) need a Google AI Studio key.</p>
+      <p><strong>To add it:</strong> create a key in <strong>Google AI Studio</strong>, open Kivo → <strong>Settings → AI</strong>, paste it, and press <strong>Save key</strong>. Kivo verifies it against Google’s current Interactions API. Use <strong>Test connection</strong> any time to re-check.</p>
+      <div class="callout"><strong>Where’s my key stored?</strong> In macOS Keychain or Windows Credential Manager — managed entirely by the Rust process. It is never returned to the webview, never logged, and only leaves your machine inside the HTTPS request for the action you invoke.</div>
+
+      <h2 id="dictation">Dictation</h2>
+      <h3>Hold, speak, release</h3>
+      <p>Defaults: <kbd>Fn</kbd> on macOS, <kbd>Ctrl</kbd> + <kbd>Win</kbd> on Windows (changeable in Settings → Dictation). Hold the shortcut in any app, speak, release — the transcript lands at your cursor.</p>
+      <h3>The Flow Bar</h3>
+      <p>The pill overlay tells you exactly what’s happening:</p>
+      <table>
+        <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>Waveform</td><td>Listening — speak now.</td></tr>
+          <tr><td>Finishing</td><td>Processing, including optional AI cleanup.</td></tr>
+          <tr><td>Checkmark</td><td>Inserted. The bar fades away on its own.</td></tr>
+          <tr><td>Error + Retry</td><td>Something failed (e.g. no speech heard). Retry if offered.</td></tr>
+        </tbody>
+      </table>
+      <p>Press <kbd>esc</kbd> to cancel mid-dictation. Enable <strong>Show Flow Bar while idle</strong> in Settings if you want a quiet “ready” indicator between sessions.</p>
+      <h3>AI cleanup (optional)</h3>
+      <p><strong>Improve dictated text with AI</strong> tidies punctuation and obvious filler without changing your meaning. Turn it off in Settings → Dictation for verbatim transcripts.</p>
+      <h3>Language &amp; microphone</h3>
+      <p>Pick a microphone (or System Default) and a dictation language in Settings → Dictation. <strong>Automatic</strong> follows your input language on macOS, and the system speech language on Windows — where only installed languages can start dictation.</p>
+
+      <h2 id="writing-tools">Writing Tools</h2>
+      <p>Select text in any app, hit your Writing Tools shortcut (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> on Mac, <kbd>Ctrl</kbd> + <kbd>Space</kbd> on Windows). A compact popup opens next to your cursor or selection.</p>
+      <table>
+        <thead><tr><th>Action</th><th>Does</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Proofread</td><td>Fixes grammar and spelling</td><td>Can replace</td></tr>
+          <tr><td>Rewrite</td><td>Improves clarity and wording</td><td>Can replace</td></tr>
+          <tr><td>Concise</td><td>Shortens, keeps meaning</td><td>Can replace</td></tr>
+          <tr><td>Friendly</td><td>Warms the tone</td><td>Can replace</td></tr>
+          <tr><td>Professional</td><td>Polishes the tone</td><td>Can replace</td></tr>
+          <tr><td>Summarize</td><td>Short overview</td><td>Copy only</td></tr>
+          <tr><td>Key Points</td><td>Extracts essentials</td><td>Copy only</td></tr>
+          <tr><td>Custom</td><td>“Describe your change…” in your own words</td><td>Can replace</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Replace vs. Copy:</strong> summaries and key points never overwrite your selection — the result stays in the popup until you copy it. Everything else offers <strong>Replace</strong> (writes back into your app) and <strong>Copy</strong>.</p>
+      <h3>Quick chat</h3>
+      <p>With nothing selected, the shortcut opens <strong>Quick chat</strong> instead: type a question, press <kbd>Enter</kbd> (<kbd>Shift</kbd> + <kbd>Enter</kbd> for a newline). The answer can be copied but never replaces anything — there’s nothing to replace.</p>
+      <h3>Keyboard-first</h3>
+      <p>Arrow keys move through actions, <kbd>Enter</kbd> runs, typing jumps straight to a custom instruction, <kbd>esc</kbd> goes back or closes. Toggle <strong>Editable selected text</strong> in Settings if you want to tweak the captured highlight before running an action.</p>
+
+      <h2 id="summarize">Summaries: articles, text &amp; video</h2>
+      <p>Three ways in, one tidy result with its source URL attached:</p>
+      <table>
+        <thead><tr><th>Entry point</th><th>Use when</th></tr></thead>
+        <tbody>
+          <tr><td>Summarize (with text selected)</td><td>You already highlighted an article or transcript.</td></tr>
+          <tr><td>Summarize link…</td><td>You have a public webpage or YouTube URL. A selected URL is prefilled.</td></tr>
+          <tr><td>Summarize text…</td><td>You want to paste an article or transcript manually (Quick chat).</td></tr>
+        </tbody>
+      </table>
+      <div class="callout"><strong>Good to know.</strong> Webpages are retrieved via Gemini’s URL context; YouTube links use its video input. Only the link you submit is sent — Kivo never reads your tabs, cookies, or history. Private/unlisted videos and paywalled or sign-in pages aren’t supported; if retrieval fails, choose <strong>Paste text instead</strong>.</div>
+
+      <h2 id="settings">Settings tour</h2>
+      <p><strong>General</strong> — launch at login, appearance (System/Light/Dark), idle Flow Bar, start in background.</p>
+      <p><strong>Dictation</strong> — shortcut recorder, microphone, language, AI cleanup, sound feedback.</p>
+      <p><strong>Writing Tools</strong> — shortcut, popup placement (Cursor / Selection / Fixed + size), editable text box, per-action toggles with reset.</p>
+      <p><strong>AI</strong> — key management, connection status, link to Google AI Studio.</p>
+      <p><strong>About</strong> — version and manual update check (GitHub Releases).</p>
+
+      <h2 id="how-it-works">How it works (the short version)</h2>
+      <p>Kivo is one app with four small windows: the <strong>Flow Bar</strong> (dictation pill), <strong>Writing Tools</strong> (selection popup), <strong>Settings</strong>, and <strong>Onboarding</strong>. The visible interface is just presentation — all privileged work (shortcuts, window placement, speech, text replacement, credentials, Gemini calls) happens in the trusted Rust process.</p>
+      <p>Voice audio goes to your OS speech engine and comes back as text. That text is inserted locally. Only when <em>you</em> run a writing action or summary does text travel — directly, over HTTPS, to Gemini with retention off (<code>store: false</code>). Closing a popup cancels the pending request and discards late results.</p>
+
+      <h2 id="shortcuts">Shortcuts</h2>
+      <table>
+        <thead><tr><th>Where</th><th>Keys</th><th>Does</th></tr></thead>
+        <tbody>
+          <tr><td>Anywhere</td><td><kbd>Fn</kbd> hold (Mac)</td><td>Dictate; release to insert</td></tr>
+          <tr><td>Anywhere</td><td>Your writing shortcut</td><td>Open Writing Tools / Quick chat</td></tr>
+          <tr><td>Flow Bar</td><td><kbd>esc</kbd></td><td>Cancel dictation</td></tr>
+          <tr><td>Popup menu</td><td>Arrows · <kbd>Enter</kbd></td><td>Move · run action</td></tr>
+          <tr><td>Quick chat</td><td><kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd></td><td>Send / newline</td></tr>
+        </tbody>
+      </table>
+      <p>Both global shortcuts are re-recordable in Settings. On macOS, <kbd>Fn</kbd> is best-effort when the system assigns the Globe key elsewhere.</p>
+
+      <h2 id="limits">Limits &amp; timing</h2>
+      <table>
+        <thead><tr><th>Thing</th><th>Limit</th></tr></thead>
+        <tbody>
+          <tr><td>Text summaries</td><td>Up to 200,000 characters — split longer pieces</td></tr>
+          <tr><td>Writing requests</td><td>20-second deadline</td></tr>
+          <tr><td>Link summaries</td><td>90-second deadline (retrieval takes longer)</td></tr>
+          <tr><td>Summaries vs. Replace</td><td>Summaries can’t replace — including via shortcut</td></tr>
+        </tbody>
+      </table>
+      <p>A request already received by Gemini may still use quota even if you close the popup first. Long videos can use more quota than pasted text; normal Gemini usage limits and billing apply.</p>
+
+      <h2 id="troubleshooting">Troubleshooting</h2>
+      <h3>Dictation won’t start</h3>
+      <p>Check the microphone permission, confirm the shortcut isn’t claimed by another app (macOS Globe/<kbd>Fn</kbd> conflicts are common), and on Windows verify your speech language is installed.</p>
+      <h3>Writing actions show a configuration error</h3>
+      <p>You need a valid Gemini key: Settings → AI → save, then <strong>Test connection</strong>. A “rate limited” status means Gemini is throttling — wait and retry.</p>
+      <h3>Replace doesn’t work in an app</h3>
+      <p>Replacement needs native Accessibility (Mac) / UI Automation (Windows) access to the target app. If the OS can’t preserve the selection there, Kivo fails safely instead of mangling your text — use <strong>Copy</strong> and paste manually.</p>
+      <h3>Link summary failed</h3>
+      <p>Confirm the page or video is public, then try <strong>Paste text instead</strong> with the article text or transcript.</p>
+
+      <div class="pager">
+        <a href="index.html"><small>← Back to</small><strong>Landing page</strong></a>
+        <a href="dev.html"><small>Next →</small><strong>Developer guide</strong></a>
+      </div>
+    </article>
+  </div>
+
+  <footer>
+    <div class="wrap footer__inner">
+      <a class="brand" href="index.html" style="font-size:15px">
+        <span class="brand__mark" aria-hidden="true" style="width:24px;height:24px">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 5v14M11 5v14M16 8v8M21 10v4"/></svg>
+        </span>
+        Kivo
+      </a>
+      <span>© <span data-year>2026</span> Kivo.</span>
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="docs.html" aria-current="page">Docs</a>
+        <a href="dev.html">Developers</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>
