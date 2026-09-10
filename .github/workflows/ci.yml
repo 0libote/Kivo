@@ -183,11 +183,12 @@ jobs:
   macos-beta:
     needs: [frontend, native, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
-    # NOTE: no job-level concurrency yet. The `continuous-prerelease`
-    # group lived here before and was removed during diagnosis (it proved
-    # innocent — the real starvation cause was dep-review skipping, fixed
-    # above). Re-add it once betas are observed starting, to serialize
-    # concurrent runs racing the `continuous` delete/create/upload.
+    # Serializes concurrent runs racing the `continuous` delete/create/
+    # upload below. (Temporarily removed during beta-starvation diagnosis;
+    # proven innocent — the cause was dep-review skipping. Restored.)
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
@@ -248,7 +249,10 @@ jobs:
   windows-beta:
     needs: [macos-beta]
     if: needs.macos-beta.result == 'success'
-    # No job-level concurrency (see macos-beta note above).
+    # Same `continuous` race protection as macos-beta.
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
