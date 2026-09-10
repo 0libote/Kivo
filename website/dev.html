@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="Kivo developer guide — architecture, repo map, platform boundary, pipelines, credentials, and the reasoning behind the design." />
+  <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)" />
+  <title>Kivo Developers — Codebase guide</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231c1c1e'/%3E%3Cpath d='M11 9v14M16 9v14M21 12v8' stroke='%23f7f7f5' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="index.html" aria-label="Kivo home">
+        <span class="brand__mark" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 5v14M11 5v14M16 8v8M21 10v4"/></svg>
+        </span>
+        Kivo
+      </a>
+      <nav class="nav__links" data-nav-links aria-label="Primary">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#how">How it works</a>
+        <a href="index.html#privacy">Privacy</a>
+        <a href="docs.html">Docs</a>
+        <a href="dev.html" aria-current="page">Developers</a>
+      </nav>
+      <span class="nav__spacer"></span>
+      <button class="theme-toggle" data-theme-toggle type="button" aria-label="Toggle theme"></button>
+      <button class="nav__menu-btn" data-menu-btn type="button" aria-label="Open menu" aria-expanded="false">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+      <a class="nav__cta" href="https://github.com/0libote/Kivo" target="_blank" rel="noopener">Get Kivo</a>
+    </div>
+  </header>
+
+  <div class="wrap docs">
+    <aside class="sidebar" aria-label="Developer guide contents">
+      <div>
+        <h4>Architecture</h4>
+        <a href="#mental-model">Mental model</a>
+        <a href="#repo-map">Repo map</a>
+        <a href="#surfaces">The four surfaces</a>
+        <a href="#platform-boundary">Platform boundary</a>
+      </div>
+      <div>
+        <h4>Pipelines</h4>
+        <a href="#dictation-pipeline">Dictation</a>
+        <a href="#text-pipeline">Selection &amp; replace</a>
+        <a href="#ai-client">AI client</a>
+        <a href="#credentials">Credentials</a>
+      </div>
+      <div>
+        <h4>Practice</h4>
+        <a href="#why">Why it’s built this way</a>
+        <a href="#conventions">Conventions</a>
+        <a href="#workflow">Dev workflow</a>
+        <a href="#releases">Releases &amp; updates</a>
+      </div>
+    </aside>
+
+    <article class="prose">
+      <p class="breadcrumb"><a href="index.html">Home</a> / Developers</p>
+      <h1>Developer guide</h1>
+      <p class="lede">How the codebase is organized, why each boundary exists, and where to change things safely. New here? Read the <a href="docs.html#how-it-works">user-facing “how it works”</a> first — this page explains the machinery behind it.</p>
+
+      <h2 id="mental-model">Mental model</h2>
+      <p>Kivo is <strong>one Tauri process with four pre-created webview surfaces</strong>. React owns presentation and transient UI state — nothing else. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle.</p>
+      <div class="callout callout--accent"><strong>The one rule:</strong> sensitive text and keys are absent from serializable types wherever the UI doesn’t need them. If the webview doesn’t need it to render, it never crosses the bridge.</div>
+      <p>This split is deliberate: the webview is convenient for UI but untrusted for secrets. The Rust core (<code>AppCore</code> in <code>src-tauri/src/commands/</code>, wired in <code>lib.rs</code>) is the only thing allowed to touch credentials, the microphone path, or another app’s text.</p>
+
+      <h2 id="repo-map">Repo map</h2>
+      <pre><code>Kivo/
+├── src/                    # React UI — presentation only
+│   ├── App.tsx             # surface router (flow-bar | writing-tools | settings | onboarding)
+│   ├── components/         # Button, Icon, Switch, ShortcutRecorder, …
+│   ├── features/
+│   │   ├── dictation/      # FlowBar + reducer state machine
+│   │   ├── writing-tools/  # popup, actions.ts, SafeMarkdown, reducer
+│   │   ├── settings/       # SettingsWindow (5 sections)
+│   │   └── onboarding/     # first-run permission + setup flow
+│   ├── hooks/ platform/    # nativeBridge, useNativeEvent, prefs
+│   └── styles/             # tokens in globals.css, per-surface css
+├── src-tauri/src/
+│   ├── lib.rs main.rs      # composition root, tray, shortcuts, surfaces
+│   ├── commands/           # Tauri invoke handlers + AppCore
+│   ├── speech/             # session management over platform engines
+│   ├── text/               # selection capture + replacement
+│   ├── ai/                 # Gemini client (mod.rs), link_summary.rs
+│   ├── platform/           # macos.rs, windows.rs, adapters.rs, mod.rs
+│   ├── config/             # settings.json repository
+│   ├── security/           # SecretString + redaction helpers
+│   └── shell.rs            # windows, tray, shortcuts, placement
+└── website/                # this site (static, no build step)</code></pre>
+
+      <h2 id="surfaces">The four surfaces</h2>
+      <table>
+        <thead><tr><th>Surface</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><td><code>flow-bar</code></td><td>Non-activating, always-on-top dictation pill. Tightly sized; never steals focus.</td></tr>
+          <tr><td><code>writing-tools</code></td><td>Compact selection-aware command + result popup. Anchors to cursor / selection / fixed point.</td></tr>
+          <tr><td><code>settings</code></td><td>Native-window preferences. Closing hides the window — it never quits the app.</td></tr>
+          <tr><td><code>onboarding</code></td><td>Short first-run permission and setup flow.</td></tr>
+        </tbody>
+      </table>
+      <p>Windows are <strong>pre-created</strong> and shown/hidden rather than spawned per use — that’s what keeps the Flow Bar and popup instant. Placement logic lives in <code>shell.rs</code> (multi-monitor aware; verify on both OSes before release). UI reducers (<code>features/dictation/state.ts</code>, <code>features/writing-tools/state.ts</code>) model the popup lifecycle, including generation counters that discard late responses when a popup closes.</p>
+
+      <h2 id="platform-boundary">Platform boundary</h2>
+      <p>All OS code is isolated under <code>src-tauri/src/platform/</code> behind the adapter traits in <code>adapters.rs</code> (<code>PlatformSpeechEngine</code>, <code>PlatformTextService</code>, <code>PlatformCredentialStore</code>). The rest of Rust never touches an OS API directly.</p>
+      <table>
+        <thead><tr><th>Concern</th><th>macOS 26</th><th>Windows 11 24H2+</th></tr></thead>
+        <tbody>
+          <tr><td>Speech</td><td>SpeechAnalyzer + DictationTranscriber</td><td>WinRT speech (needs MSIX identity)</td></tr>
+          <tr><td>Text access</td><td>Accessibility / Core Graphics / AppKit</td><td>UI Automation + Win32 window/input</td></tr>
+          <tr><td>Secrets</td><td>Keychain</td><td>Credential Manager</td></tr>
+          <tr><td>Dictation key</td><td>Fn/Globe via Input Monitoring (best-effort)</td><td>Ctrl+Meta with Win-key suppression</td></tr>
+        </tbody>
+      </table>
+      <p>The boundary reserves application-specific <em>and</em> clipboard-fallback replacement strategies — but V1 fails safely when native Accessibility / UI Automation can’t preserve the selection, rather than risk mangling user text.</p>
+
+      <h2 id="dictation-pipeline">Dictation pipeline</h2>
+      <p><code>speech/</code> manages sessions; <code>platform/*</code> feeds audio to the OS engine and streams levels back for the waveform (<code>dictation-level</code> events) and status snapshots (<code>dictation-state</code>: idle → listening → processing → success/error). The React side is a thin reducer over those events — see <code>FlowBar.tsx</code>.</p>
+      <p>On release, the transcript goes through optional AI cleanup, then <code>text/</code> inserts it at the saved cursor. <kbd>esc</kbd> cancels; closing paths bump a generation counter so late engine callbacks are ignored.</p>
+
+      <h2 id="text-pipeline">Selection &amp; replace pipeline</h2>
+      <p>Invoking Writing Tools captures a <code>SelectionContext</code> (app name, bounds, initial text, <code>canReplace</code>) and emits <code>writing-context</code>. The popup runs its reducer (<code>OPEN → RUN → RESULT / REPLACED / FAIL</code>), calls <code>runWritingAction</code>, and on <strong>Replace</strong> asks Rust to write back through the platform text service. Summarize / Key Points / Chat are <code>resultOnly</code> — the core refuses to treat them as replacements, including through the native command path.</p>
+
+      <h2 id="ai-client">AI client</h2>
+      <p>Pinned in <code>src-tauri/src/ai/mod.rs</code>:</p>
+      <pre><code>GEMINI_MODEL = "gemini-3.8-flash"   // low thinking, latency-sensitive
+endpoint   = .../v1beta/interactions
+store      = false                  // always — retention off</code></pre>
+      <p>Prompts are built in <code>writing_prompt()</code> behind a guard: source text is treated as <strong>untrusted content, never instructions</strong> (system prefix in <code>mod.rs</code>), text summaries over 200,000 chars are rejected, and link summaries go through <code>link_summary.rs</code> (URL-context retrieval for pages, video input for YouTube) with a 90-second deadline vs. 20 seconds for ordinary writing calls. Successful URL-retrieval evidence is required before a webpage summary is shown.</p>
+      <div class="callout"><strong>Changing the model or endpoint?</strong> Edit only <code>src-tauri/src/ai/mod.rs</code> and update its fixtures at the same time. That file is the single source of truth — there is intentionally no provider abstraction.</div>
+
+      <h2 id="credentials">Credentials &amp; settings</h2>
+      <p>Keys are saved via <code>PlatformCredentialStore</code>, tested against the Interactions API, and their status surfaced as <code>configured / untested / testing / connected / invalid / rate-limited / offline</code>. The key value itself is a <code>SecretString</code> that never serializes to the frontend. Plain preferences live in <code>settings.json</code> via <code>config/SettingsRepository</code>; <code>FrontendSettings</code> is the sanitized projection the UI may see.</p>
+
+      <h2 id="why">Why it’s built this way</h2>
+      <p><strong>No provider abstraction.</strong> One model, one endpoint, one call site. Abstractions would widen the blast radius of a prompt/privacy mistake for zero current benefit.</p>
+      <p><strong>No App Sandbox on macOS.</strong> System-wide Accessibility integration is incompatible with it, so Kivo ships direct (signed + notarized) instead of via the Mac App Store.</p>
+      <p><strong>MSIX on Windows.</strong> Native speech recognition requires an installed package identity — that’s what forces the MSIX format, not fashion.</p>
+      <p><strong>Audio never touches Gemini.</strong> The OS engine is good and already privileged; routing voice to a cloud model would add latency, cost, and a privacy liability for no quality win.</p>
+      <p><strong>Short, vague user errors; rich-in-kind internal codes.</strong> User-facing strings stay concise; diagnostics record operation names, error categories, and non-sensitive OS codes only.</p>
+      <p><strong>Vite-only harness for UI.</strong> <code>bun dev</code> renders all four surfaces with mock bridges (append <code>?state=listening|processing|success|error</code> for Flow Bar states) so UI work never needs OS integration or a real key.</p>
+
+      <h2 id="conventions">Conventions</h2>
+      <table>
+        <thead><tr><th>Rule</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Logging</td><td>Never log selections, transcripts, responses, clipboard, or credentials.</td></tr>
+          <tr><td>Frontend</td><td>Reducers + <code>nativeBridge</code>; generation counters to drop stale async results.</td></tr>
+          <tr><td>Rust</td><td>OS calls stay in <code>platform/</code>; everything else goes through adapters.</td></tr>
+          <tr><td>Markdown</td><td>Render AI output only through <code>SafeMarkdown</code>.</td></tr>
+          <tr><td>Theming</td><td>Design tokens in <code>globals.css</code>; <code>data-theme</code> / <code>data-platform</code> on root.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="workflow">Dev workflow</h2>
+      <pre><code>bun install
+bun tauri dev     # full app (needs Xcode / VS Build Tools + OS perms)
+
+bun dev           # Vite-only UI harness, no OS integration
+bun typecheck && bun lint && bun test
+bun test:ui       # Playwright; isolated port: KIVO_UI_TEST_PORT=1437 bun run test:ui
+bun check:rust && cargo test --manifest-path src-tauri/Cargo.toml</code></pre>
+      <p>Physical testing on <strong>both</strong> systems is required before a release: Fn/Globe handling, Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party apps, and signing.</p>
+
+      <h2 id="releases">Releases &amp; updates</h2>
+      <p>Pushing an <code>app-v*</code> tag runs <code>.github/workflows/release.yml</code> (macOS + Windows artifacts, drafted GitHub Release). <code>bun run prepare:release</code> generates the ignored release-only Tauri config and injects the updater public key — normal local builds have no trusted updater key on purpose. Configure <code>TAURI_UPDATER_PUBKEY</code>, <code>TAURI_SIGNING_PRIVATE_KEY (+_PASSWORD)</code>, Apple signing/notarization secrets, and <code>WINDOWS_CERTIFICATE_BASE64 / _PASSWORD / WINDOWS_PUBLISHER</code> before tagging. Never commit updater private keys or certificates.</p>
+
+      <div class="pager">
+        <a href="docs.html"><small>← Back to</small><strong>User guide</strong></a>
+        <a href="index.html"><small>Next →</small><strong>Landing page</strong></a>
+      </div>
+    </article>
+  </div>
+
+  <footer>
+    <div class="wrap footer__inner">
+      <a class="brand" href="index.html" style="font-size:15px">
+        <span class="brand__mark" aria-hidden="true" style="width:24px;height:24px">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 5v14M11 5v14M16 8v8M21 10v4"/></svg>
+        </span>
+        Kivo
+      </a>
+      <span>© <span data-year>2026</span> Kivo.</span>
+      <nav aria-label="Footer">
+        <a href="index.html">Home</a>
+        <a href="docs.html">Docs</a>
+        <a href="dev.html" aria-current="page">Developers</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script src="site.js"></script>
+</body>
+</html>

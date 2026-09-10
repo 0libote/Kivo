@@ -4,6 +4,10 @@ Kivo is a small background desktop utility for system-wide dictation and focused
 
 Kivo has no account system, telemetry, hosted backend, or provider abstraction. Text is sent directly to Google's Gemini API only for an action the user invokes. API keys are stored in macOS Keychain or Windows Credential Manager and are never returned to the webview.
 
+## Website
+
+The `website/` folder holds the static landing page and docs site (`index.html`, `docs.html`, `dev.html`). It has no build step — preview it with `python3 -m http.server -d website 8000` and deploy the folder directly to Cloudflare Pages (framework preset `None`, empty build command, output directory `website`). See `website/README.md` for details.
+
 ## Supported systems
 
 - macOS 26 or later, distributed directly as a signed and notarized application. The App Sandbox is intentionally disabled because system-wide Accessibility integration is incompatible with it.
