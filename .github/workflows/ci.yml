@@ -18,11 +18,11 @@ on:
 permissions:
   contents: read
 
-# Cancel outdated PR runs; main pushes queue (cancel=false) so the
-# `continuous` beta release never races itself.
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+# NOTE: no workflow-level concurrency. An earlier revision had
+# `group: CI & Build-<ref>` with cancel-in-progress on PRs only, and the
+# beta jobs never started on green main pushes/dispatches while it was
+# present. Temporary removal to isolate the cause; will restore equivalent
+# protection (scoped so it cannot starve betas) once identified.
 
 jobs:
   frontend:
