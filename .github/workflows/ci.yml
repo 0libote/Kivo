@@ -117,14 +117,20 @@ jobs:
   dep-review:
     name: Review PR dependency changes
     needs: [frontend, native]
-    if: github.event_name == 'pull_request'
+    # Deliberately no job-level `if`: this job must complete (never skip)
+    # on every event. When it skipped off-PR, downstream
+    # `needs.security-gate.outputs.*` comparisons evaluated false at
+    # schedule time even after the gate succeeded with correct outputs
+    # (verified empirically), starving the beta jobs. The action itself
+    # stays PR-only via the step guard; off-PR the job is checkout + no-op.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+      - if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   # Aggregator: keeps one required check and one `needs` target for the beta
   # builds. codeql/audit run on every event and must be `success` — a
@@ -177,11 +183,11 @@ jobs:
   macos-beta:
     needs: [frontend, native, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
-    # NOTE: no job-level concurrency here (see windows-beta). An earlier
-    # revision had `group: continuous-prerelease` on both beta jobs and
-    # they never started (always skipped) on green main pushes or
-    # dispatches. Cross-run `continuous` release races are covered by the
-    # workflow-level concurrency (same workflow+ref queues whole runs).
+    # NOTE: no job-level concurrency yet. The `continuous-prerelease`
+    # group lived here before and was removed during diagnosis (it proved
+    # innocent — the real starvation cause was dep-review skipping, fixed
+    # above). Re-add it once betas are observed starting, to serialize
+    # concurrent runs racing the `continuous` delete/create/upload.
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
