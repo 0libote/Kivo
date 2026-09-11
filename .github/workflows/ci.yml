@@ -2,7 +2,11 @@ name: CI & Build
 
 # Unified pipeline: CI checks -> code/security review -> unsigned beta build.
 #
-# - pull_request: runs CI + review only (build jobs are skipped).
+# - pull_request: runs CI + review only (build jobs are skipped), except the
+#   approval-gated `windows-bundle-pr` job: a maintainer adds the
+#   `test-windows-build` label as the approval (labels need write access, so
+#   the label IS the approval, even for owner commits) to get a real Windows
+#   installer for that PR.
 # - push to main / workflow_dispatch: runs CI, then review, then the rolling
 #   unsigned beta (continuous pre-release) only if everything ahead passes.
 # Takes longer end-to-end, but a red check anywhere stops the build.
@@ -39,6 +43,38 @@ jobs:
       - run: bun test
       - run: bun run build
 
+  frontend-windows:
+    name: Frontend checks (Windows)
+    # JavaScript is portable, but paths, line endings, and toolchain behavior
+    # still differ on Windows. Typecheck + unit tests only; lint and the web
+    # build stay on the ubuntu `frontend` job so they are not paid for twice.
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun typecheck
+      - run: bun test
+
+  packaging:
+    name: Packaging parity gate
+    # Fast static check (seconds, no compile) that the macOS and Windows
+    # packaging metadata agree: versions, MSIX floor/identity, icons,
+    # updater endpoints. The real bundle builds only run on main/tags, so
+    # this gate is what stops a packaging breakage from merging in a PR.
+    # No install step: scripts/check-packaging.ts uses node builtins only.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun run check:packaging
+
   native:
     strategy:
       fail-fast: false
@@ -65,8 +101,12 @@ jobs:
   # Automated code review / security gates. Each gate runs independently so
   # one failure never hides the signal from the others. The `security-gate`
   # aggregator must pass before any beta build starts. It fails the pipeline
-  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), UI
-  # test failures, or risky PR dependencies.
+  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo),
+  # packaging drift between macOS and Windows metadata, UI test failures,
+  # or risky PR dependencies.
+  # NOTE: CodeQL only scans javascript-typescript (it has no Rust support);
+  # Rust review is clippy -D warnings plus cargo-audit in the `native` and
+  # `audit` jobs, enforced on both macos-latest and windows-latest.
   e2e:
     name: UI tests (Playwright)
     runs-on: ubuntu-latest
@@ -161,13 +201,14 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   # Aggregator: keeps one required check and one `needs` target for the beta
-  # builds. codeql/audit/e2e run on every event and must be `success` — a
-  # `skipped` there means an upstream CI job failed and must not look
-  # green. dep-review completes (never skips) on every event: success on
-  # PRs, no-op success elsewhere — see its note about downstream outputs.
+  # builds. codeql/audit/e2e/packaging run on every event and must be
+  # `success` — a `skipped` there means an upstream CI job failed and must
+  # not look green. dep-review completes (never skips) on every event:
+  # success on PRs, no-op success elsewhere — see its note about downstream
+  # outputs.
   security-gate:
     name: Code review / security gate
-    needs: [codeql, audit, e2e, dep-review]
+    needs: [codeql, audit, e2e, dep-review, packaging]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -177,7 +218,7 @@ jobs:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}"; do
+          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}" "packaging:${{ needs.packaging.result }}"; do
             echo "$gate"
             result="${gate##*:}"
             if [ "$result" != "success" ]; then
@@ -317,3 +358,45 @@ jobs:
           # Forward slashes: PowerShell accepts them and they avoid YAML
           # backslash-escape confusion.
           gh release upload continuous "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
+
+  windows-bundle-pr:
+    name: Windows bundle build (approval-gated)
+    # Approval model: PRs do NOT build the Windows installer by default.
+    # A maintainer approves a build by adding the `test-windows-build`
+    # label — applying labels requires write access, so the label IS the
+    # approval, even for owner commits. Removing the label cancels queued
+    # runs. The unsigned .exe is kept as a short-lived run artifact for
+    # manual smoke-testing only, never attached to a release. No secrets
+    # are used, so this is also safe on forks.
+    needs: [frontend, frontend-windows, native, packaging]
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-windows-build')
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      # Same beta-only fast release tuning as windows-beta: this is a smoke
+      # check, not a shippable artifact.
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+      CARGO_PROFILE_RELEASE_STRIP: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check:packaging
+      - name: Build unsigned NSIS installer (approval-gated PR check)
+        run: bun tauri build --bundles nsis
+      - name: Upload installer for manual smoke-testing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-windows-nsis-pr
+          retention-days: 7
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe

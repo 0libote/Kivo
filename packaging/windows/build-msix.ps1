@@ -9,6 +9,11 @@ param(
 $ErrorActionPreference = "Stop"
 $RepositoryRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $Version = (Get-Content (Join-Path $RepositoryRoot "package.json") | ConvertFrom-Json).version
+# MSIX Identity versions must be numeric X.Y.Z.W. Reject anything else here
+# instead of shipping a manifest whose version silently failed to update.
+if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+  throw "package.json version '$Version' is not X.Y.Z, so no valid MSIX package version can be derived."
+}
 $PackageVersion = "$Version.0"
 $Stage = Join-Path $RepositoryRoot "src-tauri\target\msix-stage"
 $Output = Join-Path $RepositoryRoot "src-tauri\target\release\bundle\msix\Kivo_${Version}_$Architecture.msix"
@@ -33,8 +38,16 @@ try {
 
   Copy-Item "src-tauri\target\release\kivo.exe" (Join-Path $Stage "Kivo.exe")
   $manifest = Get-Content "packaging\windows\AppxManifest.xml" -Raw
-  $manifest = $manifest.Replace('Version="0.1.0.0"', "Version=`"$PackageVersion`"")
-  $manifest = $manifest.Replace('Publisher="CN=0libote"', "Publisher=`"$Publisher`"")
+  # Fail loudly when the placeholders drift: a silent no-op here previously
+  # shipped MSIX packages with a stale identity version or publisher.
+  $manifest = $manifest -replace 'Version="\d+\.\d+\.\d+\.\d+"', "Version=`"$PackageVersion`""
+  if ($manifest -notmatch [regex]::Escape("Version=`"$PackageVersion`"")) {
+    throw "AppxManifest.xml has no numeric Identity Version to stamp with $PackageVersion."
+  }
+  $manifest = $manifest -replace 'Publisher="CN=[^"]*"', "Publisher=`"$Publisher`""
+  if ($manifest -notmatch [regex]::Escape("Publisher=`"$Publisher`"")) {
+    throw "AppxManifest.xml has no Publisher to stamp with $Publisher."
+  }
   Set-Content -Path (Join-Path $Stage "AppxManifest.xml") -Value $manifest -Encoding UTF8
   Copy-Item "src-tauri\icons\StoreLogo.png" (Join-Path $Stage "Assets\StoreLogo.png")
   Copy-Item "src-tauri\icons\Square44x44Logo.png" (Join-Path $Stage "Assets\Square44x44Logo.png")

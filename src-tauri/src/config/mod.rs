@@ -38,6 +38,7 @@ impl AppSettings {
         }
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self.general.validate()?;
+        self.dictation.migrate_foreign_default();
         self.dictation.validate()?;
         self.writing_tools.normalize();
         Ok(self)
@@ -104,6 +105,24 @@ impl Default for DictationSettings {
 }
 
 impl DictationSettings {
+    /// A settings file carried over from the other desktop OS keeps its
+    /// dictation shortcut, but the native hold shortcuts are OS-exclusive:
+    /// "Fn" only exists on macOS and "Ctrl+Meta" only on Windows. A foreign
+    /// native default would fail registration and leave dictation silently
+    /// dead, so migrate exactly those while custom shortcuts (handled by the
+    /// portable global-shortcut plugin on both platforms) pass through.
+    fn migrate_foreign_default(&mut self) {
+        #[cfg(target_os = "windows")]
+        if self.shortcut.accelerator == "Fn" {
+            self.shortcut = ShortcutBinding::dictation_default();
+        }
+        #[cfg(target_os = "macos")]
+        if self.shortcut.accelerator == "Ctrl+Meta" || self.shortcut.accelerator == "Control+Super"
+        {
+            self.shortcut = ShortcutBinding::dictation_default();
+        }
+    }
+
     fn validate(&self) -> Result<(), SettingsError> {
         self.shortcut.validate()?;
         if let Some(id) = &self.microphone_id
@@ -363,7 +382,7 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 mod tests {
     use std::{env, fs, time::SystemTime};
 
-    use super::{AppSettings, SettingsRepository, ThemePreference};
+    use super::{AppSettings, SettingsRepository, ShortcutBinding, ThemePreference};
     use crate::ai::WritingAction;
 
     fn temporary_settings_path() -> std::path::PathBuf {
@@ -396,6 +415,38 @@ mod tests {
         assert!(!persisted.to_ascii_lowercase().contains("api_key"));
         assert!(!persisted.to_ascii_lowercase().contains("apikey"));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn foreign_native_dictation_shortcut_migrates_to_the_host_default() {
+        // The native hold shortcut is OS-exclusive ("Fn" on macOS,
+        // "Ctrl+Meta" on Windows); a settings file carried across platforms
+        // must fall back to the host default instead of registering nothing.
+        // Each CI platform executes its own branch of this test.
+        let mut settings = AppSettings::default();
+        #[cfg(target_os = "macos")]
+        {
+            settings.dictation.shortcut = ShortcutBinding::new("Ctrl+Meta");
+        }
+        #[cfg(target_os = "windows")]
+        {
+            settings.dictation.shortcut = ShortcutBinding::new("Fn");
+        }
+        let migrated = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            migrated.dictation.shortcut,
+            super::ShortcutBinding::dictation_default()
+        );
+
+        // Custom shortcuts go through the portable global-shortcut plugin on
+        // both platforms and must survive normalization untouched.
+        let mut settings = AppSettings::default();
+        settings.dictation.shortcut = ShortcutBinding::new("Ctrl+Alt+D");
+        let migrated = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            migrated.dictation.shortcut,
+            ShortcutBinding::new("Ctrl+Alt+D")
+        );
     }
 
     #[test]

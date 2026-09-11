@@ -57,7 +57,13 @@ use crate::security::{CredentialError, CredentialStore, SecretString};
 use super::*;
 
 static NEXT_SELECTION_TOKEN: AtomicU64 = AtomicU64::new(1);
+/// The low-level keyboard hook has nowhere to carry per-registration state,
+/// so the active monitor thread publishes its callback here. At most one
+/// native monitor is active; overlapping lifetimes during re-registration are
+/// disambiguated by `SHORTCUT_GENERATION` so a stale thread's cleanup can
+/// never wipe a newer registration.
 static SHORTCUT_CONTEXT: OnceLock<Mutex<Option<ShortcutContext>>> = OnceLock::new();
+static SHORTCUT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -318,6 +324,13 @@ impl PlatformImpl {
                 "start_speech",
                 "Selecting a non-default microphone is not supported by Windows Speech.",
             ));
+        }
+        // WinRT speech needs a COM apartment on this thread. Dictation runs
+        // on Tokio workers that are never initialized, so initialize here; a
+        // pre-existing different-model init (RPC_E_CHANGED_MODE) is left
+        // untouched and the error ignored.
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
         }
         let recognizer = match options.language.as_deref() {
             Some(language) => {
@@ -753,6 +766,7 @@ struct ShortcutContext {
     callback: HoldShortcutCallback,
     active: bool,
     suppress: bool,
+    generation: u64,
 }
 
 struct WindowsShortcutRegistration {
@@ -762,6 +776,9 @@ struct WindowsShortcutRegistration {
 
 impl WindowsShortcutRegistration {
     fn start(callback: HoldShortcutCallback, suppress: bool) -> PlatformResult<Self> {
+        // Claimed before spawning: the shell starts the replacement before
+        // stopping the previous monitor, so generations strictly order them.
+        let generation = SHORTCUT_GENERATION.fetch_add(1, Ordering::AcqRel);
         let (sender, receiver) = std::sync::mpsc::channel();
         let thread = thread::spawn(move || unsafe {
             let thread_id = ::windows::Win32::System::Threading::GetCurrentThreadId();
@@ -774,13 +791,21 @@ impl WindowsShortcutRegistration {
                             callback,
                             active: false,
                             suppress,
+                            generation,
                         });
                     }
                     let _ = sender.send(Ok(thread_id));
                     let mut message = MSG::default();
                     while GetMessageW(&mut message, None, 0, 0).as_bool() {}
                     let _ = UnhookWindowsHookEx(hook);
-                    if let Ok(mut state) = context.lock() {
+                    // Only clear what we published: an older thread exiting
+                    // after a re-registration must leave the newer monitor's
+                    // callback in place, otherwise the hotkey silently dies.
+                    if let Ok(mut state) = context.lock()
+                        && state
+                            .as_ref()
+                            .is_some_and(|current| current.generation == generation)
+                    {
                         *state = None;
                     }
                 }
