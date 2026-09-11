@@ -65,8 +65,34 @@ jobs:
   # Automated code review / security gates. Each gate runs independently so
   # one failure never hides the signal from the others. The `security-gate`
   # aggregator must pass before any beta build starts. It fails the pipeline
-  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), or
-  # risky PR dependencies.
+  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo), UI
+  # test failures, or risky PR dependencies.
+  e2e:
+    name: UI tests (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+      - name: Run UI tests
+        run: bun run test:ui
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          retention-days: 7
+          path: |
+            playwright-report/
+            test-results/
+
   codeql:
     name: Code review (CodeQL)
     needs: [frontend, native]
@@ -133,13 +159,13 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
   # Aggregator: keeps one required check and one `needs` target for the beta
-  # builds. codeql/audit run on every event and must be `success` — a
+  # builds. codeql/audit/e2e run on every event and must be `success` — a
   # `skipped` there means an upstream CI job failed and must not look
-  # green. dep-review only runs on pull requests, so `skipped` elsewhere
-  # is the expected pass.
+  # green. dep-review completes (never skips) on every event: success on
+  # PRs, no-op success elsewhere — see its note about downstream outputs.
   security-gate:
     name: Code review / security gate
-    needs: [codeql, audit, dep-review]
+    needs: [codeql, audit, e2e, dep-review]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -149,7 +175,7 @@ jobs:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}"; do
+          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}"; do
             echo "$gate"
             result="${gate##*:}"
             if [ "$result" != "success" ]; then
