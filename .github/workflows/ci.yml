@@ -80,7 +80,9 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps chromium
+        # Local binary (locked via bun.lock), not bunx, so the install
+        # always uses exactly the pinned @playwright/test release.
+        run: ./node_modules/.bin/playwright install --with-deps chromium
       - name: Run UI tests
         run: bun run test:ui
       - name: Upload failure artifacts
