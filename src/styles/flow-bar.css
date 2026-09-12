@@ -4,13 +4,13 @@
   height: 40px;
   display: grid;
   place-items: center;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border: 0;
   border-radius: 20px;
   color: var(--text);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
-  box-shadow: var(--shadow-overlay);
-  backdrop-filter: blur(22px) saturate(1.35);
-  -webkit-backdrop-filter: blur(22px) saturate(1.35);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  box-shadow: none;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
   pointer-events: auto;
   overflow: hidden;
   transform-origin: center bottom;

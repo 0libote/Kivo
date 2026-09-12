@@ -484,6 +484,19 @@ pub(crate) async fn begin_dictation(app: &AppHandle, core: &AppCore) -> Result<(
 
 pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandError> {
     let core = app.state::<AppCore>();
+    // Show instantly at the cursor before the slow selection capture below.
+    // Capture can take ~2s on the clipboard-fallback path; the popup renders
+    // a loading state until the writing-context event arrives.
+    let fast_cursor = app
+        .try_state::<Arc<PlatformServices>>()
+        .and_then(|platform| platform.cursor_position().ok())
+        .map(|point| crate::text::ScreenPoint {
+            x: point.x,
+            y: point.y,
+        });
+    let _ = size_writing_surface(app, "menu");
+    position_writing_surface(app, fast_cursor, None);
+    let _ = show_surface(app, "writing-tools", true);
     match core.open_writing_tools().await {
         Ok(context) => {
             // Size before positioning: placement clamps against the real
@@ -658,9 +671,11 @@ pub(crate) fn show_surface(
 }
 
 fn position_flow_bar(app: &AppHandle, window: &WebviewWindow) {
+    // Cursor-only on purpose: the bar is bottom-centered on the active
+    // monitor, so the AX selection query only added latency here.
     let cursor = app
         .try_state::<Arc<PlatformServices>>()
-        .and_then(|platform| platform.get_cursor_or_selection_position().ok());
+        .and_then(|platform| platform.cursor_position().ok());
     let monitor = cursor
         .and_then(|point| {
             window.available_monitors().ok().and_then(|monitors| {

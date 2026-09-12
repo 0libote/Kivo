@@ -24,10 +24,10 @@ function getActiveDefinition(activeAction: WritingActionId | null): { label: str
 }
 
 const MENU_MOVEMENT: Readonly<Record<string, number>> = {
+  ArrowDown: 1,
   ArrowRight: 1,
+  ArrowUp: -1,
   ArrowLeft: -1,
-  ArrowDown: 2,
-  ArrowUp: -2,
 };
 
 function isClosableMode(mode: WritingToolsState["mode"]): boolean {
@@ -216,7 +216,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         className="writing-popup"
         data-mode={state.mode}
         onCancel={(event) => event.preventDefault()}
-        open={state.mode !== "closed"}
+        open
       >
         <PopupContent state={state} actions={actions} settings={settings} close={close} dispatch={dispatch} runAction={runAction} summarizeEnabled={summarizeEnabled} />
       </dialog>
@@ -237,6 +237,8 @@ interface PopupContentProps {
 function PopupContent({ state, actions, settings, close, dispatch, runAction, summarizeEnabled }: PopupContentProps) {
   const activeDefinition = getActiveDefinition(state.activeAction);
   switch (state.mode) {
+    case "closed":
+      return <OpeningView />;
     case "menu":
       return (
         <MenuView
@@ -303,26 +305,16 @@ function MenuView(props: MenuViewProps) {
   const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText, summarizeEnabled } = props;
   return (
     <div className="writing-menu">
-      <header className="writing-popup__header" data-tauri-drag-region>
-        <span>Writing Tools</span>
+      <div className="writing-command" data-tauri-drag-region>
+        <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
+          <Icon name="pencil" size={15} />
+          <span>Describe your change…</span>
+          <kbd>↵</kbd>
+        </button>
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
           <Icon name="close" size={14} />
         </button>
-      </header>
-      {allowManualText ? (
-        <div className="writing-source">
-          <label htmlFor="writing-source-text">
-            {applicationName ? `Selected in ${applicationName}` : "Selected text"}
-          </label>
-          <textarea
-            id="writing-source-text"
-            onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
-            rows={3}
-            spellCheck
-            value={sourceText}
-          />
-        </div>
-      ) : null}
+      </div>
       <div aria-label="Writing actions" className="writing-actions" role="listbox">
         {actions.map((action, index) => (
           <button
@@ -341,11 +333,21 @@ function MenuView(props: MenuViewProps) {
         ))}
       </div>
       {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText={false} /> : null}
-      <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
-        <Icon name="pencil" size={15} />
-        <span>Describe your change…</span>
-        <kbd>↵</kbd>
-      </button>
+      {allowManualText ? (
+        <div className="writing-source">
+          <label htmlFor="writing-source-text">
+            {applicationName ? `Selected in ${applicationName}` : "Selected text"}
+          </label>
+          <textarea
+            id="writing-source-text"
+            onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
+            rows={3}
+            spellCheck
+            value={sourceText}
+          />
+        </div>
+      ) : null}
+      <p className="writing-hint">↑↓ to choose · ↵ to run · Esc to close</p>
     </div>
   );
 }
@@ -437,6 +439,14 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
         ↵
       </button>
     </form>
+  );
+}
+
+function OpeningView() {
+  return (
+    <div aria-live="polite" className="writing-opening">
+      <Spinner label="Opening Writing Tools" />
+    </div>
   );
 }
 

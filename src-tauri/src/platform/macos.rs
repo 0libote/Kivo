@@ -242,20 +242,6 @@ impl PlatformImpl {
         )
     }
 
-    pub(super) fn get_cursor_or_selection_position(&self) -> PlatformResult<ScreenPoint> {
-        ensure_accessibility("get_cursor_or_selection_position")?;
-        let (_, element) = focused_ax_elements("get_cursor_or_selection_position")?;
-        selection_bounds(element.as_ptr())
-            .map(ScreenRect::anchor_below)
-            .ok_or_else(|| {
-                PlatformError::new(
-                    PlatformErrorKind::NotFound,
-                    "get_cursor_or_selection_position",
-                    "The focused application did not expose the caret position.",
-                )
-            })
-    }
-
     pub(super) fn permission_status(
         &self,
         permission: PermissionKind,

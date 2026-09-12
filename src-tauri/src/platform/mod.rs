@@ -92,15 +92,6 @@ pub struct ScreenRect {
     pub height: f64,
 }
 
-impl ScreenRect {
-    pub fn anchor_below(self) -> ScreenPoint {
-        ScreenPoint {
-            x: self.x + self.width / 2.0,
-            y: self.y + self.height,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActiveApplication {
@@ -307,10 +298,6 @@ impl PlatformServices {
             return Ok(());
         }
         self.implementation.insert_text_at_cursor(text)
-    }
-
-    pub fn get_cursor_or_selection_position(&self) -> PlatformResult<ScreenPoint> {
-        self.implementation.get_cursor_or_selection_position()
     }
 
     pub fn permission_status(

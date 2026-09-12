@@ -49,10 +49,6 @@ impl PlatformImpl {
         Err(unsupported("insert_text_at_cursor"))
     }
 
-    pub(super) fn get_cursor_or_selection_position(&self) -> PlatformResult<ScreenPoint> {
-        Err(unsupported("get_cursor_or_selection_position"))
-    }
-
     pub(super) fn permission_status(
         &self,
         _permission: PermissionKind,

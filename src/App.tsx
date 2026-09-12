@@ -5,17 +5,13 @@ import { OnboardingWindow } from "./features/onboarding/OnboardingWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
 import { WritingToolsPopup } from "./features/writing-tools/WritingToolsPopup";
 import { useSystemPreferences } from "./hooks/useSystemPreferences";
-import { nativeBridge } from "./platform/native";
-import type { AppContext, Platform } from "./types";
-
-function browserPlatform(): Platform {
-  return /Windows/i.test(navigator.userAgent) ? "windows" : "macos";
-}
+import { nativeBridge, initialAppContext } from "./platform/native";
+import type { AppContext } from "./types";
 
 export function App() {
-  const [context, setContext] = useState<AppContext | null>(null);
-  const [bootstrapError, setBootstrapError] = useState(false);
-  const platform = context?.platform ?? browserPlatform();
+  // ponytail: render the window-label surface immediately; context hydrates async.
+  const [context, setContext] = useState<AppContext>(() => initialAppContext());
+  const platform = context.platform;
   const { settings, loading, update } = useSystemPreferences(platform);
 
   useEffect(() => {
@@ -24,22 +20,16 @@ export function App() {
       .then((next) => {
         if (active) setContext(next);
       })
-      .catch(() => active && setBootstrapError(true));
+      .catch(() => {});
     return () => {
       active = false;
     };
   }, []);
 
   useEffect(() => {
-    if (!context) return;
     document.documentElement.dataset.platform = context.platform;
     document.documentElement.dataset.surface = context.surface;
   }, [context]);
-
-  if (bootstrapError) {
-    return <main className="fatal-surface"><div><strong>Kivo couldn’t start.</strong><span>Please reopen the application.</span></div></main>;
-  }
-  if (!context) return <main aria-label="Loading Kivo" className="bootstrap-surface" />;
 
   let surface: React.ReactNode;
   switch (context.surface) {

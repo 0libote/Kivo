@@ -1,14 +1,19 @@
 .writing-stage { width: 100%; height: 100%; padding: 2px; background: transparent; }
 dialog.writing-popup { margin: 0; padding: 0; max-width: none; }
 dialog.writing-popup:not([open]) { display: none; }
-.writing-popup { width: 100%; max-height: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--shadow-overlay); backdrop-filter: blur(24px) saturate(1.2); -webkit-backdrop-filter: blur(24px) saturate(1.2); animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; }
+.writing-popup { width: 100%; max-height: 100%; overflow: hidden; border: 0; border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface) 78%, transparent); box-shadow: none; backdrop-filter: blur(26px) saturate(1.4); -webkit-backdrop-filter: blur(26px) saturate(1.4); animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
+.writing-popup textarea, .writing-popup input { user-select: text; }
 @keyframes writing-enter { from { opacity: 0; transform: translateY(-3px) scale(.985); } to { opacity: 1; transform: none; } }
 .writing-popup__header { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 0 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11.5px; font-weight: 600; }
-.writing-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 6px; }
-.writing-action { height: 34px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
+.writing-command { display: flex; align-items: center; gap: 2px; padding: 8px 6px 4px 8px; }
+.writing-command .custom-prompt { flex: 1; margin: 0; }
+.writing-command .icon-button { flex: 0 0 auto; }
+.writing-actions { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 4px; }
+.writing-action { min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; }
 .writing-action:hover, .writing-action[data-selected="true"] { background: var(--selected); }
 .writing-action .icon { color: var(--text-secondary); }
-.custom-prompt { width: calc(100% - 12px); min-height: 34px; display: flex; align-items: center; gap: 9px; margin: 0 6px 6px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
+.custom-prompt { min-height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
+.custom-prompt:hover { color: var(--text); background: var(--hover); }
 .custom-prompt span { flex: 1; }
 .custom-prompt kbd { font-size: 11px; color: var(--text-tertiary); }
 .custom-instruction { height: 50px; display: grid; grid-template-columns: 28px 1fr 30px; gap: 4px; align-items: center; padding: 7px; }
@@ -34,13 +39,15 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-error strong, .writing-error span { display: block; }
 .writing-error span { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
 .writing-error__actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
-.writing-source { padding: 8px 8px 0; }
+.writing-source { padding: 6px 8px 0; }
 .writing-source label { display: block; margin: 0 4px 4px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
-.writing-source textarea { width: 100%; min-height: 56px; max-height: 110px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
+.writing-source textarea { width: 100%; min-height: 56px; max-height: 110px; padding: 7px 9px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
 .writing-source textarea:focus { outline: none; border-color: var(--accent); }
+.writing-hint { margin: 0; padding: 6px 14px 10px; color: var(--text-tertiary); font-size: 11px; }
+.writing-opening { height: 64px; display: grid; place-items: center; color: var(--text-secondary); }
 .writing-chat { display: flex; flex-direction: column; }
 .writing-chat__hint { margin: 8px 12px 0; color: var(--text-secondary); font-size: 12px; }
-.writing-chat textarea { margin: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; resize: none; }
+.writing-chat textarea { margin: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; resize: none; }
 .writing-chat textarea:focus { outline: none; border-color: var(--accent); }
 .writing-chat__footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px 8px; }
 
@@ -55,7 +62,7 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-summary { max-height: calc(100vh - 6px); overflow-y: auto; }
 .writing-summary__input { display: grid; gap: 7px; padding: 12px; }
 .writing-summary__input label { color: var(--text-secondary); font-size: 12px; }
-.writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }
+.writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }
 .writing-summary__input input:focus, .writing-summary__input textarea:focus { outline: none; border-color: var(--accent); }
 .writing-summary__input p { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
 .writing-summary__footer { display: flex; justify-content: space-between; padding: 0 12px 12px; }

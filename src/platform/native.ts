@@ -359,4 +359,17 @@ function delay(milliseconds: number) {
 
 export const nativeBridge: NativeBridge = window.__TAURI_INTERNALS__ ? new TauriBridge() : new MockBridge();
 
+export function initialAppContext(): AppContext {
+  // Synchronous guess so each window paints on load instead of waiting for
+  // the get_app_context round-trip; hydrated with real values right after.
+  const platform = detectedPlatform();
+  let surface: Surface;
+  try {
+    surface = surfaceFromLabel(window.__TAURI_INTERNALS__ ? getCurrentWindow().label : undefined);
+  } catch {
+    surface = surfaceFromLabel(undefined);
+  }
+  return { platform, surface, version: "", development: false, paused: false };
+}
+
 export { surfaceFromLabel };

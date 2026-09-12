@@ -223,17 +223,6 @@ impl PlatformImpl {
         send_unicode(text, "insert_text_at_cursor")
     }
 
-    pub(super) fn get_cursor_or_selection_position(&self) -> PlatformResult<ScreenPoint> {
-        let (_, _, bounds) = selected_text()?;
-        bounds.map(ScreenRect::anchor_below).ok_or_else(|| {
-            PlatformError::new(
-                PlatformErrorKind::NotFound,
-                "get_cursor_or_selection_position",
-                "The active control did not expose the caret position.",
-            )
-        })
-    }
-
     pub(super) fn permission_status(
         &self,
         permission: PermissionKind,
