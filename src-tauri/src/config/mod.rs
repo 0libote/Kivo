@@ -39,6 +39,7 @@ impl AppSettings {
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self.general.validate()?;
         self.dictation.migrate_foreign_default();
+        self.dictation.normalize();
         self.dictation.validate()?;
         self.writing_tools.normalize();
         Ok(self)
@@ -90,6 +91,9 @@ pub struct DictationSettings {
     pub improve_with_ai: bool,
     pub language: LanguagePreference,
     pub sound_feedback: bool,
+    pub tap_enabled: bool,
+    pub hold_enabled: bool,
+    pub hold_threshold_ms: u64,
 }
 
 impl Default for DictationSettings {
@@ -100,6 +104,9 @@ impl Default for DictationSettings {
             improve_with_ai: true,
             language: LanguagePreference::Auto,
             sound_feedback: true,
+            tap_enabled: true,
+            hold_enabled: true,
+            hold_threshold_ms: 350,
         }
     }
 }
@@ -121,6 +128,10 @@ impl DictationSettings {
         {
             self.shortcut = ShortcutBinding::dictation_default();
         }
+    }
+
+    fn normalize(&mut self) {
+        self.hold_threshold_ms = self.hold_threshold_ms.min(5000);
     }
 
     fn validate(&self) -> Result<(), SettingsError> {

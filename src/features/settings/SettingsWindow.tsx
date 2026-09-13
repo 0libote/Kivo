@@ -221,10 +221,19 @@ function DictationSection({
       ? "Fn is best-effort when macOS assigns the Globe key to another action."
       : undefined;
   return (
-    <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release to insert text in the active app.">
+    <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop.">
       <SettingsGroup>
         <SettingRow label="Shortcut" description={shortcutNote}>
           <ShortcutRecorder label="Dictation shortcut" onChange={(dictationShortcut) => save({ dictationShortcut })} platform={context.platform} value={settings.dictationShortcut} />
+        </SettingRow>
+        <SettingRow label="Tap to dictate" description="A quick press starts listening; press again to finish.">
+          <Switch checked={settings.dictationTapEnabled} label="Tap to dictate" onChange={(value) => void save({ dictationTapEnabled: value })} />
+        </SettingRow>
+        <SettingRow label="Hold to dictate" description="Keep the shortcut held while speaking; release to finish.">
+          <Switch checked={settings.dictationHoldEnabled} label="Hold to dictate" onChange={(value) => void save({ dictationHoldEnabled: value })} />
+        </SettingRow>
+        <SettingRow label="Hold threshold" description="How long (ms) a press must last to count as a hold instead of a tap.">
+          <NumberPreference label="Hold threshold" min={0} max={5000} value={settings.dictationHoldThresholdMs} onChange={(value) => save({ dictationHoldThresholdMs: value })} />
         </SettingRow>
         <SettingRow label="Microphone">
           <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={settings.microphoneId ?? ""}>

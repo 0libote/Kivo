@@ -39,6 +39,9 @@ export interface AppSettings {
   improveDictationWithAi: boolean;
   dictationLanguage: string;
   soundFeedback: boolean;
+  dictationTapEnabled: boolean;
+  dictationHoldEnabled: boolean;
+  dictationHoldThresholdMs: number;
   writingShortcut: string;
   enabledWritingActions: WritingActionId[];
   writingPopupAnchor: WritingPopupAnchor;
@@ -152,6 +155,9 @@ export function defaultSettings(platform: Platform): AppSettings {
     improveDictationWithAi: true,
     dictationLanguage: "auto",
     soundFeedback: true,
+    dictationTapEnabled: true,
+    dictationHoldEnabled: true,
+    dictationHoldThresholdMs: 350,
     writingShortcut: platform === "macos" ? "Ctrl+Shift+Space" : "Ctrl+Space",
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
     writingPopupAnchor: "cursor",

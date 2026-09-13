@@ -4,6 +4,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::Instant;
 #[cfg(target_os = "macos")]
 use std::{io::Write, process::Stdio};
 
@@ -30,11 +31,18 @@ use crate::{
 pub(crate) struct ShellState {
     paused: AtomicBool,
     dictation_held: AtomicBool,
+    dictation_press: Mutex<DictationPress>,
     dictation_cancel_epoch: AtomicU64,
     escape_shortcut_registered: AtomicBool,
     pause_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     writing_shortcut: Mutex<Option<String>>,
     dictation_shortcut: Mutex<Option<ActiveDictationShortcut>>,
+}
+
+#[derive(Default)]
+struct DictationPress {
+    started: Option<Instant>,
+    released_ms: Option<u64>,
 }
 
 struct ActiveDictationShortcut {
@@ -72,6 +80,7 @@ impl ShellState {
         Self {
             paused: AtomicBool::new(false),
             dictation_held: AtomicBool::new(false),
+            dictation_press: Mutex::new(DictationPress::default()),
             dictation_cancel_epoch: AtomicU64::new(0),
             escape_shortcut_registered: AtomicBool::new(false),
             pause_item: Mutex::new(None),
@@ -394,7 +403,25 @@ fn dispatch_dictation_event(app: AppHandle, event: HoldShortcutEvent) {
                     return;
                 }
                 shell.dictation_held.store(true, Ordering::Release);
+                if let Ok(mut press) = shell.dictation_press.lock() {
+                    press.started = Some(Instant::now());
+                    press.released_ms = None;
+                }
                 let cancel_epoch = shell.dictation_cancel_epoch.load(Ordering::Acquire);
+                let dictation = core.settings().ok().map(|settings| settings.dictation);
+                let (tap_enabled, hold_enabled, threshold_ms) = dictation
+                    .as_ref()
+                    .map(|dictation| {
+                        (
+                            dictation.tap_enabled,
+                            dictation.hold_enabled,
+                            dictation.hold_threshold_ms,
+                        )
+                    })
+                    .unwrap_or((true, true, 350));
+                if !tap_enabled && !hold_enabled {
+                    return;
+                }
                 if begin_dictation(&app, &core).await.is_ok()
                     && !shell.dictation_held.load(Ordering::Acquire)
                 {
@@ -402,14 +429,67 @@ fn dispatch_dictation_event(app: AppHandle, event: HoldShortcutEvent) {
                         let _ = core.cancel_dictation().await;
                         unregister_cancel_shortcut(&app);
                         sync_idle_flow_bar(&app);
-                    } else {
-                        let _ = finish_dictation(&app, &core).await;
+                        return;
+                    }
+                    // ponytail: a release before the mic is ready defers to the
+                    // tap/hold settings instead of always stopping an empty
+                    // session (which surfaced as "No speech was detected").
+                    let released_ms = shell
+                        .dictation_press
+                        .lock()
+                        .ok()
+                        .and_then(|press| press.released_ms)
+                        .unwrap_or(u64::MAX);
+                    match press_outcome(
+                        press_kind(released_ms, threshold_ms),
+                        tap_enabled,
+                        hold_enabled,
+                    ) {
+                        PressOutcome::Finish => {
+                            let _ = finish_dictation(&app, &core).await;
+                        }
+                        PressOutcome::Cancel => {
+                            let _ = core.cancel_dictation().await;
+                            unregister_cancel_shortcut(&app);
+                            sync_idle_flow_bar(&app);
+                        }
+                        PressOutcome::Stay => {}
                     }
                 }
             }
             HoldShortcutEvent::Released => {
                 shell.dictation_held.store(false, Ordering::Release);
-                let _ = finish_dictation(&app, &core).await;
+                let elapsed_ms = shell
+                    .dictation_press
+                    .lock()
+                    .ok()
+                    .map(|mut press| {
+                        let elapsed = press.started.map(|started| {
+                            started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+                        });
+                        press.released_ms = elapsed;
+                        elapsed.unwrap_or(u64::MAX)
+                    })
+                    .unwrap_or(u64::MAX);
+                let dictation = core.settings().ok().map(|settings| settings.dictation);
+                let (tap_enabled, hold_enabled, threshold_ms) = dictation
+                    .as_ref()
+                    .map(|dictation| {
+                        (
+                            dictation.tap_enabled,
+                            dictation.hold_enabled,
+                            dictation.hold_threshold_ms,
+                        )
+                    })
+                    .unwrap_or((true, true, 350));
+                if press_outcome(
+                    press_kind(elapsed_ms, threshold_ms),
+                    tap_enabled,
+                    hold_enabled,
+                ) == PressOutcome::Finish
+                {
+                    let _ = finish_dictation(&app, &core).await;
+                }
             }
             HoldShortcutEvent::Cancelled => {
                 shell.dictation_held.store(false, Ordering::Release);
@@ -420,6 +500,36 @@ fn dispatch_dictation_event(app: AppHandle, event: HoldShortcutEvent) {
             }
         }
     });
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PressKind {
+    Tap,
+    Hold,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PressOutcome {
+    Stay,
+    Finish,
+    Cancel,
+}
+
+fn press_kind(elapsed_ms: u64, threshold_ms: u64) -> PressKind {
+    if elapsed_ms < threshold_ms {
+        PressKind::Tap
+    } else {
+        PressKind::Hold
+    }
+}
+
+fn press_outcome(kind: PressKind, tap_enabled: bool, hold_enabled: bool) -> PressOutcome {
+    match kind {
+        PressKind::Tap if tap_enabled => PressOutcome::Stay,
+        PressKind::Tap => PressOutcome::Cancel,
+        PressKind::Hold if hold_enabled => PressOutcome::Finish,
+        PressKind::Hold => PressOutcome::Stay,
+    }
 }
 
 fn register_writing_shortcut(
@@ -1408,13 +1518,39 @@ fn window_error(operation: &'static str) -> PlatformError {
 
 #[cfg(test)]
 mod tests {
-    use super::{stable_version_from_tag, version_is_newer};
+    use super::{PressKind, PressOutcome};
+    use super::{press_kind, press_outcome, stable_version_from_tag, version_is_newer};
 
     #[test]
     fn github_release_versions_are_compared_without_lexical_ordering() {
         assert!(version_is_newer("1.10.0", "1.9.9"));
         assert!(!version_is_newer("1.2.3", "1.2.3"));
         assert!(!version_is_newer("not-a-version", "1.2.3"));
+    }
+
+    #[test]
+    fn shortcut_presses_split_into_taps_and_holds() {
+        assert_eq!(press_kind(0, 350), PressKind::Tap);
+        assert_eq!(press_kind(349, 350), PressKind::Tap);
+        assert_eq!(press_kind(350, 350), PressKind::Hold);
+        // Taps toggle (stay listening) while holds finish on release.
+        assert_eq!(
+            press_outcome(PressKind::Tap, true, true),
+            PressOutcome::Stay
+        );
+        assert_eq!(
+            press_outcome(PressKind::Hold, true, true),
+            PressOutcome::Finish
+        );
+        // A disabled gesture never acts: taps vanish, holds become taps.
+        assert_eq!(
+            press_outcome(PressKind::Tap, false, true),
+            PressOutcome::Cancel
+        );
+        assert_eq!(
+            press_outcome(PressKind::Hold, true, false),
+            PressOutcome::Stay
+        );
     }
 
     #[test]

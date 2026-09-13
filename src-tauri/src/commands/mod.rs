@@ -785,6 +785,14 @@ impl From<AppCoreError> for CommandError {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+fn default_hold_threshold_ms() -> u64 {
+    350
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
@@ -797,6 +805,12 @@ pub struct FrontendSettings {
     pub improve_dictation_with_ai: bool,
     pub dictation_language: String,
     pub sound_feedback: bool,
+    #[serde(default = "default_true")]
+    pub dictation_tap_enabled: bool,
+    #[serde(default = "default_true")]
+    pub dictation_hold_enabled: bool,
+    #[serde(default = "default_hold_threshold_ms")]
+    pub dictation_hold_threshold_ms: u64,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
     pub writing_popup_anchor: String,
@@ -828,6 +842,9 @@ impl From<AppSettings> for FrontendSettings {
                 LanguagePreference::Locale { tag } => tag,
             },
             sound_feedback: settings.dictation.sound_feedback,
+            dictation_tap_enabled: settings.dictation.tap_enabled,
+            dictation_hold_enabled: settings.dictation.hold_enabled,
+            dictation_hold_threshold_ms: settings.dictation.hold_threshold_ms,
             writing_shortcut: settings.writing_tools.shortcut.accelerator,
             enabled_writing_actions: settings
                 .writing_tools
@@ -899,6 +916,9 @@ impl TryFrom<FrontendSettings> for AppSettings {
                     }
                 },
                 sound_feedback: settings.sound_feedback,
+                tap_enabled: settings.dictation_tap_enabled,
+                hold_enabled: settings.dictation_hold_enabled,
+                hold_threshold_ms: settings.dictation_hold_threshold_ms,
             },
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
@@ -926,6 +946,9 @@ pub struct SettingsPatch {
     improve_dictation_with_ai: Option<bool>,
     dictation_language: Option<String>,
     sound_feedback: Option<bool>,
+    dictation_tap_enabled: Option<bool>,
+    dictation_hold_enabled: Option<bool>,
+    dictation_hold_threshold_ms: Option<u64>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
     writing_popup_anchor: Option<String>,
@@ -955,6 +978,9 @@ impl SettingsPatch {
         assign!(improve_dictation_with_ai);
         assign!(dictation_language);
         assign!(sound_feedback);
+        assign!(dictation_tap_enabled);
+        assign!(dictation_hold_enabled);
+        assign!(dictation_hold_threshold_ms);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
         assign!(writing_popup_anchor);
