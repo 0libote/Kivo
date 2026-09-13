@@ -335,7 +335,7 @@ function MenuView(props: MenuViewProps) {
         </button>
       </div>
       <div aria-label="Writing actions" className="writing-actions" role="listbox">
-        {actions.slice(0, 3).map(renderAction)}
+        {actions.slice(0, 3).map((action, index) => renderAction(action, index))}
         {actions.length > 3 ? <details className="writing-more" ref={more}><summary>More actions</summary><div role="group" aria-label="More writing actions">{actions.slice(3).map((action, index) => renderAction(action, index + 3))}</div></details> : null}
       </div>
       {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText={false} /> : null}
