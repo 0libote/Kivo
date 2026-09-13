@@ -1,5 +1,5 @@
 .writing-stage { width: 100%; height: 100%; padding: 2px; background: transparent; }
-dialog.writing-popup { margin: 0; padding: 0; max-width: none; }
+dialog.writing-popup { position: relative; inset: auto; margin: 0; padding: 0; max-width: none; }
 dialog.writing-popup:not([open]) { display: none; }
 .writing-popup { width: 100%; max-height: calc(var(--writing-max-height, 460px) - 4px); overflow: hidden; border: 0; border-radius: var(--radius-panel); background: var(--surface); box-shadow: none; animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
 .writing-popup textarea, .writing-popup input { user-select: text; }

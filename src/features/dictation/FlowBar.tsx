@@ -107,7 +107,7 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
                 {levels.map((bar) => (
                   <i key={bar.id} style={{ "--level": bar.value } as React.CSSProperties} />
                 ))}
-              </span> : <span className="flow-bar__listening">Listening</span>}
+              </span> : <><span aria-hidden="true" className="flow-bar__input-level" style={{ "--level": state.level } as React.CSSProperties}><i /><i /><i /></span><span className="flow-bar__listening">Listening</span></>}
               <button className="flow-bar__stop" aria-label="Finish dictation" onClick={() => void nativeBridge.stopDictation()} type="button"><span /></button>
             </>
           ) : null}

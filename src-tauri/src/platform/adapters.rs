@@ -174,11 +174,23 @@ impl PlatformSpeechEngine {
 impl SpeechEngine for PlatformSpeechEngine {
     fn microphones(&self) -> SpeechFuture<'_, Result<Vec<MicrophoneDevice>, SpeechError>> {
         Box::pin(async {
-            Ok(vec![MicrophoneDevice {
+            let devices = std::iter::once(MicrophoneDevice {
                 id: "default".into(),
                 name: "System Default".into(),
                 is_default: true,
-            }])
+            });
+            #[cfg(target_os = "windows")]
+            let devices = devices.chain(
+                super::windows_speech::microphones()
+                    .map_err(speech_error_from_platform)?
+                    .into_iter()
+                    .map(|(id, name)| MicrophoneDevice {
+                        id,
+                        name,
+                        is_default: false,
+                    }),
+            );
+            Ok(devices.collect())
         })
     }
 

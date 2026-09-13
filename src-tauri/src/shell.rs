@@ -259,6 +259,9 @@ fn build_window(
         .inner_size(width, height)
         .decorations(!transparent)
         .transparent(transparent)
+        // On Windows, Tauri's undecorated shadow adds its own native frame.
+        // A rectangular frame must not surround the smaller recording pill.
+        .shadow(!transparent)
         .always_on_top(label == "flow-bar" || label == "writing-tools")
         .skip_taskbar(label == "flow-bar" || label == "writing-tools")
         .focusable(focusable)
