@@ -7,7 +7,6 @@ use std::{
         mpsc,
     },
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
 };
 
 use crate::security::{CredentialError, CredentialStore, SecretString};
@@ -28,7 +27,6 @@ const ERR_SEC_ITEM_NOT_FOUND: OsStatus = -25300;
 const ERR_SEC_AUTH_FAILED: OsStatus = -25293;
 const AX_VALUE_CGRECT: i32 = 3;
 const FN_FLAG: u64 = 0x0080_0000;
-const CG_SESSION_EVENT_TAP: u32 = 1;
 const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEYCODE_FIELD: u32 = 9;
