@@ -64,7 +64,7 @@ export interface NativeBridge {
   copyText(text: string): Promise<void>;
   closeSurface(surface: Surface): Promise<void>;
   showSurface(surface: Surface): Promise<void>;
-  setSurfaceMode(surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error"): Promise<void>;
+  setSurfaceMode(surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error", height?: number): Promise<void>;
   completeOnboarding(): Promise<void>;
   setPaused(paused: boolean): Promise<void>;
   checkForUpdates(): Promise<UpdateResult>;
@@ -147,7 +147,7 @@ class TauriBridge implements NativeBridge {
   copyText = (text: string) => call<void>("copy_text", { text });
   closeSurface = (surface: Surface) => call<void>("close_surface", { surface });
   showSurface = (surface: Surface) => call<void>("show_surface", { surface });
-  setSurfaceMode = (surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error") => call<void>("set_surface_mode", { surface, mode });
+  setSurfaceMode = (surface: "writing-tools", mode: "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error", height?: number) => call<void>("set_surface_mode", { surface, mode, height });
   completeOnboarding = () => call<void>("complete_onboarding");
   setPaused = (paused: boolean) => call<void>("set_paused", { paused });
   checkForUpdates = () => call<UpdateResult>("check_for_updates");

@@ -135,8 +135,7 @@ struct WritingContextEvent {
     initial_text: String,
 }
 
-/// One stable size for every popup mode. Per-mode resizing made the old
-/// popup jump under the cursor; placement math depends on a known size.
+/// User preferences cap the popup; the frontend reports its content height.
 const WRITING_DEFAULT_WIDTH: f64 = 380.0;
 const WRITING_DEFAULT_HEIGHT: f64 = 460.0;
 
@@ -516,6 +515,76 @@ pub(crate) fn apply_theme(app: &AppHandle, theme: &str) {
                 _ => None,
             };
             let _ = window.set_theme(theme);
+            #[cfg(target_os = "windows")]
+            apply_caption_theme(
+                app,
+                label,
+                theme.unwrap_or_else(|| window.theme().unwrap_or(tauri::Theme::Light)),
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn apply_caption_theme(app: &AppHandle, label: &str, theme: tauri::Theme) {
+    use windows::Win32::{
+        Foundation::HWND,
+        Graphics::Dwm::{
+            DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DwmSetWindowAttribute,
+        },
+        UI::{
+            Accessibility::{HCF_HIGHCONTRASTON, HIGHCONTRASTW},
+            WindowsAndMessaging::{
+                SPI_GETHIGHCONTRAST, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
+            },
+        },
+    };
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    unsafe {
+        let mut contrast = HIGHCONTRASTW {
+            cbSize: size_of::<HIGHCONTRASTW>() as u32,
+            ..Default::default()
+        };
+        let _ = SystemParametersInfoW(
+            SPI_GETHIGHCONTRAST,
+            contrast.cbSize,
+            Some((&mut contrast as *mut HIGHCONTRASTW).cast()),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        );
+        let high_contrast = contrast.dwFlags & HCF_HIGHCONTRASTON != Default::default();
+        let border: u32 = if high_contrast {
+            0xFFFF_FFFF
+        } else {
+            0xFFFF_FFFE
+        };
+        let _ = DwmSetWindowAttribute(
+            HWND(hwnd.0),
+            DWMWA_BORDER_COLOR,
+            (&border as *const u32).cast(),
+            size_of::<u32>() as u32,
+        );
+        if !matches!(label, "settings" | "onboarding") {
+            return;
+        }
+        let (caption, text): (u32, u32) = if high_contrast {
+            (0xFFFF_FFFF, 0xFFFF_FFFF)
+        } else if theme == tauri::Theme::Dark {
+            (0x00202020, 0x00F3F3F3)
+        } else {
+            (0x00F9FCFC, 0x00262624)
+        };
+        for (attribute, color) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)] {
+            let _ = DwmSetWindowAttribute(
+                HWND(hwnd.0),
+                attribute,
+                (&color as *const u32).cast(),
+                size_of::<u32>() as u32,
+            );
         }
     }
 }
@@ -576,7 +645,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
         Ok(context) => {
             // Size before positioning: placement clamps against the real
             // window frame, so the order matters.
-            size_writing_surface(app, "menu").map_err(platform_command_error)?;
+            size_writing_surface(app, "menu", None).map_err(platform_command_error)?;
             position_writing_surface(app, context.cursor, context.anchor);
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
             let _ = app.emit_to(
@@ -594,7 +663,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
         }
         Err(crate::commands::AppCoreError::WritingCancelled) => Ok(()),
         Err(error) => {
-            size_writing_surface(app, "error").map_err(platform_command_error)?;
+            size_writing_surface(app, "error", None).map_err(platform_command_error)?;
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
             let command_error = CommandError::from(error);
             let _ = app.emit_to("writing-tools", "writing-error", command_error.clone());
@@ -713,10 +782,16 @@ fn size_flow_bar(app: &AppHandle, status: &str) {
     }
 }
 
-pub(crate) fn size_writing_surface(app: &AppHandle, _mode: &str) -> Result<(), PlatformError> {
-    // Deliberately mode-independent: the popup keeps one user-configurable
-    // size so it never jumps while working through menu/result states.
-    let (width, height) = writing_popup_size(app);
+pub(crate) fn size_writing_surface(
+    app: &AppHandle,
+    _mode: &str,
+    content_height: Option<f64>,
+) -> Result<(), PlatformError> {
+    let (width, max_height) = writing_popup_size(app);
+    let height = content_height
+        .filter(|height| height.is_finite())
+        .unwrap_or(max_height)
+        .clamp(44.0, max_height);
     let window = app.get_webview_window("writing-tools").ok_or_else(|| {
         PlatformError::new(
             PlatformErrorKind::NotFound,
@@ -726,7 +801,15 @@ pub(crate) fn size_writing_surface(app: &AppHandle, _mode: &str) -> Result<(), P
     })?;
     window
         .set_size(Size::Logical(LogicalSize::new(width, height)))
-        .map_err(|_| window_error("size_writing_surface"))
+        .map_err(|_| window_error("size_writing_surface"))?;
+    // Keep the top-left stable between modes; only move to stay on-screen.
+    if content_height.is_some()
+        && let (Ok(mut position), Ok(size)) = (window.outer_position(), window.outer_size())
+    {
+        clamp_to_monitor_on(&window, &mut position, size, None);
+        let _ = window.set_position(Position::Physical(position));
+    }
+    Ok(())
 }
 
 fn writing_popup_size(app: &AppHandle) -> (f64, f64) {

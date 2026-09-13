@@ -8,8 +8,8 @@
 .settings-sidebar nav button[aria-current="page"] { background: var(--surface); color: var(--text); font-weight: 600; }
 .settings-sidebar nav .icon { color: var(--text-secondary); }
 .settings-sidebar__status { margin: auto 7px 0; display: flex; align-items: center; gap: 7px; color: var(--text-tertiary); font-size: 11px; }
-.settings-sidebar__status span { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
-.settings-main { position: relative; min-width: 0; overflow: auto; padding: 42px 40px 40px; outline: none; }
+.settings-sidebar__version { margin-left: auto; font-variant-numeric: tabular-nums; }
+.settings-main { position: relative; min-width: 0; overflow: auto; scrollbar-gutter: stable; padding: 36px 40px 32px; outline: none; }
 .settings-content { max-width: 590px; margin: 0 auto; }
 .settings-content > header { margin-bottom: 25px; }
 .settings-content > header h1 { margin: 0 0 4px; font-size: 27px; line-height: 1.25; letter-spacing: -.015em; }
@@ -38,8 +38,8 @@
 .about-lockup h2 { font-size: 18px; }
 .about-lockup p { color: var(--text-secondary); }
 .about-links { display: grid; gap: 8px; color: var(--text-secondary); }
-.about-links span { display: flex; justify-content: space-between; }
-.about-links small { color: var(--text-tertiary); }
+.about-links .text-link { justify-self: start; }
+
 .privacy-note { margin-top: 28px; color: var(--text-tertiary); font-size: 11px; }
 
 :root[data-platform="windows"] .settings-window { grid-template-columns: 190px minmax(0, 1fr); }
@@ -47,23 +47,36 @@
 :root[data-platform="windows"] .settings-group__body { border-radius: 7px; }
 
 .settings-sidebar nav button:nth-child(4) { margin-top: 26px; }
-.home-eyebrow { margin: 0 0 13px; color: var(--text-secondary); font-size: 12px; }
-.home-content h1 { margin: 0 0 14px; font-size: 34px; font-weight: 600; letter-spacing: -.04em; line-height: 1.12; }
-.home-intro { margin: 0; color: var(--text-secondary); }
-.home-shortcut { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 28px 0; margin-bottom: 22px; border-bottom: 1px solid var(--border); }
+/* Home is a working surface, with the same heading scale as preferences. */
+.home-shortcuts { display: grid; margin: 0 0 28px; }
+.home-shortcut { width: 100%; display: flex; align-items: center; gap: 14px; padding: 18px 8px; border: 0; border-bottom: 1px solid var(--border); background: transparent; text-align: left; }
+.home-shortcut:hover { background: var(--hover); border-radius: 6px; }
+.home-shortcut > .icon { color: var(--text-secondary); }
 .home-shortcut strong, .home-shortcut span { display: block; }
-.home-shortcut strong { font-weight: 550; }
-.home-shortcut span { color: var(--text-secondary); font-size: 12px; margin-top: 3px; }
-.home-shortcut .shortcut-summary { display: flex; gap: 5px; padding: 0; background: transparent; }
-.home-shortcut kbd { min-width: 32px; height: 30px; font-size: 12px; }
-.dictation-practice { width: 100%; padding: 18px; border-radius: 8px; background: var(--surface-muted); }
+.home-shortcut strong { font-weight: 600; }
+.home-shortcut span { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
+.home-shortcut .shortcut-summary { margin-left: auto; display: flex; gap: 5px; padding: 0; background: transparent; }
+.home-shortcut kbd { min-width: 30px; height: 27px; font-size: 12px; }
+.home-pause { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 10px 12px; border-radius: 6px; background: var(--surface-muted); }
+.dictation-practice { width: 100%; padding: 0; background: transparent; }
 .dictation-practice__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.dictation-practice strong { font-size: 13px; font-weight: 550; }
-.dictation-practice p { margin: 7px 0 0; color: var(--text-secondary); font-size: 12px; }
-.dictation-practice textarea { width: 100%; min-height: 66px; padding: 10px 0; margin-top: 7px; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); resize: vertical; user-select: text; }
+.dictation-practice strong { font-size: 14px; font-weight: 600; }
+.dictation-practice p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; }
+.dictation-practice textarea { width: 100%; min-height: 120px; padding: 14px; margin-top: 14px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-strong); color: var(--text); resize: vertical; user-select: text; line-height: 1.6; }
+.dictation-practice textarea::placeholder { color: var(--text-tertiary); }
 .dictation-practice .text-link { font-size: 12px; }
-.home-writing { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 26px; font-size: 12px; color: var(--text-secondary); }
-.home-writing p { margin: 0; }
+.dictation-practice .dictation-practice__status { min-height: 18px; font-size: 11px; color: var(--text-tertiary); }
+.home-footnote { margin: 28px 0 0; color: var(--text-tertiary); font-size: 11px; }
+.settings-advanced { margin: -18px 0 22px; border-bottom: 1px solid var(--border); }
+.settings-advanced > summary { padding: 12px 0; color: var(--text-secondary); font-size: 13px; cursor: default; }
+.settings-advanced[open] > summary { color: var(--text); }
+.popup-geometry { display: flex; gap: 12px; }
+.popup-geometry label { display: flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.popup-geometry input { width: 74px; }
+.writing-preferences-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
+.writing-preferences-actions .setting-row { min-height: 60px; padding: 11px 0; border-top: 1px solid var(--border); }
+.writing-preferences-actions .setting-row__label strong { font-size: 13px; }
+.writing-preferences-actions .setting-row__label span { font-size: 11px; }
 .dictation-recovery { margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border); }
 .dictation-recovery span { font-size: 11px; color: var(--text-secondary); }
 .dictation-recovery > p { max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
@@ -74,6 +87,8 @@
   .settings-main { padding: 28px 22px; }
   .setting-row { align-items: flex-start; flex-direction: column; gap: 10px; }
   .setting-row__control { max-width: 100%; }
-  .home-shortcut, .home-writing, .dictation-practice__header { align-items: flex-start; flex-wrap: wrap; }
-  .home-content h1 { font-size: 28px; }
+  .home-shortcut, .dictation-practice__header { align-items: flex-start; flex-wrap: wrap; }
+  .writing-preferences-actions { grid-template-columns: 1fr; }
+  .writing-preferences-actions .setting-row { flex-direction: row; align-items: center; }
+
 }

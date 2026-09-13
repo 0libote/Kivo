@@ -1,6 +1,6 @@
 # Kivo overhaul: implementation and release status
 
-12-13 September 2026. Changes are local and have not been published.
+12-13 September 2026. This records the initial overhaul. That baseline and its macOS cleanup now pass [GitHub CI](https://github.com/0libote/Kivo/actions/runs/34756547231). See [POLISH.md](POLISH.md) for the subsequent local polish, native Windows observations, and current installer.
 
 ## TL;DR
 

@@ -64,6 +64,16 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(target_os = "windows")]
+            if let tauri::WindowEvent::ThemeChanged(theme) = event {
+                shell::apply_caption_theme(window.app_handle(), window.label(), *theme);
+            }
+            #[cfg(target_os = "windows")]
+            if let tauri::WindowEvent::Focused(_) = event
+                && let Ok(theme) = window.theme()
+            {
+                shell::apply_caption_theme(window.app_handle(), window.label(), theme);
+            }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event
                 && matches!(window.label(), "settings" | "onboarding")
             {

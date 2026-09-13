@@ -1346,9 +1346,9 @@ pub async fn show_surface(app: AppHandle, surface: String) -> Result<(), Command
 #[tauri::command]
 pub fn set_surface_mode(
     app: AppHandle,
-    core: State<'_, AppCore>,
     surface: String,
     mode: String,
+    height: Option<f64>,
 ) -> Result<(), CommandError> {
     if surface != "writing-tools" {
         return Err(CommandError {
@@ -1357,10 +1357,7 @@ pub fn set_surface_mode(
             recoverable: false,
         });
     }
-    crate::shell::size_writing_surface(&app, &mode).map_err(platform_command_error)?;
-    if let Ok(context) = core.writing_context() {
-        crate::shell::position_writing_surface(&app, context.cursor, context.anchor);
-    }
+    crate::shell::size_writing_surface(&app, &mode, height).map_err(platform_command_error)?;
     Ok(())
 }
 

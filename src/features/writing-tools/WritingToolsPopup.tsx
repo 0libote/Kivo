@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { Spinner } from "../../components/Spinner";
@@ -117,6 +117,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   const [state, dispatch] = useReducer(writingToolsReducer, initialWritingToolsState);
   const requestGeneration = useRef(0);
   const requestInFlight = useRef(false);
+  const popup = useRef<HTMLDialogElement>(null);
   const summarizeEnabled = settings.enabledWritingActions.includes("summarize");
   const actions = useMemo(
     () => WRITING_ACTIONS.filter((action) => settings.enabledWritingActions.includes(action.id)),
@@ -157,9 +158,20 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     };
   }, [openWithContext]);
 
-  useEffect(() => {
-    if (state.mode === "closed") return;
-    void nativeBridge.setSurfaceMode("writing-tools", state.mode);
+  useLayoutEffect(() => {
+    const element = popup.current;
+    const mode = state.mode;
+    if (mode === "closed" || !element) return;
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        // Layout height excludes the entrance animation's temporary scale.
+        void nativeBridge.setSurfaceMode("writing-tools", mode, element.offsetHeight + 4).catch(() => {});
+      });
+    });
+    observer.observe(element);
+    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, [state.mode]);
 
   const close = useCallback(() => {
@@ -210,13 +222,14 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   });
 
   return (
-    <main className="writing-stage" data-platform={platform}>
+    <main className="writing-stage" data-platform={platform} style={{ "--writing-max-height": `${Math.min(settings.writingPopupHeight, window.screen.availHeight - 32)}px` } as CSSProperties}>
       <dialog
         aria-label="Writing Tools"
         className="writing-popup"
         data-mode={state.mode}
         onCancel={(event) => event.preventDefault()}
         open
+        ref={popup}
       >
         <PopupContent state={state} actions={actions} settings={settings} close={close} dispatch={dispatch} runAction={runAction} summarizeEnabled={summarizeEnabled} />
       </dialog>

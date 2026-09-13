@@ -7,7 +7,15 @@ for (const platform of ["windows", "macos"] as const) {
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto("/?surface=settings");
-    await expect(page.getByRole("heading", { name: /A thought/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Change dictation shortcut", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await page.getByRole("button", { name: "Change Writing Tools shortcut", exact: true }).click();
+    await expect(page.getByLabel("Popup width")).not.toBeVisible();
+    await page.getByText("Popup appearance", { exact: true }).click();
+    await expect(page.getByLabel("Popup width")).toBeVisible();
+    await page.getByRole("button", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Try dictation" }).click();
     await expect(page.getByLabel("Dictation practice")).toBeFocused();
     for (const theme of ["light", "dark"] as const) {
@@ -70,4 +78,54 @@ test("More actions stays reachable from the keyboard and recording can finish fr
   await page.screenshot({ path: testInfo.outputPath("dictation-error.png") });
   await page.getByRole("button", { name: "Dismiss dictation error" }).click();
   await expect(page.locator('.flow-bar[data-state="hidden"]')).toHaveCount(1);
+});
+
+test("Writing Tools requests its content height and can expand after shrinking", async ({ page }) => {
+  await page.setViewportSize({ width: 380, height: 460 });
+  await page.goto("/?surface=writing-tools");
+  await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = await import(path);
+    nativeBridge.setSurfaceMode = async (_surface: string, _mode: string, height: number) => {
+      document.documentElement.dataset.requestedHeight = String(height);
+    };
+  });
+  await page.getByText("More actions", { exact: true }).click();
+  await expect.poll(() => page.locator("html").getAttribute("data-requested-height")).not.toBeNull();
+  const expanded = Number(await page.locator("html").getAttribute("data-requested-height"));
+  await page.getByText("More actions", { exact: true }).click();
+  await expect.poll(async () => Number(await page.locator("html").getAttribute("data-requested-height"))).toBeLessThan(expanded);
+  const compact = Number(await page.locator("html").getAttribute("data-requested-height"));
+  await page.setViewportSize({ width: 380, height: compact });
+  await page.getByText("More actions", { exact: true }).click();
+  await expect.poll(async () => Number(await page.locator("html").getAttribute("data-requested-height"))).toBeGreaterThan(compact);
+});
+
+test("popup dimensions commit complete edits and settings navigation resets scroll", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 900, height: 650 });
+  await page.goto("/?surface=settings");
+  await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reset actions", exact: true })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("writing-settings.png") });
+  await page.getByText("Popup appearance", { exact: true }).click();
+  const width = page.getByLabel("Popup width", { exact: true });
+  await width.fill("");
+  await width.pressSequentially("640", { delay: 60 });
+  await expect(width).toHaveValue("640");
+  await width.press("Enter");
+  await expect(width).toHaveValue("640");
+  await width.fill("500");
+  await width.press("Escape");
+  await expect(width).toHaveValue("640");
+  await width.fill("");
+  await width.press("Tab");
+  await expect(width).toHaveValue("640");
+  await width.fill("900");
+  await width.press("Enter");
+  await expect(width).toHaveValue("800");
+  await page.setViewportSize({ width: 620, height: 500 });
+  await page.getByRole("button", { name: "Reset actions", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "AI", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "AI", exact: true })).toBeInViewport();
 });

@@ -29,12 +29,12 @@ interface SettingsWindowProps {
 }
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
-  { id: "home", label: "Home", icon: "audio" },
+  { id: "home", label: "Home", icon: "home" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
   { id: "general", label: "General", icon: "settings" },
-  { id: "ai", label: "AI", icon: "settings" },
-  { id: "about", label: "About", icon: "audio" },
+  { id: "ai", label: "AI", icon: "connection" },
+  { id: "about", label: "About", icon: "info" },
 ];
 
 type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
@@ -90,10 +90,10 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
             </button>
           ))}
         </nav>
-        <p className="settings-sidebar__status">Here when you need it.</p>
+        <p className="settings-sidebar__status">Kivo <span className="settings-sidebar__version">{context.version}</span></p>
       </aside>
-      <div className="settings-main" tabIndex={-1}>
-        {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} /> : <SectionContent
+      <div className="settings-main" key={section} tabIndex={-1}>
+        {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} onDictation={() => setSection("dictation")} /> : <SectionContent
           apiKey={apiKey}
           apiStatus={apiStatus}
           busy={busy}
@@ -195,7 +195,7 @@ function GeneralSection({ settings, save }: { readonly settings: AppSettings; re
         <SettingRow label="Show Flow Bar while idle" description="Keep a quiet indicator visible between dictations.">
           <Switch checked={settings.showIdleFlowBar} label="Show Flow Bar while idle" onChange={(value) => void save({ showIdleFlowBar: value })} />
         </SettingRow>
-        <SettingRow label="Start in background" description="Open without showing Settings.">
+        <SettingRow label="Start in background" description="Keep the main window closed when Kivo starts.">
           <Switch checked={settings.startInBackground} label="Start in background" onChange={(value) => void save({ startInBackground: value })} />
         </SettingRow>
       </SettingsGroup>
@@ -255,6 +255,27 @@ function languageName(language: SpeechLanguage): string {
   return language.name;
 }
 
+function NumberPreference({ label, value, min, max, onChange }: {
+  readonly label: string;
+  readonly value: number;
+  readonly min: number;
+  readonly max: number;
+  readonly onChange: (value: number) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return <input aria-label={label} type="number" min={min} max={max} value={draft ?? value}
+    onChange={event => setDraft(event.target.value)}
+    onBlur={event => {
+      const next = event.currentTarget.valueAsNumber;
+      setDraft(null);
+      if (Number.isFinite(next) && next !== value) void onChange(Math.min(max, Math.max(min, next)));
+    }}
+    onKeyDown={event => {
+      if (event.key === "Escape") event.currentTarget.value = String(value);
+      if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+    }} />;
+}
+
 function WritingSection({
   context,
   settings,
@@ -270,7 +291,7 @@ function WritingSection({
         <SettingRow label="Shortcut">
           <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
         </SettingRow>
-        <SettingRow label="Popup follows" description="Cursor anchors beside the mouse; selection anchors under the highlight; fixed always opens in one place.">
+        <SettingRow label="Open beside" description="Choose where Writing Tools appears.">
           <SegmentedControl
             ariaLabel="Popup placement"
             onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
@@ -278,26 +299,29 @@ function WritingSection({
             value={settings.writingPopupAnchor}
           />
         </SettingRow>
+      </SettingsGroup>
+      <details className="settings-advanced"><summary>Popup appearance</summary><SettingsGroup>
         {settings.writingPopupAnchor === "fixed" ? (
           <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
             <div className="popup-geometry">
-              <label>X<input aria-label="Fixed popup X" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupX: value }); }} type="number" value={settings.writingPopupX} /></label>
-              <label>Y<input aria-label="Fixed popup Y" max={4000} min={0} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupY: value }); }} type="number" value={settings.writingPopupY} /></label>
+              <label>X<NumberPreference label="Fixed popup X" min={0} max={4000} value={settings.writingPopupX} onChange={value => save({ writingPopupX: value })} /></label>
+              <label>Y<NumberPreference label="Fixed popup Y" min={0} max={4000} value={settings.writingPopupY} onChange={value => save({ writingPopupY: value })} /></label>
             </div>
           </SettingRow>
         ) : null}
-        <SettingRow label="Popup size" description="Width and height in pixels. One size for every Writing Tools view.">
+        <SettingRow label="Popup size" description="Width and maximum height. The window fits its content.">
           <div className="popup-geometry">
-            <label>W<input aria-label="Popup width" max={800} min={280} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupWidth: value }); }} type="number" value={settings.writingPopupWidth} /></label>
-            <label>H<input aria-label="Popup height" max={800} min={200} onChange={(event) => { const value = Number(event.target.value); if (Number.isFinite(value)) void save({ writingPopupHeight: value }); }} type="number" value={settings.writingPopupHeight} /></label>
+            <label>W<NumberPreference label="Popup width" min={280} max={800} value={settings.writingPopupWidth} onChange={value => save({ writingPopupWidth: value })} /></label>
+            <label>H<NumberPreference label="Popup height" min={200} max={800} value={settings.writingPopupHeight} onChange={value => save({ writingPopupHeight: value })} /></label>
           </div>
         </SettingRow>
         <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
           <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
         </SettingRow>
       </SettingsGroup>
+      </details>
       <SettingsGroup header="Actions">
-        {DEFAULT_WRITING_ACTIONS.map((id) => {
+        <div className="writing-preferences-actions">{DEFAULT_WRITING_ACTIONS.map((id) => {
           const action = writingAction(id);
           const checked = settings.enabledWritingActions.includes(id);
           return (
@@ -316,7 +340,7 @@ function WritingSection({
             </SettingRow>
           );
         })}
-        <div className="settings-group__footer"><Button compact onClick={() => void save({ enabledWritingActions: [...DEFAULT_WRITING_ACTIONS] })}>Reset actions</Button></div>
+        </div><div className="settings-group__footer"><Button compact onClick={() => void save({ enabledWritingActions: [...DEFAULT_WRITING_ACTIONS] })}>Reset actions</Button></div>
       </SettingsGroup>
     </SettingsContent>
   );
@@ -453,8 +477,8 @@ function AboutSection({
         <button className="text-link" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">Download the latest release from GitHub</button>
       ) : null}
       <div className="about-links" aria-label="Project links">
-        <span>Project website <small>Available at release</small></span>
-        <span>Source repository <small>Available at release</small></span>
+        <button className="text-link" type="button" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo").catch(() => setNotice("The repository could not be opened."))}>Source code on GitHub</button>
+        <button className="text-link" type="button" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page could not be opened."))}>Release notes</button>
       </div>
       <p className="privacy-note">No accounts, analytics, or telemetry. Your text is processed only when you invoke Kivo.</p>
     </SettingsContent>

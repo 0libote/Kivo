@@ -2,6 +2,9 @@ import type { SVGProps } from "react";
 
 export type IconName =
   | "audio"
+  | "home"
+  | "info"
+  | "connection"
   | "check"
   | "close"
   | "copy"
@@ -21,6 +24,9 @@ interface IconProps extends SVGProps<SVGSVGElement> {
 }
 
 const paths: Record<IconName, React.ReactNode> = {
+  home: <><path d="m3 10 9-7 9 7v10H3Z" /><path d="M9 20v-7h6v7" /></>,
+  info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>,
+  connection: <><path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0ZM12 17v4" /></>,
   audio: <path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4" />,
   check: <path d="m5 12 4 4L19 6" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,

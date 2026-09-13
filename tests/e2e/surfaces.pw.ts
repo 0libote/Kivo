@@ -12,7 +12,7 @@ test("settings navigation and controls work", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
-  await expect(page.getByRole("heading", { name: /A thought/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "General", exact: true }).click();
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   await page.getByRole("button", { name: "AI", exact: true }).click();
