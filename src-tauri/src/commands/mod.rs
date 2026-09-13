@@ -38,6 +38,11 @@ pub struct AppCore {
     speech: Arc<dyn SpeechEngine>,
     text: Arc<dyn TextService>,
     dictation: Mutex<DictationMachine>,
+    dictation_operation: tokio::sync::Mutex<()>,
+    dictation_generation: AtomicU64,
+    dictation_cancel: tokio::sync::watch::Sender<()>,
+    dictation_target: Mutex<Option<Box<dyn crate::text::InsertionTarget>>>,
+    last_transcript: Mutex<Option<String>>,
     writing: Mutex<WritingPopupMachine>,
     pending_selection: Mutex<Option<Arc<CapturedSelection>>>,
     last_result: Mutex<Option<StoredWritingResult>>,
@@ -65,6 +70,11 @@ impl AppCore {
             speech,
             text,
             dictation: Mutex::new(DictationMachine::default()),
+            dictation_operation: tokio::sync::Mutex::new(()),
+            dictation_generation: AtomicU64::new(0),
+            dictation_cancel: tokio::sync::watch::channel(()).0,
+            dictation_target: Mutex::new(None),
+            last_transcript: Mutex::new(None),
             writing: Mutex::new(WritingPopupMachine::default()),
             pending_selection: Mutex::new(None),
             last_result: Mutex::new(None),
@@ -142,84 +152,176 @@ impl AppCore {
         self.speech.microphones().await.map_err(Into::into)
     }
 
+    pub fn dictation_generation(&self) -> u64 {
+        self.dictation_generation.load(Ordering::Acquire)
+    }
+
+    pub fn recovery_text(&self) -> Result<Option<String>, AppCoreError> {
+        Ok(self
+            .last_transcript
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .clone())
+    }
+
+    pub fn clear_recovery(&self) -> Result<(), AppCoreError> {
+        self.last_transcript
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .take();
+        Ok(())
+    }
+
     pub async fn begin_dictation(
         &self,
         events: SpeechEventSink,
     ) -> Result<DictationPhase, AppCoreError> {
+        let _operation = self
+            .dictation_operation
+            .try_lock()
+            .map_err(|_| SpeechError::AlreadyRunning)?;
+        if matches!(
+            self.dictation_phase()?,
+            DictationPhase::Starting | DictationPhase::Listening | DictationPhase::Processing
+        ) {
+            return Err(SpeechError::AlreadyRunning.into());
+        }
+        // Capture before any asynchronous work or window activation. A missing
+        // target still allows speech, but delivery becomes explicit recovery.
+        let target = self.text.capture_insertion_target().ok();
+        let generation = self.dictation_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let mut cancelled = self.dictation_cancel.subscribe();
+        self.dictation
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .prepare()?;
         let settings = self.settings()?.dictation;
         let locale = match settings.language {
             LanguagePreference::Auto => None,
             LanguagePreference::Locale { tag } => Some(tag),
         };
-        let session = self
-            .speech
-            .start(
-                SpeechStartOptions {
-                    microphone_id: settings.microphone_id,
-                    locale,
-                },
-                events,
-            )
-            .await?;
-        let mut machine = self
-            .dictation
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?;
-        machine.begin(session)?;
-        Ok(machine.phase())
-    }
-
-    pub async fn finish_dictation(&self) -> Result<DictationPhase, AppCoreError> {
-        let session = {
+        let started = tokio::select! {
+            biased;
+            _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
+            result = self.speech.start(SpeechStartOptions { microphone_id: settings.microphone_id, locale }, events) => result,
+        };
+        let session = match started {
+            Ok(session) => session,
+            Err(error) => {
+                self.fail_dictation(generation);
+                return Err(error.into());
+            }
+        };
+        let phase = {
             let mut machine = self
                 .dictation
                 .lock()
                 .map_err(|_| AppCoreError::Unavailable)?;
-            machine.release()?
+            if self.dictation_generation() == generation
+                && machine.phase() == DictationPhase::Starting
+            {
+                *self
+                    .dictation_target
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = target;
+                machine.begin(session)?;
+                Some(machine.phase())
+            } else {
+                None
+            }
         };
+        if let Some(phase) = phase {
+            Ok(phase)
+        } else {
+            let _ = self.speech.cancel(session).await;
+            Ok(DictationPhase::Hidden)
+        }
+    }
 
-        let transcript = match self.speech.stop(session).await {
+    pub async fn finish_dictation(&self) -> Result<DictationPhase, AppCoreError> {
+        let _operation = self
+            .dictation_operation
+            .try_lock()
+            .map_err(|_| SpeechError::AlreadyRunning)?;
+        let generation = self.dictation_generation();
+        let mut cancelled = self.dictation_cancel.subscribe();
+        let session = self
+            .dictation
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .release()?;
+        let transcript = tokio::select! {
+            biased;
+            _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
+            result = self.speech.stop(session) => result,
+        };
+        let transcript = match transcript {
             Ok(transcript) => transcript,
             Err(error) => {
-                self.fail_dictation();
+                self.fail_dictation(generation);
                 return Err(error.into());
             }
         };
-
         let settings = self.settings()?.dictation;
         let mut final_text = transcript.into_text();
         if settings.improve_with_ai
             && let Ok(Some(api_key)) = self.credentials.load_api_key()
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
-            && let Ok(Ok(cleaned)) =
-                tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate(&api_key, &prompt))
-                    .await
         {
-            final_text = cleaned;
+            let cleaned = tokio::select! {
+                biased;
+                _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
+                result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate(&api_key, &prompt)) => result,
+            };
+            if let Ok(Ok(cleaned)) = cleaned {
+                final_text = cleaned;
+            }
         }
-
-        if let Err(error) = self.text.insert_text_at_cursor(&final_text).await {
-            self.fail_dictation();
-            return Err(error.into());
-        }
-
+        // Serialize the final check and synchronous native delivery with cancel.
         let mut machine = self
             .dictation
             .lock()
             .map_err(|_| AppCoreError::Unavailable)?;
+        if self.dictation_generation() != generation
+            || machine.phase() != DictationPhase::Processing
+        {
+            return Ok(DictationPhase::Hidden);
+        }
+        *self
+            .last_transcript
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)? = Some(final_text.clone());
+        let target = self
+            .dictation_target
+            .lock()
+            .map_err(|_| AppCoreError::Unavailable)?
+            .take();
+        if let Err(error) = target
+            .ok_or(TextError::SelectionExpired)
+            .and_then(|target| target.insert(&final_text))
+        {
+            machine.fail();
+            return Err(error.into());
+        }
         machine.complete()?;
         Ok(machine.phase())
     }
 
     pub async fn cancel_dictation(&self) -> Result<DictationPhase, AppCoreError> {
-        let session = self
-            .dictation
-            .lock()
-            .map_err(|_| AppCoreError::Unavailable)?
-            .cancel();
+        let session = {
+            let mut machine = self
+                .dictation
+                .lock()
+                .map_err(|_| AppCoreError::Unavailable)?;
+            self.dictation_generation.fetch_add(1, Ordering::AcqRel);
+            self.dictation_cancel.send_replace(());
+            self.dictation_target
+                .lock()
+                .map_err(|_| AppCoreError::Unavailable)?
+                .take();
+            machine.cancel()
+        };
         if let Some(session) = session {
-            // Cancellation is already reflected in the UI; a late native error must
-            // not resurrect the flow bar or insert text.
             let _ = self.speech.cancel(session).await;
         }
         Ok(DictationPhase::Hidden)
@@ -372,9 +474,20 @@ impl AppCore {
             };
             let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
             self.check_writing_generation(generation)?;
-            if let Err(error) = replacement {
-                machine.fail();
-                return Err(error);
+            if replacement.is_err() {
+                machine.recover_result()?;
+                *self
+                    .last_result
+                    .lock()
+                    .map_err(|_| AppCoreError::Unavailable)? = Some(StoredWritingResult {
+                    text: Arc::from(result.as_str()),
+                    can_replace: false,
+                });
+                return Ok(WritingOutcome::Result {
+                    markdown: result,
+                    source: None,
+                    can_replace: false,
+                });
             }
             machine.complete_replacement()?;
             self.clear_writing_context()?;
@@ -465,8 +578,10 @@ impl AppCore {
         Ok(())
     }
 
-    fn fail_dictation(&self) {
-        if let Ok(mut machine) = self.dictation.lock() {
+    fn fail_dictation(&self, generation: u64) {
+        if let Ok(mut machine) = self.dictation.lock()
+            && self.dictation_generation() == generation
+        {
             machine.fail();
         }
     }
@@ -949,7 +1064,6 @@ pub fn update_settings(
     let current = FrontendSettings::from(core.settings().map_err(CommandError::from)?);
     let updated = patch.apply(current);
     let native_settings = updated.clone().try_into().map_err(CommandError::from)?;
-    crate::shell::apply_settings(&app, &updated).map_err(CommandError::from)?;
     let saved = core
         .save_settings(native_settings)
         .map(FrontendSettings::from)
@@ -1039,44 +1153,24 @@ pub fn list_speech_languages() -> Vec<SpeechLanguage> {
     ]
 }
 
-// The hardcoded list above is macOS-centric: on Windows only the installed
-// speech packs work, and offering anything else hard-fails dictation at
-// hotkey time (e.g. en-US without its pack: 0x800455BC). Query the real
-// list; any failure falls back to the static list.
 #[cfg(target_os = "windows")]
 fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
-    use ::windows::{Globalization::Language, Media::SpeechRecognition::SpeechRecognizer};
-
-    let supported = SpeechRecognizer::SupportedTopicLanguages().ok()?;
-    let size = supported.Size().ok()?;
-    let mut languages = Vec::with_capacity(size as usize + 1);
-    languages.push(SpeechLanguage {
+    let mut languages = vec![SpeechLanguage {
         code: "auto".into(),
-        name: "Automatic".into(),
+        name: "System default".into(),
         installed: true,
         downloadable: false,
-    });
-    for index in 0..size {
-        let language: Language = supported.GetAt(index).ok()?;
-        let tag = language.LanguageTag().ok()?.to_string();
-        if tag.is_empty()
-            || languages
-                .iter()
-                .any(|existing: &SpeechLanguage| existing.code == tag)
-        {
-            continue;
-        }
-        let name = language
-            .DisplayName()
-            .map(|name| name.to_string())
-            .unwrap_or_else(|_| tag.clone());
-        languages.push(SpeechLanguage {
-            code: tag,
-            name,
-            installed: true,
-            downloadable: false,
-        });
-    }
+    }];
+    languages.extend(
+        crate::platform::windows_speech::languages()
+            .into_iter()
+            .map(|(code, name)| SpeechLanguage {
+                code,
+                name,
+                installed: true,
+                downloadable: false,
+            }),
+    );
     Some(languages)
 }
 
@@ -1209,8 +1303,23 @@ pub async fn replace_writing_result(
 }
 
 #[tauri::command]
-pub fn copy_text(text: String) -> Result<(), CommandError> {
-    crate::shell::copy_text(&text).map_err(platform_command_error)
+pub fn get_dictation_recovery(core: State<'_, AppCore>) -> Result<Option<String>, CommandError> {
+    core.recovery_text().map_err(Into::into)
+}
+
+#[tauri::command]
+pub fn clear_dictation_recovery(
+    app: AppHandle,
+    core: State<'_, AppCore>,
+) -> Result<(), CommandError> {
+    core.clear_recovery().map_err(CommandError::from)?;
+    let _ = app.emit_to("settings", "recovery-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn copy_text(app: AppHandle, text: String) -> Result<(), CommandError> {
+    crate::shell::copy_text(&app, &text).map_err(platform_command_error)
 }
 
 #[tauri::command]
@@ -1262,8 +1371,8 @@ pub fn complete_onboarding(app: AppHandle) -> Result<(), CommandError> {
 }
 
 #[tauri::command]
-pub fn set_paused(shell: State<'_, crate::shell::ShellState>, paused: bool) {
-    shell.set_paused(paused);
+pub fn set_paused(app: AppHandle, shell: State<'_, crate::shell::ShellState>, paused: bool) {
+    shell.set_paused(&app, paused);
 }
 
 #[derive(Serialize)]

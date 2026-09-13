@@ -112,7 +112,7 @@
       <table>
         <thead><tr><th>Concern</th><th>macOS 26</th><th>Windows 11 24H2+</th></tr></thead>
         <tbody>
-          <tr><td>Speech</td><td>SpeechAnalyzer + DictationTranscriber</td><td>WinRT speech (needs MSIX identity)</td></tr>
+          <tr><td>Speech</td><td>SpeechAnalyzer + DictationTranscriber</td><td>Desktop SAPI (installed speech languages)</td></tr>
           <tr><td>Text access</td><td>Accessibility / Core Graphics / AppKit</td><td>UI Automation + Win32 window/input</td></tr>
           <tr><td>Secrets</td><td>Keychain</td><td>Credential Manager</td></tr>
           <tr><td>Dictation key</td><td>Fn/Globe via Input Monitoring (best-effort)</td><td>Ctrl+Meta with Win-key suppression</td></tr>
@@ -141,7 +141,7 @@ store      = false                  // always — retention off</code></pre>
       <h2 id="why">Why it’s built this way</h2>
       <p><strong>No provider abstraction.</strong> One model, one endpoint, one call site. Abstractions would widen the blast radius of a prompt/privacy mistake for zero current benefit.</p>
       <p><strong>No App Sandbox on macOS.</strong> System-wide Accessibility integration is incompatible with it, so Kivo ships direct (signed + notarized) instead of via the Mac App Store.</p>
-      <p><strong>MSIX on Windows.</strong> Native speech recognition requires an installed package identity — that’s what forces the MSIX format, not fashion.</p>
+      <p><strong>A direct Windows download.</strong> Kivo uses desktop SAPI speech with installed language packs and ships as a per-user .exe. Downloads need no account; unsigned builds may show a SmartScreen warning.</p>
       <p><strong>Audio never touches Gemini.</strong> The OS engine is good and already privileged; routing voice to a cloud model would add latency, cost, and a privacy liability for no quality win.</p>
       <p><strong>Short, vague user errors; rich-in-kind internal codes.</strong> User-facing strings stay concise; diagnostics record operation names, error categories, and non-sensitive OS codes only.</p>
       <p><strong>Vite-only harness for UI.</strong> <code>bun dev</code> renders all four surfaces with mock bridges (append <code>?state=listening|processing|success|error</code> for Flow Bar states) so UI work never needs OS integration or a real key.</p>

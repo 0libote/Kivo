@@ -177,7 +177,7 @@
           <table class="flow-table" aria-label="Where your data goes">
             <thead><tr><th>Data</th><th>Destination</th></tr></thead>
             <tbody>
-              <tr><td>Voice audio</td><td><span class="pill pill--local">OS only</span><br />macOS SpeechAnalyzer · WinRT speech</td></tr>
+              <tr><td>Voice audio</td><td><span class="pill pill--local">OS only</span><br />macOS SpeechAnalyzer · Desktop SAPI speech</td></tr>
               <tr><td>Dictated transcript</td><td><span class="pill pill--local">Local insert</span><br />Optional Gemini cleanup if you enable it</td></tr>
               <tr><td>Writing action text</td><td><span class="pill pill--ok">Gemini, on invoke</span><br />Direct HTTPS, retention off</td></tr>
               <tr><td>API key</td><td><span class="pill pill--local">OS vault</span><br />Keychain · Credential Manager</td></tr>
@@ -200,8 +200,8 @@
         </div>
         <div class="platform">
           <h3>Windows 11 24H2+</h3>
-          <p>MSIX package with identity (required for native speech). UI Automation + Win32 input, Credential Manager for keys.</p>
-          <code>WinRT speech · UI Automation · MSIX</code>
+          <p>A per-user .exe installer. No store account or package identity required. UI Automation + Win32 input, Credential Manager for keys.</p>
+          <code>Desktop SAPI speech · UI Automation · .exe installer</code>
         </div>
       </div>
     </section>

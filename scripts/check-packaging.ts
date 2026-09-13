@@ -32,6 +32,10 @@ check(
   `got "${version}"; the MSIX identity needs a numeric 4-part version and the NSIS artifact names embed this string`,
 );
 
+const windowsConf = JSON.parse(readFileSync(join(root, "src-tauri/tauri.windows.conf.json"), "utf8")) as { bundle: { targets: string[]; windows: { nsis: { installMode: string; installerHooks: string } } } };
+check("Windows ships a per-user .exe", windowsConf.bundle.targets.length === 1 && windowsConf.bundle.targets[0] === "nsis" && windowsConf.bundle.windows.nsis.installMode === "currentUser", "Windows must keep the NSIS .exe installer");
+check("Windows installer enforces 24H2", readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8").includes("${AtLeastBuild} 26100"), "installer OS floor is missing");
+
 // --- Tauri config -----------------------------------------------------------
 const tauriConf = JSON.parse(
   readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"),
@@ -57,7 +61,7 @@ check(
 );
 
 // --- Windows MSIX manifest ---------------------------------------------------
-const MSIX_FLOOR = "10.0.17763.0"; // Windows 10 1809: lowest release Kivo supports.
+const MSIX_FLOOR = "10.0.26100.0"; // Windows 11 24H2: supported floor.
 const manifestPath = join(root, "packaging", "windows", "AppxManifest.xml");
 const manifest = readFileSync(manifestPath, "utf8");
 const identity = /<Identity\s+Name="([^"]+)"\s+Publisher="([^"]+)"\s+Version="([^"]+)"/.exec(manifest);
@@ -90,7 +94,7 @@ for (const icon of [
 
 // --- Artifact name parity (what CI uploads vs. what releases expect) ---------
 console.info(`info - expected NSIS artifact: src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe`);
-console.info(`info - expected MSIX artifact: src-tauri/target/release/bundle/msix/Kivo_${version}_x64.msix`);
+console.info(`info - optional legacy MSIX artifact: src-tauri/target/release/bundle/msix/Kivo_${version}_x64.msix`);
 
 if (failures > 0) {
   console.error(`\n${failures} packaging check(s) failed.`);

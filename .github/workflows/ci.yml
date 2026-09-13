@@ -15,6 +15,7 @@ name: CI & Build
 # stable `app-v*` releases.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -40,7 +41,7 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
       - run: bun lint
-      - run: bun test
+      - run: bun run test
       - run: bun run build
 
   frontend-windows:
@@ -57,7 +58,7 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
-      - run: bun test
+      - run: bun run test
 
   packaging:
     name: Packaging parity gate
@@ -250,7 +251,7 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
   macos-beta:
-    needs: [frontend, native, security-gate]
+    needs: [frontend, frontend-windows, native, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
     # Serializes concurrent runs racing the `continuous` delete/create/
     # upload below. (Temporarily removed during beta-starvation diagnosis;
@@ -283,7 +284,7 @@ jobs:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
-      - run: bun test
+      - run: bun run test
       - name: Reset the continuous release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

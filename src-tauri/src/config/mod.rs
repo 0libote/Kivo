@@ -364,17 +364,9 @@ impl SettingsRepository {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
 fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::rename(source, destination)
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
-    // `std::fs::rename` cannot replace an existing destination on Windows.
-    if destination.exists() {
-        fs::remove_file(destination)?;
-    }
+    // std::fs::rename replaces existing files on both platforms. Removing
+    // the destination first loses the user's settings if the rename fails.
     fs::rename(source, destination)
 }
 
@@ -411,6 +403,9 @@ mod tests {
         repository.save(&settings).unwrap();
         assert_eq!(repository.load().unwrap(), settings);
 
+        settings.general.theme = ThemePreference::Light;
+        repository.save(&settings).unwrap();
+        assert_eq!(repository.load().unwrap(), settings);
         let persisted = fs::read_to_string(&path).unwrap();
         assert!(!persisted.to_ascii_lowercase().contains("api_key"));
         assert!(!persisted.to_ascii_lowercase().contains("apikey"));

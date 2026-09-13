@@ -49,8 +49,8 @@ impl TextService for MockText {
         })
     }
 
-    fn insert_text_at_cursor<'a>(&'a self, _: &'a str) -> TextFuture<'a, Result<(), TextError>> {
-        panic!("writing summaries must not invoke dictation insertion")
+    fn capture_insertion_target(&self) -> Result<Box<dyn crate::text::InsertionTarget>, TextError> {
+        Err(TextError::UnsupportedApplication)
     }
 }
 
@@ -117,6 +117,11 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
         speech: Arc::new(UnusedSpeech),
         text: text.clone(),
         dictation: Mutex::new(DictationMachine::default()),
+        dictation_operation: tokio::sync::Mutex::new(()),
+        dictation_generation: AtomicU64::new(0),
+        dictation_cancel: tokio::sync::watch::channel(()).0,
+        dictation_target: Mutex::new(None),
+        last_transcript: Mutex::new(None),
         writing: Mutex::new(WritingPopupMachine::default()),
         pending_selection: Mutex::new(None),
         last_result: Mutex::new(None),
@@ -466,10 +471,250 @@ async fn dismiss_cancels_network_work_immediately_and_reopen_ignores_late_respon
 #[cfg(target_os = "windows")]
 #[test]
 fn windows_lists_installed_speech_languages() {
-    // A machine without speech packs falls back to the static list.
+    // Only installed desktop engines are listed, plus the system default.
     if let Some(languages) = windows_speech_languages() {
         assert!(!languages.is_empty());
         assert_eq!(languages[0].code, "auto");
         assert!(languages.iter().all(|language| language.installed));
     }
+}
+
+struct DictationText {
+    inserted: Arc<AtomicU64>,
+    valid: Arc<AtomicBool>,
+}
+struct TestInsertion {
+    inserted: Arc<AtomicU64>,
+    valid: Arc<AtomicBool>,
+}
+impl crate::text::InsertionTarget for TestInsertion {
+    fn insert(&self, _: &str) -> Result<(), TextError> {
+        if !self.valid.load(Ordering::Acquire) {
+            return Err(TextError::SelectionExpired);
+        }
+        self.inserted.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+}
+impl TextService for DictationText {
+    fn capture_selection(&self) -> TextFuture<'_, Result<CapturedSelection, TextError>> {
+        Box::pin(async { Err(TextError::NoSelection) })
+    }
+    fn replace_selected_text<'a>(
+        &'a self,
+        _: &'a CapturedSelection,
+        _: &'a str,
+    ) -> TextFuture<'a, Result<(), TextError>> {
+        Box::pin(async { Err(TextError::SelectionExpired) })
+    }
+    fn capture_insertion_target(&self) -> Result<Box<dyn crate::text::InsertionTarget>, TextError> {
+        Ok(Box::new(TestInsertion {
+            inserted: self.inserted.clone(),
+            valid: self.valid.clone(),
+        }))
+    }
+}
+
+struct GatedSpeech {
+    start_entered: tokio::sync::Notify,
+    start_release: tokio::sync::Notify,
+    stop_entered: tokio::sync::Notify,
+    stop_release: tokio::sync::Notify,
+    delay_start: bool,
+    delay_stop: bool,
+}
+impl SpeechEngine for GatedSpeech {
+    fn microphones(&self) -> SpeechFuture<'_, Result<Vec<MicrophoneDevice>, SpeechError>> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn start(
+        &self,
+        _: SpeechStartOptions,
+        _: SpeechEventSink,
+    ) -> SpeechFuture<'_, Result<SpeechSessionId, SpeechError>> {
+        Box::pin(async {
+            self.start_entered.notify_one();
+            if self.delay_start {
+                self.start_release.notified().await;
+            }
+            Ok(SpeechSessionId(1))
+        })
+    }
+    fn stop(&self, _: SpeechSessionId) -> SpeechFuture<'_, Result<SpeechTranscript, SpeechError>> {
+        Box::pin(async {
+            self.stop_entered.notify_one();
+            if self.delay_stop {
+                self.stop_release.notified().await;
+            }
+            SpeechTranscript::new("Keep these words".into())
+        })
+    }
+    fn cancel(&self, _: SpeechSessionId) -> SpeechFuture<'_, Result<(), SpeechError>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+fn dictation_core(
+    endpoint: &str,
+    delay_start: bool,
+    delay_stop: bool,
+) -> (Arc<AppCore>, Arc<GatedSpeech>, Arc<DictationText>) {
+    let (mut core, _) = core(endpoint, None);
+    let speech = Arc::new(GatedSpeech {
+        start_entered: Default::default(),
+        start_release: Default::default(),
+        stop_entered: Default::default(),
+        stop_release: Default::default(),
+        delay_start,
+        delay_stop,
+    });
+    let text = Arc::new(DictationText {
+        inserted: Arc::new(AtomicU64::new(0)),
+        valid: Arc::new(AtomicBool::new(true)),
+    });
+    let state = Arc::get_mut(&mut core).unwrap();
+    state.speech = speech.clone();
+    state.text = text.clone();
+    state.settings.write().unwrap().dictation.improve_with_ai = false;
+    (core, speech, text)
+}
+
+#[tokio::test]
+async fn dictation_cancel_during_start_and_stop_never_inserts() {
+    for during_start in [true, false] {
+        let (core, speech, text) =
+            dictation_core("http://127.0.0.1:1", during_start, !during_start);
+        let task_core = core.clone();
+        let task = tokio::spawn(async move {
+            let phase = task_core.begin_dictation(Arc::new(|_| {})).await?;
+            if phase == DictationPhase::Hidden {
+                return Ok(phase);
+            }
+            task_core.finish_dictation().await
+        });
+        if during_start {
+            speech.start_entered.notified().await;
+        } else {
+            speech.stop_entered.notified().await;
+        }
+        core.cancel_dictation().await.unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(250), task)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            DictationPhase::Hidden
+        );
+        speech.start_release.notify_one();
+        speech.stop_release.notify_one();
+        assert_eq!(text.inserted.load(Ordering::Relaxed), 0);
+        assert!(core.recovery_text().unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn dictation_cancel_during_ai_discards_late_result() {
+    let mut server = HttpFixture::new(200, TEXT_RESPONSE, true);
+    let (core, _, text) = dictation_core(&server.endpoint, false, false);
+    core.settings.write().unwrap().dictation.improve_with_ai = true;
+    core.begin_dictation(Arc::new(|_| {})).await.unwrap();
+    let task_core = core.clone();
+    let task = tokio::spawn(async move { task_core.finish_dictation().await });
+    server.request().await;
+    core.cancel_dictation().await.unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_millis(250), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap(),
+        DictationPhase::Hidden
+    );
+    drop(server);
+    assert_eq!(text.inserted.load(Ordering::Relaxed), 0);
+}
+
+#[tokio::test]
+async fn changed_dictation_target_preserves_recovery_and_next_session_works() {
+    let (core, _, text) = dictation_core("http://127.0.0.1:1", false, false);
+    core.begin_dictation(Arc::new(|_| {})).await.unwrap();
+    text.valid.store(false, Ordering::Release);
+    assert!(matches!(
+        core.finish_dictation().await,
+        Err(AppCoreError::Text(TextError::SelectionExpired))
+    ));
+    assert_eq!(text.inserted.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        core.recovery_text().unwrap().as_deref(),
+        Some("Keep these words")
+    );
+    core.clear_recovery().unwrap();
+    text.valid.store(true, Ordering::Release);
+    core.begin_dictation(Arc::new(|_| {})).await.unwrap();
+    assert_eq!(
+        core.finish_dictation().await.unwrap(),
+        DictationPhase::Success
+    );
+    assert_eq!(text.inserted.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn failed_replacement_returns_copyable_result() {
+    let server = HttpFixture::new(200, TEXT_RESPONSE, false);
+    let (mut core, _) = core(&server.endpoint, Some("Original selection"));
+    core.open_writing_tools().await.unwrap();
+    Arc::get_mut(&mut core).unwrap().text = Arc::new(DictationText {
+        inserted: Arc::new(AtomicU64::new(0)),
+        valid: Arc::new(AtomicBool::new(false)),
+    });
+    let result = core
+        .run_writing_action(
+            WritingAction::Proofread,
+            None,
+            None,
+            WritingSourceKind::Text,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        result,
+        WritingOutcome::Result {
+            can_replace: false,
+            ..
+        }
+    ));
+    assert!(core.last_result.lock().unwrap().is_some());
+}
+
+struct RecordingSettingsRuntime(Mutex<Vec<AppSettings>>);
+impl SettingsRuntime for RecordingSettingsRuntime {
+    fn apply(&self, _: &AppSettings, next: &AppSettings) -> Result<(), SettingsRuntimeError> {
+        self.0.lock().unwrap().push(next.clone());
+        Ok(())
+    }
+}
+
+#[test]
+fn failed_settings_write_restores_runtime_and_keeps_previous_preferences() {
+    let (mut core, _) = core("http://127.0.0.1:1", None);
+    let runtime = Arc::new(RecordingSettingsRuntime(Mutex::new(Vec::new())));
+    // A regular file cannot be a parent directory, on either desktop OS.
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let parent = std::env::temp_dir().join(format!("kivo-settings-failure-{unique}"));
+    std::fs::write(&parent, b"sentinel").unwrap();
+    let state = Arc::get_mut(&mut core).unwrap();
+    state.settings_repository = SettingsRepository::new(parent.join("settings.json"));
+    state.settings_runtime = runtime.clone();
+    let previous = core.settings().unwrap();
+    let mut changed = previous.clone();
+    changed.general.launch_at_login = !previous.general.launch_at_login;
+    assert!(core.save_settings(changed.clone()).is_err());
+    assert_eq!(core.settings().unwrap(), previous);
+    assert_eq!(*runtime.0.lock().unwrap(), vec![changed, previous]);
+    assert_eq!(std::fs::read(&parent).unwrap(), b"sentinel");
+    std::fs::remove_file(parent).unwrap();
 }

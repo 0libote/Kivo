@@ -12,6 +12,8 @@ test("settings navigation and controls work", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.getByRole("heading", { name: /A thought/ })).toBeVisible();
+  await page.getByRole("button", { name: "General", exact: true }).click();
   await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.getByRole("heading", { name: "AI" })).toBeVisible();
@@ -41,6 +43,7 @@ test("writing tools supports keyboard custom instructions and informational resu
   await page.keyboard.type("Translate to French");
   await expect(page.getByLabel("Custom writing instruction")).toHaveValue("Translate to French");
   await page.keyboard.press("Escape");
+  await page.getByText("More actions", { exact: true }).click();
   await page.getByRole("option", { name: "Summarize" }).click();
   await expect(page.getByText(/short greeting/)).toBeVisible({ timeout: 2_000 });
   await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();
@@ -50,10 +53,12 @@ test("writing tools supports keyboard custom instructions and informational resu
 test("flow bar exposes calm listening, processing, and error states", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 260, height: 72 });
-  for (const state of ["idle", "listening", "processing", "error"]) {
+  for (const state of ["idle", "starting", "listening", "processing", "error"]) {
+    await page.setViewportSize(state === "error" ? { width: 380, height: 96 } : { width: 164, height: 48 });
     await page.goto(`/?surface=flow-bar&state=${state}`);
     await expect(page.locator(".flow-bar")).toBeVisible();
   }
-  await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(page.locator('.flow-bar[data-state="listening"]')).toBeVisible();
   assertNoErrors();
 });

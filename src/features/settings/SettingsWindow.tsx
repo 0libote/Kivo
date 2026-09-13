@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { HomeSection } from "./HomeSection";
+import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { Button } from "../../components/Button";
 import { Icon, type IconName } from "../../components/Icon";
 import { SegmentedControl } from "../../components/SegmentedControl";
@@ -17,7 +19,7 @@ import {
 } from "../../types";
 import { writingAction } from "../writing-tools/actions";
 
-type SettingsSection = "general" | "dictation" | "writing" | "ai" | "about";
+type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "about";
 
 interface SettingsWindowProps {
   readonly context: AppContext;
@@ -27,17 +29,18 @@ interface SettingsWindowProps {
 }
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
-  { id: "general", label: "General", icon: "settings" },
+  { id: "home", label: "Home", icon: "audio" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
-  { id: "ai", label: "AI", icon: "spark" },
+  { id: "general", label: "General", icon: "settings" },
+  { id: "ai", label: "AI", icon: "settings" },
   { id: "about", label: "About", icon: "audio" },
 ];
 
 type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
 
 export function SettingsWindow({ context, settings, loading, updateSettings }: SettingsWindowProps) {
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>("home");
   const [microphones, setMicrophones] = useState<MicrophoneDevice[]>([]);
   const [languages, setLanguages] = useState<SpeechLanguage[]>([]);
   const [apiStatus, setApiStatus] = useState<ApiKeyStatus>({ configured: false, connection: "untested" });
@@ -46,14 +49,17 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
   const [notice, setNotice] = useState<string | null>(null);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
 
+  useNativeEvent("show-about", () => setSection("about"));
+
   useEffect(() => {
     let active = true;
-    void Promise.all([nativeBridge.listMicrophones(), nativeBridge.listSpeechLanguages(), nativeBridge.getApiKeyStatus()])
+    void Promise.allSettled([nativeBridge.listMicrophones(), nativeBridge.listSpeechLanguages(), nativeBridge.getApiKeyStatus()])
       .then(([nextMicrophones, nextLanguages, nextApiStatus]) => {
         if (!active) return;
-        setMicrophones(nextMicrophones);
-        setLanguages(nextLanguages);
-        setApiStatus(nextApiStatus);
+        if (nextMicrophones.status === "fulfilled") setMicrophones(nextMicrophones.value);
+        if (nextLanguages.status === "fulfilled") setLanguages(nextLanguages.value);
+        if (nextApiStatus.status === "fulfilled") setApiStatus(nextApiStatus.value);
+        if ([nextMicrophones, nextLanguages, nextApiStatus].some(result => result.status === "rejected")) setNotice("Some settings could not be loaded. Reopen Settings to try again.");
       })
       .catch(() => active && setNotice("Some settings aren’t available right now."));
     return () => {
@@ -84,10 +90,10 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
             </button>
           ))}
         </nav>
-        <p className="settings-sidebar__status"><span />Running in the background</p>
+        <p className="settings-sidebar__status">Here when you need it.</p>
       </aside>
       <div className="settings-main" tabIndex={-1}>
-        <SectionContent
+        {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} /> : <SectionContent
           apiKey={apiKey}
           apiStatus={apiStatus}
           busy={busy}
@@ -103,7 +109,7 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
           settings={settings}
           save={save}
           updateResult={updateResult}
-        />
+        />}
         {notice ? <div aria-live="polite" className="settings-notice">{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)} type="button"><Icon name="close" size={12} /></button></div> : null}
       </div>
     </main>
@@ -130,6 +136,7 @@ interface SectionContentProps {
 
 function SectionContent(props: SectionContentProps) {
   switch (props.section) {
+    case "home": return null;
     case "general":
       return <GeneralSection settings={props.settings} save={props.save} />;
     case "dictation":

@@ -11,7 +11,7 @@ The `website/` folder holds the static landing page and docs site (`index.html`,
 ## Supported systems
 
 - macOS 26 or later, distributed directly as a signed and notarized application. The App Sandbox is intentionally disabled because system-wide Accessibility integration is incompatible with it.
-- Windows 11 24H2 (build 26100) or later. Native speech recognition requires an installed package identity, so production Windows builds use MSIX.
+- Windows 11 24H2 (build 26100) or later. Distributed as a per-user `.exe` installer. Desktop SAPI speech uses installed Windows speech engines and needs no MSIX identity, Microsoft Store account, or Kivo account.
 
 Physical testing on both systems is required before a release, especially for Fn/Globe handling, Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party applications, and signing.
 
@@ -32,9 +32,9 @@ Physical testing on both systems is required before a release, especially for Fn
 ### Windows
 
 - Visual Studio Build Tools with Desktop development with C++.
-- Windows 11 SDK 10.0.26100 or newer, including MakeAppx and SignTool.
+- Windows 11 SDK 10.0.26100 or newer. SignTool is optional for Authenticode signing.
 - WebView2 Runtime (included with current Windows 11 installations).
-- A code-signing certificate whose subject matches the MSIX publisher.
+- An installed desktop speech language for dictation. A signing certificate is optional for building and sharing the `.exe`.
 
 ## Development
 
@@ -54,7 +54,7 @@ Useful checks:
 ```sh
 bun typecheck
 bun lint
-bun test
+bun run test
 bun test:ui
 bun run build
 bun check:rust
@@ -97,9 +97,9 @@ The app is one Tauri process with four pre-created webview surfaces:
 - `settings`: native-window preferences; closing it hides the window rather than quitting Kivo.
 - `onboarding`: a short first-run permission and setup flow.
 
-React owns presentation and transient UI state. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle. Sensitive text and keys are intentionally absent from serializable types wherever the UI does not need them.
+React owns presentation and transient UI state. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle. Sensitive text and keys are intentionally absent from serializable types wherever the UI does not need them. The latest completed dictation is kept only in memory for the current app session and can be copied or cleared from Home. Cancelled dictations are discarded.
 
-Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, WinRT speech, and Credential Manager. The platform boundary reserves application-specific and clipboard fallback strategies, but V1 replacement currently fails safely when native Accessibility/UI Automation cannot preserve the original selection.
+Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Native AX/UIA capture leaves the clipboard unchanged. Kivo validates the original field and selection before insertion; unsupported targets or changed selections keep the result available to copy instead of automatically pasting into another field.
 
 ## Permissions
 
@@ -116,29 +116,30 @@ Kivo asks only in onboarding or when a feature is invoked:
 
 `bun tauri build` produces the macOS app and DMG. Configure the standard Tauri Apple signing/notarization environment variables in the release environment. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
 
-### Windows MSIX
-
-From a Windows developer shell:
+### Windows .exe
 
 ```powershell
-.\packaging\windows\build-msix.ps1 -CertificatePath C:\secure\kivo.pfx
+bun run tauri build --bundles nsis
 ```
 
-Replace the placeholder publisher in `packaging/windows/AppxManifest.xml` with the subject of the production certificate or the Microsoft Store identity before signing. The script emits an MSIX under `src-tauri/target/release/bundle/msix`.
+The installer is written to `src-tauri/target/release/bundle/nsis/Kivo_<version>_x64-setup.exe`. It installs for the current user, appears in Start and Installed apps, and enforces Windows 11 24H2 or later. WebView2 is bootstrapped if missing. Host the installer as a public GitHub Release asset: downloading needs no account or payment.
+
+Unsigned builds work but may receive SmartScreen warnings; free hosting does not provide trusted publisher signing. The stable workflow signs the installer when an Authenticode certificate is configured. The older MSIX script remains an optional packaging route and is not used by beta or stable release jobs.
 
 ### GitHub Releases and updates
 
-Pushing an `app-v*` tag runs `.github/workflows/release.yml`, builds macOS and Windows artifacts, and drafts a GitHub Release. Configure these repository secrets first:
+Pushing an `app-v*` tag runs `.github/workflows/release.yml`, builds macOS and Windows artifacts, and drafts a GitHub Release. For signed macOS distribution and updates, configure these repository secrets:
 
 - `TAURI_UPDATER_PUBKEY`
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 - Apple signing/notarization secrets listed in the workflow
-- `WINDOWS_CERTIFICATE_BASE64`, `WINDOWS_CERTIFICATE_PASSWORD`, and `WINDOWS_PUBLISHER`
+
+Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD`. No Windows signing secret is required to build the installer.
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. macOS uses Tauri's signed updater metadata; the MSIX build checks the latest GitHub Release and is updated by installing the newer signed package.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. macOS uses Tauri's signed updater metadata; Windows checks GitHub Releases and hands off to the installer download. An up-to-date stable installation does not get offered a rolling beta. Rolling betas still require manual download when their version number has not changed.
 
 ## Privacy and diagnostics
 

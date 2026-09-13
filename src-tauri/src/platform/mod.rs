@@ -12,6 +12,8 @@ mod macos;
 mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows_speech;
 
 #[cfg(target_os = "macos")]
 use macos::PlatformImpl;
@@ -110,9 +112,7 @@ pub struct SelectionSnapshot {
     pub text: String,
     pub bounds: Vec<ScreenRect>,
     pub owner: ActiveApplication,
-    /// How the text was obtained. The AX/UIA fast path never touches the
-    /// clipboard; the clipboard fallback simulates Copy and must be replaced
-    /// with a simulated Paste.
+    /// How the text was obtained. Native AX/UIA access leaves the clipboard alone.
     pub strategy: TextAccessStrategy,
     #[serde(skip)]
     pub(crate) native_token: u64,
@@ -244,32 +244,6 @@ impl PlatformServices {
         self.implementation.get_selected_text()
     }
 
-    /// Highlight-first capture: backs up the clipboard, simulates Copy for
-    /// the user's current highlight, waits for the clipboard to change, then
-    /// silently restores the backup. Blocking; call from `spawn_blocking`.
-    pub fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
-        self.implementation.capture_selection_via_clipboard()
-    }
-
-    /// Replacement for clipboard-captured text: writes the result to the
-    /// clipboard, reactivates the owning application, simulates Paste, then
-    /// silently restores the previous clipboard content. Blocking; call from
-    /// `spawn_blocking`. Undo remains available in the target app via Ctrl/Cmd+Z.
-    pub fn paste_replacement(
-        &self,
-        snapshot: &SelectionSnapshot,
-        replacement: &str,
-    ) -> PlatformResult<()> {
-        if replacement.is_empty() {
-            return Err(PlatformError::new(
-                PlatformErrorKind::InvalidState,
-                "paste_replacement",
-                "Replacement text is empty.",
-            ));
-        }
-        self.implementation.paste_replacement(snapshot, replacement)
-    }
-
     /// Mouse cursor in physical pixels with a top-left origin, matching the
     /// coordinate space used for window positioning. Used for cursor-anchored
     /// popup placement.
@@ -293,11 +267,10 @@ impl PlatformServices {
             .replace_selected_text(snapshot, replacement)
     }
 
-    pub fn insert_text_at_cursor(&self, text: &str) -> PlatformResult<()> {
-        if text.is_empty() {
-            return Ok(());
-        }
-        self.implementation.insert_text_at_cursor(text)
+    pub fn capture_insertion_target(
+        &self,
+    ) -> PlatformResult<Box<dyn crate::text::InsertionTarget>> {
+        self.implementation.capture_insertion_target()
     }
 
     pub fn permission_status(

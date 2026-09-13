@@ -105,7 +105,7 @@ export interface WritingResponse {
 }
 
 export interface DictationSnapshot {
-  status: "hidden" | "idle" | "listening" | "processing" | "success" | "error";
+  status: "hidden" | "idle" | "starting" | "listening" | "processing" | "success" | "error";
   sessionId?: string;
   level?: number;
   message?: string;

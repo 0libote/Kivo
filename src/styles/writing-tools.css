@@ -1,7 +1,7 @@
 .writing-stage { width: 100%; height: 100%; padding: 2px; background: transparent; }
 dialog.writing-popup { margin: 0; padding: 0; max-width: none; }
 dialog.writing-popup:not([open]) { display: none; }
-.writing-popup { width: 100%; max-height: 100%; overflow: hidden; border: 0; border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface) 78%, transparent); box-shadow: none; backdrop-filter: blur(26px) saturate(1.4); -webkit-backdrop-filter: blur(26px) saturate(1.4); animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
+.writing-popup { width: 100%; max-height: 100%; overflow: hidden; border: 0; border-radius: var(--radius-panel); background: var(--surface); box-shadow: none; animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
 .writing-popup textarea, .writing-popup input { user-select: text; }
 @keyframes writing-enter { from { opacity: 0; transform: translateY(-3px) scale(.985); } to { opacity: 1; transform: none; } }
 .writing-popup__header { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 0 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11.5px; font-weight: 600; }
@@ -9,10 +9,10 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-command .custom-prompt { flex: 1; margin: 0; }
 .writing-command .icon-button { flex: 0 0 auto; }
 .writing-actions { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 4px; }
-.writing-action { min-height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 13px; }
+.writing-action { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 14px; }
 .writing-action:hover, .writing-action[data-selected="true"] { background: var(--selected); }
 .writing-action .icon { color: var(--text-secondary); }
-.custom-prompt { min-height: 36px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
+.custom-prompt { min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
 .custom-prompt:hover { color: var(--text); background: var(--hover); }
 .custom-prompt span { flex: 1; }
 .custom-prompt kbd { font-size: 11px; color: var(--text-tertiary); }
@@ -47,7 +47,7 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-opening { height: 64px; display: grid; place-items: center; color: var(--text-secondary); }
 .writing-chat { display: flex; flex-direction: column; }
 .writing-chat__hint { margin: 8px 12px 0; color: var(--text-secondary); font-size: 12px; }
-.writing-chat textarea { margin: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 13px; line-height: 1.5; resize: none; }
+.writing-chat textarea { margin: 8px; padding: 8px 10px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 14px; line-height: 1.5; resize: none; }
 .writing-chat textarea:focus { outline: none; border-color: var(--accent); }
 .writing-chat__footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px 8px; }
 
@@ -70,3 +70,11 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-result__header, .writing-result__footer, .writing-result__source { flex-shrink: 0; }
 .writing-result__source { display: flex; gap: 7px; min-width: 0; padding: 8px 15px 0; color: var(--text-secondary); font-size: 11px; }
 .writing-result__source > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+
+.writing-more summary { padding: 10px; margin-top: 5px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; cursor: default; }
+.writing-more[open] summary { margin-bottom: 4px; }
+.writing-source label { font-size: 11px; text-transform: none; }
+.writing-command { padding: 12px 10px 8px; }
+.writing-hint { font-size: 11px; }
+
+.writing-more .writing-action { width: 100%; }

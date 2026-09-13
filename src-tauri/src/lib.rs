@@ -19,7 +19,7 @@ use crate::{
         PlatformServices,
         adapters::{PlatformCredentialStore, PlatformSpeechEngine, PlatformTextService},
     },
-    shell::{DeferredSettingsRuntime, ShellState},
+    shell::{ShellSettingsRuntime, ShellState},
 };
 
 pub fn run() {
@@ -37,7 +37,7 @@ pub fn run() {
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             let core = AppCore::new(
                 SettingsRepository::new(settings_path),
-                Arc::new(DeferredSettingsRuntime),
+                Arc::new(ShellSettingsRuntime(handle.clone())),
                 Arc::new(PlatformCredentialStore::new(Arc::clone(&platform))),
                 GeminiClient::new()?,
                 Arc::new(PlatformSpeechEngine::new(Arc::clone(&platform))),
@@ -49,6 +49,7 @@ pub fn run() {
 
             shell::create_windows(&handle)?;
             shell::create_tray(&handle)?;
+            shell::apply_theme(&handle, &settings.theme);
             let _ = shell::register_shortcuts(&handle, &settings);
             if settings.onboarding_complete {
                 shell::sync_idle_flow_bar(&handle);
@@ -91,6 +92,8 @@ pub fn run() {
             commands::run_writing_action,
             commands::replace_writing_result,
             commands::copy_text,
+            commands::get_dictation_recovery,
+            commands::clear_dictation_recovery,
             commands::close_surface,
             commands::show_surface,
             commands::set_surface_mode,

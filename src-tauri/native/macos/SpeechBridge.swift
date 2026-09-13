@@ -19,6 +19,10 @@ private final class SpeechSession: @unchecked Sendable {
     private let inputStream: AsyncStream<AnalyzerInput>
     private let inputContinuation: AsyncStream<AnalyzerInput>.Continuation
     private let lock = NSLock()
+    private let audioLock = NSLock()
+    private var tapInstalled = false
+    private let callbackLock = NSLock()
+    private var callbacksEnabled = true
     private var analysisTask: Task<Void, Never>?
     private var resultsTask: Task<Void, Never>?
     private var finalSegments: [String] = []
@@ -68,8 +72,8 @@ private final class SpeechSession: @unchecked Sendable {
         let wasStarted = started
         lock.unlock()
 
+        stopAudio()
         if wasStarted {
-            stopAudio()
             inputContinuation.finish()
             Task { [weak self] in
                 guard let self else { return }
@@ -89,10 +93,9 @@ private final class SpeechSession: @unchecked Sendable {
             return
         }
         cancelled = true
-        let wasStarted = started
         lock.unlock()
 
-        if wasStarted { stopAudio() }
+        stopAudio()
         inputContinuation.finish()
         resultsTask?.cancel()
         Task { [weak self] in
@@ -135,18 +138,21 @@ private final class SpeechSession: @unchecked Sendable {
             resultsTask = Task { [weak self] in
                 await self?.consumeResults()
             }
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
-                guard let self, self.acceptingAudio else { return }
-                inputContinuation.yield(AnalyzerInput(buffer: buffer))
-                emitLevel(buffer)
+            let didStart = try audioLock.withLock {
+                guard acceptingAudio else { return false }
+                input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+                    guard let self, self.acceptingAudio else { return }
+                    inputContinuation.yield(AnalyzerInput(buffer: buffer))
+                    emitLevel(buffer)
+                }
+                tapInstalled = true
+                engine.prepare()
+                try engine.start()
+                return true
             }
-            engine.prepare()
-            try engine.start()
-            emit(0, nil)
+            if didStart { emit(0, nil) }
         } catch {
-            if engine.inputNode.numberOfInputs > 0 {
-                engine.inputNode.removeTap(onBus: 0)
-            }
+            stopAudio()
             emit(4, "On-device speech recognition could not be started.")
         }
     }
@@ -186,11 +192,25 @@ private final class SpeechSession: @unchecked Sendable {
     }
 
     private func stopAudio() {
-        if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        audioLock.withLock {
+            if engine.isRunning { engine.stop() }
+            if tapInstalled {
+                engine.inputNode.removeTap(onBus: 0)
+                tapInstalled = false
+            }
+        }
+    }
+
+    // Destroy synchronously closes the callback gate before Rust releases its
+    // context. Analyzer tasks may finish later but cannot call freed memory.
+    func invalidateCallbacks() {
+        callbackLock.withLock { callbacksEnabled = false }
     }
 
     private func emit(_ event: Int32, _ text: String?) {
+        callbackLock.lock()
+        defer { callbackLock.unlock() }
+        guard callbacksEnabled else { return }
         if let text {
             text.withCString { callback(context, event, $0, 0) }
         } else {
@@ -208,7 +228,9 @@ private final class SpeechSession: @unchecked Sendable {
         }
         let rms = sqrt(sum / Float(count))
         let normalized = max(0, min(1, (20 * log10(max(rms, 0.000_01)) + 55) / 55))
-        callback(context, 3, nil, normalized)
+        callbackLock.withLock {
+            if callbacksEnabled { callback(context, 3, nil, normalized) }
+        }
     }
 }
 
@@ -269,5 +291,7 @@ public func kivoSpeechCancel(_ handle: UnsafeMutableRawPointer?) {
 @_cdecl("kivo_speech_destroy")
 public func kivoSpeechDestroy(_ handle: UnsafeMutableRawPointer?) {
     guard let handle else { return }
-    Unmanaged<SpeechSession>.fromOpaque(handle).release()
+    let session = Unmanaged<SpeechSession>.fromOpaque(handle).takeRetainedValue()
+    session.invalidateCallbacks()
+    session.cancel()
 }

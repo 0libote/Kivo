@@ -1,4 +1,4 @@
-export type DictationStatus = "hidden" | "idle" | "listening" | "processing" | "success" | "error";
+export type DictationStatus = "hidden" | "idle" | "starting" | "listening" | "processing" | "success" | "error";
 
 export interface DictationState {
   status: DictationStatus;
@@ -9,6 +9,7 @@ export interface DictationState {
 }
 
 export type DictationEvent =
+  | { type: "START" }
   | { type: "IDLE" }
   | { type: "LISTEN"; sessionId?: string }
   | { type: "LEVEL"; level: number }
@@ -28,6 +29,8 @@ export const initialDictationState: DictationState = {
 
 export function dictationReducer(state: DictationState, event: DictationEvent): DictationState {
   switch (event.type) {
+    case "START":
+      return { ...initialDictationState, status: "starting" };
     case "IDLE":
       return { ...initialDictationState, status: "idle" };
     case "LISTEN":

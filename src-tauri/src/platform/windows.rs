@@ -1,55 +1,43 @@
 use std::{
     mem::size_of,
     ptr,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Mutex, OnceLock},
     thread::{self, JoinHandle},
 };
 
 use ::windows::{
-    Foundation::TypedEventHandler,
-    Globalization::Language,
-    Media::SpeechRecognition::{
-        SpeechContinuousRecognitionResultGeneratedEventArgs, SpeechContinuousRecognitionSession,
-        SpeechRecognitionResultStatus, SpeechRecognizer,
-    },
     Win32::{
-        Foundation::{ERROR_NOT_FOUND, HANDLE, HWND, LPARAM, LRESULT, POINT, WPARAM},
+        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, POINT, WPARAM},
         Graphics::Dwm::{
-            DWM_SYSTEMBACKDROP_TYPE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE,
+            DWM_SYSTEMBACKDROP_TYPE, DWMSBT_NONE, DWMWA_BORDER_COLOR, DWMWA_SYSTEMBACKDROP_TYPE,
             DwmSetWindowAttribute,
         },
         Security::Credentials::{
             CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree,
             CredReadW, CredWriteW,
         },
-        System::{
-            Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx},
-            DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-                OpenClipboard, SetClipboardData,
-            },
-            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock},
-            Ole::CF_UNICODETEXT,
+        System::Com::{
+            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+            CoUninitialize,
         },
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
             },
             Input::KeyboardAndMouse::{
-                GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT,
-                KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE,
-                VK_LWIN, VK_RWIN,
+                GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+                KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetMessageW,
-                GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG,
-                PostThreadMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
-                UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
-                WM_SYSKEYUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                GetWindowLongPtrW, GetWindowTextW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
+                SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW, UnhookWindowsHookEx,
+                WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+                WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
             },
         },
     },
-    core::{HRESULT, HSTRING, PWSTR, w},
+    core::{HRESULT, PWSTR, w},
 };
 
 use crate::security::{CredentialError, CredentialStore, SecretString};
@@ -69,12 +57,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(super) struct PlatformImpl {
     credentials: WindowsCredentialStore,
+    selection: Mutex<Option<(u64, WindowsTextTarget)>>,
 }
 
 impl PlatformImpl {
     pub(super) fn new() -> PlatformResult<Self> {
         Ok(Self {
             credentials: WindowsCredentialStore,
+            selection: Mutex::new(None),
         })
     }
 
@@ -88,6 +78,13 @@ impl PlatformImpl {
         let mut title = [0_u16; 260];
         let title_length = unsafe { GetWindowTextW(window, &mut title) }.max(0) as usize;
         let name = String::from_utf16_lossy(&title[..title_length]);
+        let token = NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed);
+        let target = WindowsTextTarget::capture()?;
+        *self
+            .selection
+            .lock()
+            .map_err(|_| os_error("get_selected_text", "Selection state unavailable."))? =
+            Some((token, target));
         Ok(SelectionSnapshot {
             text,
             bounds: bounds.into_iter().collect(),
@@ -102,86 +99,8 @@ impl PlatformImpl {
                 native_handle: window.0 as usize,
             },
             strategy: crate::text::TextAccessStrategy::Accessibility,
-            native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
+            native_token: token,
         })
-    }
-
-    /// Clipboard-fallback capture. Must run before the popup takes focus so
-    /// the simulated Ctrl+C lands in the user's application. Blocking.
-    pub(super) fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
-        let window = unsafe { GetForegroundWindow() };
-        let owner = foreground_application(window);
-        let backup = clipboard_text().ok();
-        let before = clipboard_sequence_number();
-        send_control_keystroke(b'C', "capture_selection_via_clipboard")?;
-
-        if !wait_for_clipboard_change(before, std::time::Duration::from_secs(2)) {
-            restore_clipboard_backup(backup.as_deref(), clipboard_sequence_number());
-            return Err(PlatformError::new(
-                PlatformErrorKind::NotFound,
-                "capture_selection_via_clipboard",
-                "Select some text first.",
-            ));
-        }
-        let after = clipboard_sequence_number();
-        let text = clipboard_text().map_err(|_| {
-            restore_clipboard_backup(backup.as_deref(), after);
-            os_error(
-                "capture_selection_via_clipboard",
-                "The selected text could not be read.",
-            )
-        })?;
-        restore_clipboard_backup(backup.as_deref(), after);
-        if text.trim().is_empty() {
-            return Err(PlatformError::new(
-                PlatformErrorKind::NotFound,
-                "capture_selection_via_clipboard",
-                "Select some text first.",
-            ));
-        }
-        Ok(SelectionSnapshot {
-            text,
-            bounds: Vec::new(),
-            owner,
-            strategy: crate::text::TextAccessStrategy::ClipboardFallback,
-            native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
-        })
-    }
-
-    /// Paste-based replacement for clipboard-captured selections. Restores the
-    /// previous clipboard content silently before returning, on both success
-    /// and failure paths after the clipboard was overwritten.
-    pub(super) fn paste_replacement(
-        &self,
-        snapshot: &SelectionSnapshot,
-        replacement: &str,
-    ) -> PlatformResult<()> {
-        if snapshot.owner.native_handle == 0 {
-            return Err(os_error(
-                "paste_replacement",
-                "The original application is no longer available.",
-            ));
-        }
-        let window = HWND(snapshot.owner.native_handle as *mut _);
-        if !unsafe { SetForegroundWindow(window) }.as_bool() {
-            return Err(os_error(
-                "paste_replacement",
-                "The original application could not be focused.",
-            ));
-        }
-        let backup = clipboard_text().ok();
-        set_clipboard_text(replacement)?;
-        let written = clipboard_sequence_number();
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        if let Err(error) = send_control_keystroke(b'V', "paste_replacement") {
-            restore_clipboard_backup(backup.as_deref(), written);
-            return Err(error);
-        }
-        // No cross-process paste-completion signal exists; 500ms covers
-        // slower targets while staying responsive.
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        restore_clipboard_backup(backup.as_deref(), written);
-        Ok(())
     }
 
     pub(super) fn cursor_position(&self) -> PlatformResult<ScreenPoint> {
@@ -208,6 +127,20 @@ impl PlatformImpl {
                 "The original application could not be focused.",
             ));
         }
+        let selection = self
+            .selection
+            .lock()
+            .map_err(|_| os_error("replace_selected_text", "Selection state unavailable."))?;
+        if !selection
+            .as_ref()
+            .is_some_and(|(token, target)| *token == snapshot.native_token && target.is_current())
+        {
+            return Err(PlatformError::new(
+                PlatformErrorKind::InvalidState,
+                "replace_selected_text",
+                "The original text field or selection changed.",
+            ));
+        }
         let (current, process_id, _) = selected_text()?;
         if current != snapshot.text || process_id != snapshot.owner.process_id {
             return Err(PlatformError::new(
@@ -219,8 +152,10 @@ impl PlatformImpl {
         send_unicode(replacement, "replace_selected_text")
     }
 
-    pub(super) fn insert_text_at_cursor(&self, text: &str) -> PlatformResult<()> {
-        send_unicode(text, "insert_text_at_cursor")
+    pub(super) fn capture_insertion_target(
+        &self,
+    ) -> PlatformResult<Box<dyn crate::text::InsertionTarget>> {
+        Ok(Box::new(WindowsTextTarget::capture()?))
     }
 
     pub(super) fn permission_status(
@@ -232,7 +167,7 @@ impl PlatformImpl {
                 PermissionStatus::Unavailable
             }
             PermissionKind::Microphone | PermissionKind::SpeechRecognition => {
-                PermissionStatus::Granted
+                PermissionStatus::NotDetermined
             }
         })
     }
@@ -286,7 +221,16 @@ impl PlatformImpl {
                     existing | (WS_EX_TOOLWINDOW.0 | no_activate) as isize,
                 );
             }
-            let backdrop: DWM_SYSTEMBACKDROP_TYPE = DWMSBT_TRANSIENTWINDOW;
+            // Let the webview supply a compact opaque surface, without a
+            // native acrylic rectangle behind the smaller recording pill.
+            let border: u32 = 0xFFFF_FFFE; // DWMWA_COLOR_NONE on Windows 11.
+            let _ = DwmSetWindowAttribute(
+                window,
+                DWMWA_BORDER_COLOR,
+                (&border as *const u32).cast(),
+                size_of::<u32>() as u32,
+            );
+            let backdrop: DWM_SYSTEMBACKDROP_TYPE = DWMSBT_NONE;
             DwmSetWindowAttribute(
                 window,
                 DWMWA_SYSTEMBACKDROP_TYPE,
@@ -308,155 +252,115 @@ impl PlatformImpl {
         options: SpeechOptions,
         callback: SpeechCallback,
     ) -> PlatformResult<Box<dyn SpeechSession>> {
-        if options.microphone_id.is_some() {
-            return Err(PlatformError::unsupported(
-                "start_speech",
-                "Selecting a non-default microphone is not supported by Windows Speech.",
-            ));
-        }
-        // WinRT speech needs a COM apartment on this thread. Dictation runs
-        // on Tokio workers that are never initialized, so initialize here; a
-        // pre-existing different-model init (RPC_E_CHANGED_MODE) is left
-        // untouched and the error ignored.
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        }
-        let recognizer = match options.language.as_deref() {
-            Some(language) => {
-                let language =
-                    Language::CreateLanguage(&HSTRING::from(language)).map_err(|_| {
-                        speech_unavailable("The selected dictation language is unavailable.")
-                    })?;
-                SpeechRecognizer::Create(&language)
-            }
-            None => SpeechRecognizer::new(),
-        }
-        .map_err(|_| speech_unavailable("Windows Speech could not be initialized."))?;
-        let compilation = recognizer
-            .CompileConstraintsAsync()
-            .and_then(|operation| operation.join())
-            .map_err(|_| speech_unavailable("Windows Speech could not prepare dictation."))?;
-        if compilation
-            .Status()
-            .unwrap_or(SpeechRecognitionResultStatus::Unknown)
-            != SpeechRecognitionResultStatus::Success
-        {
-            return Err(speech_unavailable(
-                "Windows Speech is unavailable for this language.",
-            ));
-        }
-
-        let session = recognizer
-            .ContinuousRecognitionSession()
-            .map_err(|_| speech_unavailable("Windows Speech could not start a session."))?;
-        let transcript = Arc::new(Mutex::new(Vec::<String>::new()));
-        let callback_for_results = Arc::clone(&callback);
-        let transcript_for_results = Arc::clone(&transcript);
-        let result_token = session
-            .ResultGenerated(&TypedEventHandler::<
-                SpeechContinuousRecognitionSession,
-                SpeechContinuousRecognitionResultGeneratedEventArgs,
-            >::new(move |_, args| {
-                if let Ok(text) = args
-                    .ok()
-                    .and_then(|args| args.Result())
-                    .and_then(|result| result.Text())
-                {
-                    let text = text.to_string();
-                    if !text.trim().is_empty()
-                        && let Ok(mut transcript) = transcript_for_results.lock()
-                    {
-                        transcript.push(text);
-                        callback_for_results(SpeechEvent::Partial(transcript.join(" ")));
-                    }
-                }
-                Ok(())
-            }))
-            .map_err(|_| speech_error("Windows Speech could not attach its result handler."))?;
-        session
-            .StartAsync()
-            .and_then(|operation| operation.join())
-            .map_err(|error| {
-                // 0x80045509: the speech privacy policy was not accepted
-                // (Settings > Privacy & security > Speech). Every other
-                // StartAsync failure means the microphone itself is unusable.
-                if error.code().0 == 0x80045509u32 as i32 {
-                    PlatformError::new(
-                        PlatformErrorKind::PermissionDenied,
-                        "start_speech",
-                        "Windows Speech recognition consent has not been granted.",
-                    )
-                } else {
-                    PlatformError::new(
-                        PlatformErrorKind::NotFound,
-                        "start_speech",
-                        "Windows Speech could not access the microphone.",
-                    )
-                }
-            })?;
-        callback(SpeechEvent::Listening);
-        Ok(Box::new(WindowsSpeechSession {
-            recognizer,
-            session,
-            result_token,
-            transcript,
-            callback,
-            finished: false,
-        }))
+        super::windows_speech::start(options, callback)
     }
 }
 
-struct WindowsSpeechSession {
-    recognizer: SpeechRecognizer,
-    session: SpeechContinuousRecognitionSession,
-    result_token: i64,
-    transcript: Arc<Mutex<Vec<String>>>,
-    callback: SpeechCallback,
-    finished: bool,
+struct WindowsTextTarget {
+    window: usize,
+    identity: Vec<i32>,
 }
 
-impl SpeechSession for WindowsSpeechSession {
-    fn stop(&mut self) -> PlatformResult<()> {
-        if self.finished {
-            return Ok(());
-        }
-        self.session
-            .StopAsync()
-            .and_then(|operation| operation.join())
-            .map_err(|_| speech_error("Windows Speech could not finish dictation."))?;
-        let transcript = self
-            .transcript
-            .lock()
-            .map_err(|_| speech_error("Windows Speech result state is unavailable."))?
-            .join(" ");
-        (self.callback)(SpeechEvent::Final(transcript));
-        self.finished = true;
-        Ok(())
+impl WindowsTextTarget {
+    fn capture() -> PlatformResult<Self> {
+        Ok(Self {
+            window: unsafe { GetForegroundWindow() }.0 as usize,
+            identity: focused_identity()?,
+        })
     }
-
-    fn cancel(&mut self) -> PlatformResult<()> {
-        if !self.finished {
-            self.session
-                .CancelAsync()
-                .and_then(|operation| operation.join())
-                .map_err(|_| speech_error("Windows Speech could not cancel dictation."))?;
-            self.finished = true;
-        }
-        Ok(())
+    fn is_current(&self) -> bool {
+        unsafe { GetForegroundWindow() }.0 as usize == self.window
+            && focused_identity().ok().as_ref() == Some(&self.identity)
     }
 }
 
-impl Drop for WindowsSpeechSession {
+// UIA calls may run on Tauri's existing STA or a worker's new MTA. Only
+// balance successful initialization; RPC_E_CHANGED_MODE reuses the STA.
+struct AutomationApartment(bool);
+impl AutomationApartment {
+    fn new() -> Self {
+        Self(unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) }.is_ok())
+    }
+}
+impl Drop for AutomationApartment {
     fn drop(&mut self) {
-        if !self.finished {
-            let _ = self
-                .session
-                .CancelAsync()
-                .and_then(|operation| operation.join());
+        if self.0 {
+            unsafe {
+                CoUninitialize();
+            }
         }
-        let _ = self.session.RemoveResultGenerated(self.result_token);
-        let _ = self.recognizer.Close();
     }
+}
+
+impl crate::text::InsertionTarget for WindowsTextTarget {
+    fn insert(&self, text: &str) -> Result<(), crate::text::TextError> {
+        if !self.is_current() {
+            return Err(crate::text::TextError::SelectionExpired);
+        }
+        send_unicode(text, "insert_text_at_cursor")
+            .map_err(|_| crate::text::TextError::InsertionFailed)
+    }
+}
+
+fn focused_identity() -> PlatformResult<Vec<i32>> {
+    use ::windows::Win32::System::Ole::{
+        SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
+    };
+    let read = || -> ::windows::core::Result<Vec<i32>> {
+        unsafe {
+            let _apartment = AutomationApartment::new();
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)?;
+            let element = automation.GetFocusedElement()?;
+            if element.CurrentIsPassword()?.as_bool() {
+                return Err(::windows::core::Error::from_hresult(HRESULT(
+                    0x80070005u32 as i32,
+                )));
+            }
+            let array = element.GetRuntimeId()?;
+            let result = (|| {
+                let low = SafeArrayGetLBound(array, 1)?;
+                let high = SafeArrayGetUBound(array, 1)?;
+                let mut identity = vec![element.CurrentProcessId()?];
+                for index in low..=high {
+                    let mut value = 0_i32;
+                    SafeArrayGetElement(array, &index, (&mut value as *mut i32).cast())?;
+                    identity.push(value);
+                }
+                // Remember the caret/selection offsets as well as the control.
+                // A moved caret in the same editor must also require recovery.
+                let pattern: IUIAutomationTextPattern =
+                    element.GetCurrentPatternAs(UIA_TextPatternId)?;
+                let selections = pattern.GetSelection()?;
+                if selections.Length()? != 1 {
+                    return Err(::windows::core::Error::from_hresult(HRESULT(
+                        0x80004005u32 as i32,
+                    )));
+                }
+                let selected = selections.GetElement(0)?;
+                let before = pattern.DocumentRange()?;
+                use ::windows::Win32::UI::Accessibility::{
+                    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
+                };
+                before.MoveEndpointByRange(
+                    TextPatternRangeEndpoint_End,
+                    &selected,
+                    TextPatternRangeEndpoint_Start,
+                )?;
+                identity.push(before.GetText(-1)?.len() as i32);
+                identity.push(selected.GetText(-1)?.len() as i32);
+                Ok(identity)
+            })();
+            let _ = SafeArrayDestroy(array);
+            result
+        }
+    };
+    read().map_err(|_| {
+        PlatformError::unsupported(
+            "capture_insertion_target",
+            "Focus an editable text field first.",
+        )
+    })
 }
 
 struct WindowsCredentialStore;
@@ -526,146 +430,9 @@ impl CredentialStore for WindowsCredentialStore {
     }
 }
 
-fn foreground_application(window: HWND) -> ActiveApplication {
-    let mut title = [0_u16; 260];
-    let title_length = unsafe { GetWindowTextW(window, &mut title) }.max(0) as usize;
-    let name = String::from_utf16_lossy(&title[..title_length]);
-    let mut process_id = 0_u32;
-    unsafe {
-        GetWindowThreadProcessId(window, Some(&mut process_id));
-    }
-    ActiveApplication {
-        process_id,
-        name: if name.is_empty() {
-            format!("Application {process_id}")
-        } else {
-            name
-        },
-        identifier: None,
-        native_handle: window.0 as usize,
-    }
-}
-
-fn clipboard_sequence_number() -> u32 {
-    unsafe { GetClipboardSequenceNumber() }
-}
-
-fn clipboard_text() -> PlatformResult<String> {
-    unsafe {
-        OpenClipboard(None).map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
-        let result = (|| {
-            let handle = GetClipboardData(u32::from(CF_UNICODETEXT.0))
-                .map_err(|_| os_error("clipboard", "The clipboard could not be read."))?;
-            if handle.0.is_null() {
-                return Err(os_error("clipboard", "The clipboard holds no text."));
-            }
-            let memory = ::windows::Win32::Foundation::HGLOBAL(handle.0);
-            let locked = GlobalLock(memory) as *const u16;
-            if locked.is_null() {
-                return Err(os_error("clipboard", "The clipboard could not be read."));
-            }
-            let length = GlobalSize(memory) / 2;
-            let slice = std::slice::from_raw_parts(locked, length);
-            let end = slice.iter().position(|unit| *unit == 0).unwrap_or(length);
-            let text = String::from_utf16_lossy(&slice[..end]);
-            let _ = GlobalUnlock(memory);
-            Ok(text)
-        })();
-        let _ = CloseClipboard();
-        result
-    }
-}
-
-fn set_clipboard_text(text: &str) -> PlatformResult<()> {
-    unsafe {
-        let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
-        let bytes = wide.len() * 2;
-        OpenClipboard(None).map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
-        let result = (|| {
-            EmptyClipboard().map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
-            let memory = GlobalAlloc(GMEM_MOVEABLE, bytes)
-                .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
-            let locked = GlobalLock(memory) as *mut u16;
-            if locked.is_null() {
-                return Err(os_error("clipboard", "The clipboard could not be written."));
-            }
-            std::ptr::copy_nonoverlapping(wide.as_ptr(), locked, wide.len());
-            let _ = GlobalUnlock(memory);
-            SetClipboardData(
-                u32::from(CF_UNICODETEXT.0),
-                Some(HANDLE(memory.0 as *mut _)),
-            )
-            .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
-            // Ownership passes to the system on success; HGLOBAL is a plain
-            // handle with no Drop, so there is nothing to free here.
-            Ok(())
-        })();
-        let _ = CloseClipboard();
-        result
-    }
-}
-
-/// Silently restores the pre-capture clipboard text, but only when nothing
-/// else changed the clipboard since (`observed` guards against clobbering a
-/// newer copy). A `None` backup means the clipboard held no text; it is left
-/// alone so non-text content is never destroyed.
-fn restore_clipboard_backup(backup: Option<&str>, observed: u32) {
-    let Some(backup) = backup else { return };
-    if clipboard_sequence_number() != observed {
-        return;
-    }
-    let _ = set_clipboard_text(backup);
-}
-
-fn wait_for_clipboard_change(before: u32, timeout: std::time::Duration) -> bool {
-    let deadline = std::time::Instant::now() + timeout;
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        if clipboard_sequence_number() != before {
-            return true;
-        }
-        if std::time::Instant::now() >= deadline {
-            return false;
-        }
-    }
-}
-
-fn send_control_keystroke(key: u8, operation: &'static str) -> PlatformResult<()> {
-    let inputs = [
-        vk_input(VK_CONTROL.0, KEYBD_EVENT_FLAGS(0)),
-        vk_input(key as u16, KEYBD_EVENT_FLAGS(0)),
-        vk_input(key as u16, KEYEVENTF_KEYUP),
-        vk_input(VK_CONTROL.0, KEYEVENTF_KEYUP),
-    ];
-    let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) } as usize;
-    if sent == inputs.len() {
-        Ok(())
-    } else {
-        Err(os_error(operation, "The keyboard event could not be sent."))
-    }
-}
-
-fn vk_input(
-    code: u16,
-    flags: ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
-) -> INPUT {
-    INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(code),
-                wScan: 0,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    }
-}
-
 fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let _apartment = AutomationApartment::new();
         let automation: IUIAutomation =
             CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER).map_err(|_| {
                 os_error("get_selected_text", "Windows UI Automation is unavailable.")
@@ -673,6 +440,12 @@ fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
         let focused = automation
             .GetFocusedElement()
             .map_err(|_| os_error("get_selected_text", "The focused control is unavailable."))?;
+        if focused.CurrentIsPassword().unwrap_or_default().as_bool() {
+            return Err(PlatformError::unsupported(
+                "get_selected_text",
+                "Password fields are excluded.",
+            ));
+        }
         let pattern: IUIAutomationTextPattern = focused
             .GetCurrentPatternAs(UIA_TextPatternId)
             .map_err(|_| {
@@ -684,7 +457,7 @@ fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
         let selection = pattern
             .GetSelection()
             .map_err(|_| os_error("get_selected_text", "The selection could not be read."))?;
-        if selection.Length().unwrap_or_default() < 1 {
+        if selection.Length().unwrap_or_default() != 1 {
             return Err(PlatformError::new(
                 PlatformErrorKind::NotFound,
                 "get_selected_text",
@@ -891,16 +664,4 @@ fn wide(value: &str) -> Vec<u16> {
 
 fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformError {
     PlatformError::new(PlatformErrorKind::Os, operation, message)
-}
-
-fn speech_error(message: impl Into<String>) -> PlatformError {
-    PlatformError::new(PlatformErrorKind::Speech, "start_speech", message)
-}
-
-// Setup failures (missing language pack, uncompilable grammar) mean
-// recognition itself is unavailable, not a backend crash: they map to
-// `RecognitionUnavailable` ("Speech recognition is currently
-// unavailable.", retryable) instead of "Dictation stopped unexpectedly."
-fn speech_unavailable(message: impl Into<String>) -> PlatformError {
-    PlatformError::new(PlatformErrorKind::Unsupported, "start_speech", message)
 }

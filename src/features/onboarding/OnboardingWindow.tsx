@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { DictationPractice } from "../../components/DictationPractice";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { formatShortcut } from "../../components/ShortcutRecorder";
@@ -44,6 +45,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
     setBusyPermission(kind);
     setMessage(null);
     try {
+      if (context.platform === "windows") await nativeBridge.openPermissionSettings(kind);
       setPermissions(await nativeBridge.requestPermission(kind));
     } catch {
       setMessage("Permission wasn’t granted. You can open Settings and try again.");
@@ -77,6 +79,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
         ) : null}
         {step === 2 ? (
           <DictationStep
+            dictationShortcut={settings.dictationShortcut}
             busyPermission={busyPermission}
             platform={context.platform}
             request={(kind) => void request(kind)}
@@ -164,7 +167,7 @@ function PermissionsStep({ busyPermission, dictationShortcut, platform, request,
   );
 }
 
-function DictationStep({ busyPermission, platform, request, statusByKind }: Omit<StepPermissionsProps, "dictationShortcut">) {
+function DictationStep({ busyPermission, platform, request, statusByKind, dictationShortcut }: StepPermissionsProps) {
   const showSpeechRecognition = platform === "macos" && statusByKind["speech-recognition"]?.state !== "unavailable";
   return (
     <div className="onboarding-step">
@@ -190,9 +193,8 @@ function DictationStep({ busyPermission, platform, request, statusByKind }: Omit
           />
         ) : null}
       </div>
-      {platform === "windows" ? (
-        <p className="onboarding-copy">If dictation can’t start, turn on Online speech recognition under Settings → Privacy &amp; security → Speech.</p>
-      ) : null}
+      <DictationPractice platform={platform} shortcut={dictationShortcut} />
+      {platform === "windows" ? <p className="onboarding-copy">Use an installed Windows desktop speech language and allow microphone access for desktop apps in Windows Settings.</p> : null}
     </div>
   );
 }

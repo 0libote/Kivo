@@ -66,7 +66,7 @@ function handleMenuKey(
   dispatch: PopupDispatch,
 ): void {
   const target = event.target as HTMLElement | null;
-  if (target?.matches("input, textarea") || target?.closest("button:not(.writing-action)")) return;
+  if (target?.matches("input, textarea, summary") || target?.closest("button:not(.writing-action)")) return;
   const delta = MENU_MOVEMENT[event.key];
   if (delta !== undefined) {
     event.preventDefault();
@@ -303,6 +303,12 @@ interface MenuViewProps {
 
 function MenuView(props: MenuViewProps) {
   const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText, summarizeEnabled } = props;
+  const more = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (selectedIndex >= 3 && more.current) more.current.open = true; }, [selectedIndex]);
+  const renderAction = (action: typeof actions[number], index: number) => <button
+    aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
+    key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
+    role="option" type="button"><Icon name={action.icon} size={16} /><span>{action.label}</span></button>;
   return (
     <div className="writing-menu">
       <div className="writing-command" data-tauri-drag-region>
@@ -316,21 +322,8 @@ function MenuView(props: MenuViewProps) {
         </button>
       </div>
       <div aria-label="Writing actions" className="writing-actions" role="listbox">
-        {actions.map((action, index) => (
-          <button
-            aria-selected={index === selectedIndex}
-            className="writing-action"
-            data-selected={index === selectedIndex}
-            key={action.id}
-            onClick={() => void runAction(action.id)}
-            onFocus={() => dispatch({ type: "SELECT", index })}
-            role="option"
-            type="button"
-          >
-            <Icon name={action.icon} size={16} />
-            <span>{action.label}</span>
-          </button>
-        ))}
+        {actions.slice(0, 3).map(renderAction)}
+        {actions.length > 3 ? <details className="writing-more" ref={more}><summary>More actions</summary><div role="group" aria-label="More writing actions">{actions.slice(3).map((action, index) => renderAction(action, index + 3))}</div></details> : null}
       </div>
       {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText={false} /> : null}
       {allowManualText ? (

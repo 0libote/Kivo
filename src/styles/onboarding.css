@@ -1,12 +1,12 @@
-.onboarding-window { width: 100%; height: 100%; position: relative; display: grid; place-items: center; padding: 38px; background: var(--bg); }
-.onboarding-panel { width: min(510px, 100%); min-height: 430px; display: flex; flex-direction: column; }
-.onboarding-step { flex: 1; display: flex; flex-direction: column; align-items: flex-start; padding: 18px 22px 0; animation: onboarding-in 180ms ease-out; }
+.onboarding-window { width: 100%; height: 100%; position: relative; display: grid; place-items: start center; overflow-y: auto; padding: 28px; background: var(--bg); }
+.onboarding-panel { width: min(510px, 100%); min-height: min(460px, calc(100vh - 56px)); display: flex; flex-direction: column; }
+.onboarding-step { flex: 1; display: flex; flex-direction: column; align-items: flex-start; padding: 18px 14px 0; animation: onboarding-in 180ms ease-out; }
 @keyframes onboarding-in { from { opacity: 0; transform: translateX(6px); } to { opacity: 1; transform: none; } }
 .onboarding-welcome { align-items: center; justify-content: center; text-align: center; padding-bottom: 48px; }
-.onboarding-mark { width: 66px; height: 66px; display: grid; place-items: center; margin-bottom: 19px; border-radius: 16px; color: #f7f7f5; background: #1c1c1e; box-shadow: 0 9px 22px rgba(0,0,0,.15); }
+.onboarding-mark { width: 66px; height: 66px; display: grid; place-items: center; margin-bottom: 19px; border-radius: 16px; color: var(--accent-text); background: var(--accent); box-shadow: 0 9px 22px rgba(0,0,0,.15); }
 .onboarding-step__icon { width: 45px; height: 45px; display: grid; place-items: center; margin-bottom: 15px; border-radius: 11px; background: var(--surface-muted); color: var(--accent); }
 .onboarding-eyebrow { margin: 0 0 8px; color: var(--text-secondary); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
-.onboarding-step h1 { margin: 0 0 13px; font-size: 28px; line-height: 1.16; letter-spacing: -.025em; }
+.onboarding-step h1 { margin: 0 0 13px; font-size: 30px; line-height: 1.16; letter-spacing: -.025em; }
 .onboarding-copy { max-width: 430px; margin: 0 0 24px; color: var(--text-secondary); font-size: 14px; line-height: 1.5; }
 .permission-list { width: 100%; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-strong); }
 .permission-row { min-height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-top: 1px solid var(--border); }
@@ -31,3 +31,5 @@
 
 :root[data-platform="windows"] .onboarding-mark,
 :root[data-platform="windows"] .onboarding-step__icon { border-radius: 8px; }
+
+.onboarding-step .dictation-practice { margin: 16px 0; }

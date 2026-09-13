@@ -24,6 +24,8 @@ function eventFromSnapshot(snapshot: DictationSnapshot) {
       return { type: "IDLE" } as const;
     case "listening":
       return { type: "LISTEN", sessionId: snapshot.sessionId } as const;
+    case "starting":
+      return { type: "START" } as const;
     case "processing":
       return { type: "PROCESS" } as const;
     case "success":
@@ -42,7 +44,7 @@ function eventFromSnapshot(snapshot: DictationSnapshot) {
 function mockInitialStatus(): DictationStatus {
   if (nativeBridge.isNative) return "hidden";
   const candidate = new URLSearchParams(window.location.search).get("state");
-  if (candidate === "idle" || candidate === "processing" || candidate === "success" || candidate === "error" || candidate === "hidden") {
+  if (candidate === "starting" || candidate === "idle" || candidate === "processing" || candidate === "success" || candidate === "error" || candidate === "hidden") {
     return candidate;
   }
   return "listening";
@@ -101,16 +103,17 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
           {state.status === "listening" ? (
             <>
               <span className="flow-bar__mic"><Icon name="microphone" size={15} /></span>
-              <span aria-hidden="true" className="waveform">
+              {platform === "macos" ? <span aria-hidden="true" className="waveform">
                 {levels.map((bar) => (
                   <i key={bar.id} style={{ "--level": bar.value } as React.CSSProperties} />
                 ))}
-              </span>
+              </span> : <span className="flow-bar__listening">Listening</span>}
+              <button className="flow-bar__stop" aria-label="Finish dictation" onClick={() => void nativeBridge.stopDictation()} type="button"><span /></button>
             </>
           ) : null}
 
-          {state.status === "processing" ? (
-            <div className="flow-bar__processing"><Spinner label="Improving dictated text" /><span>Finishing</span></div>
+          {state.status === "processing" || state.status === "starting" ? (
+            <div className="flow-bar__processing"><Spinner label={state.status === "starting" ? "Starting microphone" : "Finishing dictation"} /><span>{state.status === "starting" ? "Starting" : "Finishing"}</span></div>
           ) : null}
 
           {state.status === "success" ? (
@@ -121,17 +124,24 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
             <div className="flow-bar__error">
               <Icon name="error" size={16} />
               <span>{state.message}</span>
+              <div className="flow-bar__error-actions">
+              <button onClick={() => void nativeBridge.showSurface("settings")} type="button">Open Kivo</button>
               {state.canRetry ? (
                 <button
                   onClick={() => {
-                    dispatch({ type: "LISTEN" });
-                    void nativeBridge.retryDictation();
+                    void nativeBridge.retryDictation().catch((error: unknown) => dispatch({
+                      type: "FAIL",
+                      message: error instanceof Error ? error.message : "Dictation could not restart.",
+                      canRetry: true,
+                    }));
                   }}
                   type="button"
                 >
                   Retry
                 </button>
               ) : null}
+              <button aria-label="Dismiss dictation error" onClick={() => void nativeBridge.cancelDictation()} type="button">Dismiss</button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -144,6 +154,7 @@ function flowLabel(status: DictationStatus, message: string | null) {
   switch (status) {
     case "idle": return "Dictation ready";
     case "listening": return "Listening";
+    case "starting": return "Starting microphone";
     case "processing": return "Finishing dictation";
     case "success": return "Dictation inserted";
     case "error": return message ?? "Dictation error";

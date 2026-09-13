@@ -71,25 +71,12 @@ impl PlatformTextService {
 impl TextService for PlatformTextService {
     fn capture_selection(&self) -> TextFuture<'_, Result<CapturedSelection, TextError>> {
         Box::pin(async move {
-            // Fast path: Accessibility / UI Automation reads without touching
-            // the clipboard. Any failure other than a missing permission falls
-            // through to the highlight-first simulated Copy below.
-            match self.platform.get_selected_text() {
-                Ok(snapshot) => self.remember(snapshot),
-                Err(error) => {
-                    if error.kind == PlatformErrorKind::PermissionDenied {
-                        return Err(text_error_from_platform(error));
-                    }
-                    let platform = Arc::clone(&self.platform);
-                    let snapshot = tokio::task::spawn_blocking(move || {
-                        platform.capture_selection_via_clipboard()
-                    })
-                    .await
-                    .map_err(|_| TextError::Backend)?
-                    .map_err(text_error_from_platform)?;
-                    self.remember(snapshot)
-                }
-            }
+            // Never simulate Copy: it can destroy non-text clipboard formats.
+            self.remember(
+                self.platform
+                    .get_selected_text()
+                    .map_err(text_error_from_platform)?,
+            )
         })
     }
 
@@ -99,11 +86,6 @@ impl TextService for PlatformTextService {
         replacement: &'a str,
     ) -> TextFuture<'a, Result<(), TextError>> {
         Box::pin(async move {
-            if selection.strategy() == TextAccessStrategy::ClipboardFallback {
-                return self
-                    .paste_replacement(selection, replacement.to_owned())
-                    .await;
-            }
             if selection.strategy() != TextAccessStrategy::Accessibility {
                 return Err(TextError::UnsupportedApplication);
             }
@@ -122,30 +104,15 @@ impl TextService for PlatformTextService {
                         .remove(&selection.ticket());
                     Ok(())
                 }
-                // Direct AX/UIA replacement fails in apps that expose text
-                // read-only; the simulated Paste covers those.
-                Err(error)
-                    if matches!(
-                        error.kind,
-                        PlatformErrorKind::Unsupported
-                            | PlatformErrorKind::InvalidState
-                            | PlatformErrorKind::Os
-                    ) =>
-                {
-                    self.paste_replacement(selection, replacement.to_owned())
-                        .await
-                }
                 Err(error) => Err(text_error_from_platform(error)),
             }
         })
     }
 
-    fn insert_text_at_cursor<'a>(&'a self, text: &'a str) -> TextFuture<'a, Result<(), TextError>> {
-        Box::pin(async move {
-            self.platform
-                .insert_text_at_cursor(text)
-                .map_err(text_error_from_platform)
-        })
+    fn capture_insertion_target(&self) -> Result<Box<dyn crate::text::InsertionTarget>, TextError> {
+        self.platform
+            .capture_insertion_target()
+            .map_err(text_error_from_platform)
     }
 
     fn cursor_position(&self) -> Option<CorePoint> {
@@ -176,29 +143,10 @@ impl PlatformTextService {
         let strategy = snapshot.strategy;
         let selection =
             CapturedSelection::new(ticket, snapshot.text.clone(), application, anchor, strategy)?;
-        self.selections
-            .lock()
-            .map_err(|_| TextError::Backend)?
-            .insert(ticket, snapshot);
+        let mut selections = self.selections.lock().map_err(|_| TextError::Backend)?;
+        selections.clear();
+        selections.insert(ticket, snapshot);
         Ok(selection)
-    }
-
-    async fn paste_replacement(
-        &self,
-        selection: &CapturedSelection,
-        replacement: String,
-    ) -> Result<(), TextError> {
-        let snapshot = self
-            .selections
-            .lock()
-            .map_err(|_| TextError::Backend)?
-            .remove(&selection.ticket())
-            .ok_or(TextError::SelectionExpired)?;
-        let platform = Arc::clone(&self.platform);
-        tokio::task::spawn_blocking(move || platform.paste_replacement(&snapshot, &replacement))
-            .await
-            .map_err(|_| TextError::Backend)?
-            .map_err(text_error_from_platform)
     }
 }
 
@@ -243,9 +191,11 @@ impl SpeechEngine for PlatformSpeechEngine {
             let id = SpeechSessionId(self.next_session.fetch_add(1, Ordering::Relaxed));
             let final_result = Arc::new(Mutex::new(None));
             let result_for_callback = Arc::clone(&final_result);
-            let session = self
-                .platform
-                .start_speech(
+            let platform = Arc::clone(&self.platform);
+            let (started, startup) = tokio::sync::oneshot::channel();
+            let started = Mutex::new(Some(started));
+            let session = tokio::task::spawn_blocking(move || {
+                platform.start_speech(
                     SpeechOptions {
                         language: options.locale,
                         microphone_id: options
@@ -258,6 +208,11 @@ impl SpeechEngine for PlatformSpeechEngine {
                             events(CoreSpeechEvent::AudioLevel(level))
                         }
                         SpeechEvent::Listening => {
+                            if let Ok(mut sender) = started.lock()
+                                && let Some(sender) = sender.take()
+                            {
+                                let _ = sender.send(Ok(()));
+                            }
                             events(CoreSpeechEvent::SpeechDetected);
                         }
                         SpeechEvent::Partial(text) => {
@@ -271,13 +226,28 @@ impl SpeechEngine for PlatformSpeechEngine {
                             }
                         }
                         SpeechEvent::Error(error) => {
+                            let error = speech_error_from_platform(error);
+                            if let Ok(mut sender) = started.lock()
+                                && let Some(sender) = sender.take()
+                            {
+                                let _ = sender.send(Err(error.clone()));
+                            }
                             if let Ok(mut result) = result_for_callback.lock() {
-                                *result = Some(Err(speech_error_from_platform(error)));
+                                *result = Some(Err(error));
                             }
                         }
                     }),
                 )
-                .map_err(speech_error_from_platform)?;
+            })
+            .await
+            .map_err(|_| SpeechError::Backend)?
+            .map_err(speech_error_from_platform)?;
+            // Native macOS startup prepares its model asynchronously. Do not
+            // announce Listening until the microphone actually starts.
+            tokio::time::timeout(Duration::from_secs(10), startup)
+                .await
+                .map_err(|_| SpeechError::RecognitionUnavailable)?
+                .map_err(|_| SpeechError::Backend)??;
             self.sessions
                 .lock()
                 .map_err(|_| SpeechError::Backend)?
@@ -297,14 +267,23 @@ impl SpeechEngine for PlatformSpeechEngine {
         session_id: SpeechSessionId,
     ) -> SpeechFuture<'_, Result<SpeechTranscript, SpeechError>> {
         Box::pin(async move {
-            let final_result = {
-                let mut sessions = self.sessions.lock().map_err(|_| SpeechError::Backend)?;
-                let session = sessions
-                    .get_mut(&session_id)
-                    .ok_or(SpeechError::NotRunning)?;
+            let mut session = self
+                .sessions
+                .lock()
+                .map_err(|_| SpeechError::Backend)?
+                .remove(&session_id)
+                .ok_or(SpeechError::NotRunning)?;
+            let final_result = Arc::clone(&session.final_result);
+            // The blocking OS stop owns the session until it completes. Dropping
+            // this future on cancellation cannot resurrect it in the session map.
+            let _session = tokio::task::spawn_blocking(move || {
                 session.session.stop().map_err(speech_error_from_platform)?;
-                Arc::clone(&session.final_result)
-            };
+                Ok::<_, SpeechError>(session)
+            })
+            .await
+            .map_err(|_| SpeechError::Backend)??;
+            // Keep the callback context alive until the asynchronous final
+            // transcript arrives (or cancellation drops this future).
 
             let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
             loop {
@@ -313,17 +292,9 @@ impl SpeechEngine for PlatformSpeechEngine {
                     .map_err(|_| SpeechError::Backend)?
                     .take()
                 {
-                    self.sessions
-                        .lock()
-                        .map_err(|_| SpeechError::Backend)?
-                        .remove(&session_id);
                     return SpeechTranscript::new(result?);
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    self.sessions
-                        .lock()
-                        .map_err(|_| SpeechError::Backend)?
-                        .remove(&session_id);
                     return Err(SpeechError::NoSpeechDetected);
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;
@@ -347,17 +318,9 @@ impl SpeechEngine for PlatformSpeechEngine {
 fn text_error_from_platform(error: PlatformError) -> TextError {
     match (error.kind, error.operation) {
         (PlatformErrorKind::PermissionDenied, _) => TextError::AccessibilityPermissionRequired,
-        // The clipboard fallback reports the same "nothing to copy" outcome
-        // under its own operation; without this the quick-chat fallback in
-        // `open_writing_tools` is unreachable and every empty selection
-        // surfaces as "Text integration stopped unexpectedly."
-        (PlatformErrorKind::NotFound, "get_selected_text" | "capture_selection_via_clipboard") => {
-            TextError::NoSelection
-        }
-        (PlatformErrorKind::InvalidState, "replace_selected_text" | "paste_replacement") => {
-            TextError::SelectionExpired
-        }
-        (_, "replace_selected_text" | "paste_replacement") => TextError::ReplacementFailed,
+        (PlatformErrorKind::NotFound, "get_selected_text") => TextError::NoSelection,
+        (PlatformErrorKind::InvalidState, "replace_selected_text") => TextError::SelectionExpired,
+        (_, "replace_selected_text") => TextError::ReplacementFailed,
         (PlatformErrorKind::Unsupported, _) => TextError::UnsupportedApplication,
         (_, "insert_text_at_cursor") => TextError::InsertionFailed,
         _ => TextError::Backend,
@@ -384,18 +347,16 @@ mod tests {
     use crate::text::TextError;
 
     #[test]
-    fn clipboard_fallback_errors_stay_actionable() {
-        // ponytail: guards the Windows hotkey path where UIA is unsupported
-        // and every capture goes through the clipboard fallback.
+    fn native_text_errors_stay_actionable() {
         let empty = PlatformError::new(
             PlatformErrorKind::NotFound,
-            "capture_selection_via_clipboard",
+            "get_selected_text",
             "Select some text first.",
         );
         assert_eq!(text_error_from_platform(empty), TextError::NoSelection);
         let expired = PlatformError::new(
             PlatformErrorKind::InvalidState,
-            "paste_replacement",
+            "replace_selected_text",
             "The original application is no longer available.",
         );
         assert_eq!(
@@ -404,7 +365,7 @@ mod tests {
         );
         let failed = PlatformError::new(
             PlatformErrorKind::Os,
-            "paste_replacement",
+            "replace_selected_text",
             "The original application could not be focused.",
         );
         assert_eq!(

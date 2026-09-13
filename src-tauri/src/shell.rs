@@ -1,11 +1,11 @@
-use std::{
-    io::Write,
-    process::{Command, Stdio},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-    },
+#[cfg(not(target_os = "windows"))]
+use std::process::Command;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
+#[cfg(target_os = "macos")]
+use std::{io::Write, process::Stdio};
 
 use serde::Serialize;
 use tauri::{
@@ -32,6 +32,7 @@ pub(crate) struct ShellState {
     dictation_held: AtomicBool,
     dictation_cancel_epoch: AtomicU64,
     escape_shortcut_registered: AtomicBool,
+    pause_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     writing_shortcut: Mutex<Option<String>>,
     dictation_shortcut: Mutex<Option<ActiveDictationShortcut>>,
 }
@@ -73,6 +74,7 @@ impl ShellState {
             dictation_held: AtomicBool::new(false),
             dictation_cancel_epoch: AtomicU64::new(0),
             escape_shortcut_registered: AtomicBool::new(false),
+            pause_item: Mutex::new(None),
             writing_shortcut: Mutex::new(None),
             dictation_shortcut: Mutex::new(None),
         }
@@ -82,21 +84,35 @@ impl ShellState {
         self.paused.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn set_paused(&self, paused: bool) {
+    pub(crate) fn set_paused(&self, app: &AppHandle, paused: bool) {
         self.paused.store(paused, Ordering::Relaxed);
+        if let Ok(item) = self.pause_item.lock()
+            && let Some(item) = item.as_ref()
+        {
+            let _ = item.set_text(if paused { "Resume Kivo" } else { "Pause Kivo" });
+        }
+        if let Some(tray) = app.tray_by_id("kivo") {
+            let _ = tray.set_tooltip(Some(if paused { "Kivo - paused" } else { "Kivo" }));
+        }
+        let _ = app.emit("pause-changed", paused);
+        if paused {
+            dispatch_dictation_event(app.clone(), HoldShortcutEvent::Cancelled);
+        }
     }
 }
 
-pub(crate) struct DeferredSettingsRuntime;
+pub(crate) struct ShellSettingsRuntime(pub AppHandle);
 
-impl SettingsRuntime for DeferredSettingsRuntime {
+impl SettingsRuntime for ShellSettingsRuntime {
     fn apply(
         &self,
-        _previous: &AppSettings,
-        _updated: &AppSettings,
+        previous: &AppSettings,
+        updated: &AppSettings,
     ) -> Result<(), SettingsRuntimeError> {
-        // Tauri objects are main-thread-bound. The command boundary applies these
-        // effects before persisting the corresponding frontend settings patch.
+        if let Err(error) = apply_settings(&self.0, &FrontendSettings::from(updated.clone())) {
+            let _ = apply_settings(&self.0, &FrontendSettings::from(previous.clone()));
+            return Err(error);
+        }
         Ok(())
     }
 }
@@ -135,7 +151,7 @@ pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         true,
         true,
     )?;
-    build_window(app, "settings", "Kivo Settings", 820.0, 600.0, true, false)?;
+    build_window(app, "settings", "Kivo", 900.0, 650.0, true, false)?;
     build_window(
         app,
         "onboarding",
@@ -150,6 +166,7 @@ pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         ("flow-bar", OverlayKind::FlowBar),
         ("writing-tools", OverlayKind::WritingTools),
         ("settings", OverlayKind::Settings),
+        ("onboarding", OverlayKind::Settings),
     ] {
         style_window(app, label, kind);
     }
@@ -157,12 +174,17 @@ pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
 }
 
 pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
+    let pause = tauri::menu::MenuItem::with_id(app, "pause", "Pause Kivo", true, None::<&str>)?;
+    *app.state::<ShellState>()
+        .pause_item
+        .lock()
+        .expect("tray state") = Some(pause.clone());
     let menu = MenuBuilder::new(app)
         .text("settings", "Settings…")
         .text("writing-tools", "Writing Tools")
         .text("dictation", "Start Dictation")
         .separator()
-        .text("pause", "Pause Kivo")
+        .item(&pause)
         .text("about", "About Kivo")
         .separator()
         .quit()
@@ -191,7 +213,7 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             "pause" => {
                 let shell = app.state::<ShellState>();
-                shell.set_paused(!shell.paused());
+                shell.set_paused(app, !shell.paused());
             }
             "about" => {
                 let _ = show_surface(app, "settings", true);
@@ -215,6 +237,24 @@ fn build_window(
     focusable: bool,
     transparent: bool,
 ) -> tauri::Result<WebviewWindow> {
+    let (width, height) = if !transparent {
+        app.primary_monitor()
+            .ok()
+            .flatten()
+            .map(|monitor| {
+                let area = monitor
+                    .work_area()
+                    .size
+                    .to_logical::<f64>(monitor.scale_factor());
+                (
+                    width.min((area.width - 32.0).max(320.0)),
+                    height.min((area.height - 64.0).max(320.0)),
+                )
+            })
+            .unwrap_or((width, height))
+    } else {
+        (width, height)
+    };
     let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
         .title(title)
         .inner_size(width, height)
@@ -422,7 +462,7 @@ fn register_writing_shortcut(
 pub(crate) fn apply_settings(
     app: &AppHandle,
     settings: &FrontendSettings,
-) -> Result<(), crate::commands::AppCoreError> {
+) -> Result<(), SettingsRuntimeError> {
     let autolaunch = app.autolaunch();
     let autolaunch_enabled = autolaunch
         .is_enabled()
@@ -448,55 +488,90 @@ pub(crate) fn apply_settings(
     if let Err(error) = dictation
         && error.kind != PlatformErrorKind::PermissionDenied
     {
-        return Err(SettingsRuntimeError::ShortcutUnavailable.into());
+        return Err(SettingsRuntimeError::ShortcutUnavailable);
     }
-    if settings.show_idle_flow_bar {
-        emit_dictation(app, "idle", None, false);
-        let _ = show_surface(app, "flow-bar", false);
-    } else {
-        hide_surface(app, "flow-bar");
+    if app
+        .state::<AppCore>()
+        .dictation_phase()
+        .ok()
+        .is_some_and(|phase| matches!(phase, DictationPhase::Hidden | DictationPhase::Success))
+    {
+        if settings.show_idle_flow_bar {
+            emit_dictation(app, "idle", None, false);
+            let _ = show_surface(app, "flow-bar", false);
+        } else {
+            hide_surface(app, "flow-bar");
+        }
     }
+    apply_theme(app, &settings.theme);
     Ok(())
 }
 
+pub(crate) fn apply_theme(app: &AppHandle, theme: &str) {
+    for label in ["settings", "onboarding", "writing-tools", "flow-bar"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let theme = match theme {
+                "light" => Some(tauri::Theme::Light),
+                "dark" => Some(tauri::Theme::Dark),
+                _ => None,
+            };
+            let _ = window.set_theme(theme);
+        }
+    }
+}
+
 pub(crate) async fn begin_dictation(app: &AppHandle, core: &AppCore) -> Result<(), CommandError> {
-    if core.dictation_phase().map_err(CommandError::from)? == DictationPhase::Listening {
+    if app.state::<ShellState>().paused() {
+        return Ok(());
+    }
+    if matches!(
+        core.dictation_phase().map_err(CommandError::from)?,
+        DictationPhase::Starting | DictationPhase::Listening | DictationPhase::Processing
+    ) {
         return Ok(());
     }
     show_surface(app, "flow-bar", false).map_err(platform_command_error)?;
-    emit_dictation(app, "listening", None, false);
+    emit_dictation(app, "starting", None, false);
+    register_cancel_shortcut(app);
+    let generation = core.dictation_generation() + 1;
     let event_app = app.clone();
-    let events: SpeechEventSink = Arc::new(move |event| match event {
-        SpeechEvent::AudioLevel(level) => {
-            let _ = event_app.emit_to("flow-bar", "dictation-level", level);
+    let events: SpeechEventSink = Arc::new(move |event| {
+        if event_app.state::<AppCore>().dictation_generation() != generation {
+            return;
         }
-        SpeechEvent::SpeechDetected => {}
+        match event {
+            SpeechEvent::AudioLevel(level) => {
+                let _ = event_app.emit_to("flow-bar", "dictation-level", level);
+            }
+            SpeechEvent::SpeechDetected => {}
+        }
     });
     if let Err(error) = core.begin_dictation(events).await {
+        if core.dictation_generation() != generation
+            || matches!(
+                error,
+                crate::commands::AppCoreError::Speech(crate::speech::SpeechError::AlreadyRunning)
+            )
+        {
+            return Ok(());
+        }
+        unregister_cancel_shortcut(app);
         let error = CommandError::from(error);
         emit_dictation(app, "error", Some(&error.message), error.recoverable);
         return Err(error);
     }
-    register_cancel_shortcut(app);
+    if core.dictation_phase().ok() != Some(DictationPhase::Listening) {
+        return Ok(());
+    }
+    emit_dictation(app, "listening", None, false);
     play_dictation_feedback(core, FeedbackMoment::Start);
     Ok(())
 }
 
 pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandError> {
     let core = app.state::<AppCore>();
-    // Show instantly at the cursor before the slow selection capture below.
-    // Capture can take ~2s on the clipboard-fallback path; the popup renders
-    // a loading state until the writing-context event arrives.
-    let fast_cursor = app
-        .try_state::<Arc<PlatformServices>>()
-        .and_then(|platform| platform.cursor_position().ok())
-        .map(|point| crate::text::ScreenPoint {
-            x: point.x,
-            y: point.y,
-        });
-    let _ = size_writing_surface(app, "menu");
-    position_writing_surface(app, fast_cursor, None);
-    let _ = show_surface(app, "writing-tools", true);
+    // Native capture must finish while the original application's control
+    // still owns focus. Both UIA and macOS Accessibility depend on this.
     match core.open_writing_tools().await {
         Ok(context) => {
             // Size before positioning: placement clamps against the real
@@ -532,22 +607,43 @@ pub(crate) async fn finish_dictation(app: &AppHandle, core: &AppCore) -> Result<
     if core.dictation_phase().map_err(CommandError::from)? != DictationPhase::Listening {
         return Ok(());
     }
-    unregister_cancel_shortcut(app);
+    let generation = core.dictation_generation();
     emit_dictation(app, "processing", None, false);
-    match core.finish_dictation().await {
+    let result = core.finish_dictation().await;
+    if core.dictation_generation() != generation {
+        return Ok(());
+    }
+    unregister_cancel_shortcut(app);
+    let _ = app.emit_to("settings", "recovery-changed", ());
+    match result {
+        Ok(DictationPhase::Hidden) => {
+            sync_idle_flow_bar(app);
+            Ok(())
+        }
         Ok(_) => {
             play_dictation_feedback(core, FeedbackMoment::Finish);
             emit_dictation(app, "success", None, false);
             let app = app.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(620)).await;
-                sync_idle_flow_bar(&app);
+                let core = app.state::<AppCore>();
+                if core.dictation_generation() == generation
+                    && core.dictation_phase().ok() == Some(DictationPhase::Success)
+                {
+                    sync_idle_flow_bar(&app);
+                }
             });
             Ok(())
         }
         Err(error) => {
+            let recovered = matches!(error, crate::commands::AppCoreError::Text(_));
             let error = CommandError::from(error);
-            emit_dictation(app, "error", Some(&error.message), error.recoverable);
+            let message = if recovered && core.recovery_text().ok().flatten().is_some() {
+                "Text saved. Open Kivo to copy it."
+            } else {
+                &error.message
+            };
+            emit_dictation(app, "error", Some(message), error.recoverable);
             Err(error)
         }
     }
@@ -592,8 +688,7 @@ pub(crate) fn emit_dictation(
     can_retry: bool,
 ) {
     size_flow_bar(app, status);
-    let _ = app.emit_to(
-        "flow-bar",
+    let _ = app.emit(
         "dictation-state",
         DictationSnapshot {
             status,
@@ -606,10 +701,10 @@ pub(crate) fn emit_dictation(
 fn size_flow_bar(app: &AppHandle, status: &str) {
     let (width, height) = match status {
         "idle" => (40.0, 40.0),
-        "listening" => (104.0, 48.0),
-        "processing" => (128.0, 48.0),
+        "listening" => (164.0, 48.0),
+        "processing" | "starting" => (128.0, 48.0),
         "success" => (48.0, 48.0),
-        "error" => (220.0, 56.0),
+        "error" => (380.0, 96.0),
         _ => (40.0, 40.0),
     };
     if let Some(window) = app.get_webview_window("flow-bar") {
@@ -693,13 +788,18 @@ fn position_flow_bar(app: &AppHandle, window: &WebviewWindow) {
     let Some(monitor) = monitor else {
         return;
     };
-    let size = monitor.size();
-    let origin = monitor.position();
+    let work_area = monitor.work_area();
+    let size = &work_area.size;
+    let origin = &work_area.position;
     let Ok(window_size) = window.outer_size() else {
         return;
     };
     let x = origin.x + (size.width.saturating_sub(window_size.width) / 2) as i32;
-    let y = origin.y + size.height.saturating_sub(window_size.height + 48) as i32;
+    let y = origin.y
+        + size
+            .height
+            .saturating_sub(window_size.height + (16.0 * monitor.scale_factor()) as u32)
+            as i32;
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
 }
 
@@ -796,8 +896,9 @@ pub(crate) fn position_writing_surface(
     let Some(monitor) = monitor else {
         return;
     };
-    let origin = monitor.position();
-    let monitor_size = monitor.size();
+    let work_area = monitor.work_area();
+    let origin = &work_area.position;
+    let monitor_size = &work_area.size;
     let window_width = window_size.width as f64;
     let window_height = window_size.height as f64;
     // Points arrive in physical pixels; the stored cursor/selection values
@@ -869,8 +970,9 @@ fn clamp_to_monitor_on(
     let Some(monitor) = monitor else {
         return;
     };
-    let origin = monitor.position();
-    let monitor_size = monitor.size();
+    let work_area = monitor.work_area();
+    let origin = &work_area.position;
+    let monitor_size = &work_area.size;
     position.x = position.x.clamp(
         origin.x + 8,
         (origin.x + monitor_size.width as i32 - window_size.width as i32 - 8).max(origin.x + 8),
@@ -890,8 +992,9 @@ fn center_on_monitor(window: &WebviewWindow, window_size: tauri::PhysicalSize<u3
     let Some(monitor) = monitor else {
         return;
     };
-    let origin = monitor.position();
-    let monitor_size = monitor.size();
+    let work_area = monitor.work_area();
+    let origin = &work_area.position;
+    let monitor_size = &work_area.size;
     let x = origin.x + (monitor_size.width.saturating_sub(window_size.width) / 2) as i32;
     let y = origin.y + (monitor_size.height.saturating_sub(window_size.height) / 2) as i32;
     let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
@@ -921,10 +1024,9 @@ pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(),
     };
     #[cfg(target_os = "windows")]
     let url = match permission {
-        // Speech-privacy denials (online speech recognition) live under
-        // Speech, not the microphone page.
+        // Desktop SAPI uses installed speech languages, not online speech consent.
         PermissionKind::Microphone => "ms-settings:privacy-microphone",
-        _ => "ms-settings:privacy-speech",
+        _ => "ms-settings:speech",
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let url = "";
@@ -954,17 +1056,35 @@ fn open_url(url: &str) -> Result<(), PlatformError> {
         command
     };
     #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", url]);
-        command
-    };
+    {
+        use windows::{
+            Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL},
+            core::{PCWSTR, w},
+        };
+        let url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let result = unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                PCWSTR(url.as_ptr()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            )
+        };
+        if result.0 as isize > 32 {
+            Ok(())
+        } else {
+            Err(window_error("open_url"))
+        }
+    }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let mut command = {
         let mut command = Command::new("xdg-open");
         command.arg(url);
         command
     };
+    #[cfg(not(target_os = "windows"))]
     command.spawn().map(|_| ()).map_err(|_| {
         PlatformError::new(
             PlatformErrorKind::Os,
@@ -974,27 +1094,70 @@ fn open_url(url: &str) -> Result<(), PlatformError> {
     })
 }
 
-pub(crate) fn copy_text(text: &str) -> Result<(), PlatformError> {
-    #[cfg(target_os = "macos")]
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| clipboard_error())?;
+pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError> {
     #[cfg(target_os = "windows")]
-    let mut child = Command::new("clip")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| clipboard_error())?;
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    return Err(clipboard_error());
-    child
-        .stdin
-        .take()
-        .ok_or_else(clipboard_error)?
-        .write_all(text.as_bytes())
-        .map_err(|_| clipboard_error())?;
-    child.wait().map_err(|_| clipboard_error())?;
-    Ok(())
+    {
+        use windows::Win32::{
+            Foundation::{GlobalFree, HANDLE, HWND},
+            System::{
+                DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+                Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+                Ole::CF_UNICODETEXT,
+            },
+        };
+        let window = app
+            .get_webview_window("settings")
+            .ok_or_else(clipboard_error)?;
+        let hwnd = window.hwnd().map_err(|_| clipboard_error())?;
+        let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+        unsafe {
+            let memory =
+                GlobalAlloc(GMEM_MOVEABLE, text.len() * 2).map_err(|_| clipboard_error())?;
+            let locked = GlobalLock(memory) as *mut u16;
+            if locked.is_null() {
+                let _ = GlobalFree(Some(memory));
+                return Err(clipboard_error());
+            }
+            std::ptr::copy_nonoverlapping(text.as_ptr(), locked, text.len());
+            let _ = GlobalUnlock(memory);
+            if OpenClipboard(Some(HWND(hwnd.0))).is_err() {
+                let _ = GlobalFree(Some(memory));
+                return Err(clipboard_error());
+            }
+            let result = EmptyClipboard().and_then(|_| {
+                SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0)))
+            });
+            let _ = CloseClipboard();
+            if result.is_err() {
+                let _ = GlobalFree(Some(memory));
+                return Err(clipboard_error());
+            }
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = app;
+        let mut child = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|_| clipboard_error())?;
+        child
+            .stdin
+            .take()
+            .ok_or_else(clipboard_error)?
+            .write_all(text.as_bytes())
+            .map_err(|_| clipboard_error())?;
+        if !child.wait().map_err(|_| clipboard_error())?.success() {
+            return Err(clipboard_error());
+        }
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (app, text);
+        Err(clipboard_error())
+    }
 }
 
 fn clipboard_error() -> PlatformError {
@@ -1045,13 +1208,11 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
             let available = available_version
                 .as_deref()
                 .is_some_and(|version| version_is_newer(version, &current_version));
-            if available {
-                return Ok(UpdateResult {
-                    current_version,
-                    available_version,
-                    available,
-                });
-            }
+            return Ok(UpdateResult {
+                current_version,
+                available_version,
+                available,
+            });
         } else if stable.status() != reqwest::StatusCode::NOT_FOUND {
             return Err(update_check_error());
         }

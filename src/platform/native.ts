@@ -21,6 +21,9 @@ import {
 } from "../types";
 
 type NativeEventMap = {
+  "show-about": null;
+  "recovery-changed": null;
+  "pause-changed": boolean;
   "dictation-state": DictationSnapshot;
   "dictation-level": number;
   "writing-context": SelectionContext;
@@ -39,6 +42,8 @@ export interface NativeBridge {
   readonly isNative: boolean;
   getContext(): Promise<AppContext>;
   getSettings(): Promise<AppSettings>;
+  getDictationRecovery(): Promise<string | null>;
+  clearDictationRecovery(): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   getPermissions(): Promise<PermissionStatus[]>;
   requestPermission(kind: PermissionKind): Promise<PermissionStatus[]>;
@@ -120,6 +125,8 @@ class TauriBridge implements NativeBridge {
   }
 
   getSettings = () => call<AppSettings>("get_settings");
+  getDictationRecovery = () => call<string | null>("get_dictation_recovery");
+  clearDictationRecovery = () => call<void>("clear_dictation_recovery");
   updateSettings = (patch: Partial<AppSettings>) => call<AppSettings>("update_settings", { patch });
   getPermissions = () => call<PermissionStatus[]>("get_permission_statuses");
   requestPermission = (kind: PermissionKind) => call<PermissionStatus[]>("request_permission", { kind });
@@ -162,6 +169,7 @@ class MockBridge implements NativeBridge {
   private readonly platform = detectedPlatform();
   private settings: AppSettings;
   private permissions: PermissionStatus[];
+  private paused = false;
   private apiKeyStatus: ApiKeyStatus = { configured: false, connection: "untested" };
   private readonly listeners: ListenerMap = {};
 
@@ -184,9 +192,12 @@ class MockBridge implements NativeBridge {
       surface: surfaceFromLabel(undefined),
       version: "0.1.0-dev",
       development: true,
-      paused: false,
+      paused: this.paused,
     };
   }
+
+  async getDictationRecovery(): Promise<string | null> { return null; }
+  async clearDictationRecovery() { this.emit("recovery-changed", null); }
 
   async getSettings() {
     return structuredClone(this.settings);
@@ -327,8 +338,9 @@ class MockBridge implements NativeBridge {
   async completeOnboarding() {
     await this.updateSettings({ onboardingComplete: true });
   }
-  async setPaused() {
-    // Intentional no-op: browser harness has no tray pause state to update.
+  async setPaused(paused: boolean) {
+    this.paused = paused;
+    this.emit("pause-changed", paused);
   }
   async checkForUpdates() {
     await delay(450);

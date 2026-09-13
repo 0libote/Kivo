@@ -21,18 +21,6 @@ impl PlatformImpl {
         Err(unsupported("get_selected_text"))
     }
 
-    pub(super) fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
-        Err(unsupported("capture_selection_via_clipboard"))
-    }
-
-    pub(super) fn paste_replacement(
-        &self,
-        _snapshot: &SelectionSnapshot,
-        _replacement: &str,
-    ) -> PlatformResult<()> {
-        Err(unsupported("paste_replacement"))
-    }
-
     pub(super) fn cursor_position(&self) -> PlatformResult<ScreenPoint> {
         Err(unsupported("cursor_position"))
     }
@@ -45,8 +33,10 @@ impl PlatformImpl {
         Err(unsupported("replace_selected_text"))
     }
 
-    pub(super) fn insert_text_at_cursor(&self, _text: &str) -> PlatformResult<()> {
-        Err(unsupported("insert_text_at_cursor"))
+    pub(super) fn capture_insertion_target(
+        &self,
+    ) -> PlatformResult<Box<dyn crate::text::InsertionTarget>> {
+        Err(unsupported("capture_insertion_target"))
     }
 
     pub(super) fn permission_status(

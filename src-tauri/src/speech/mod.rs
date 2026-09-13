@@ -78,11 +78,11 @@ impl fmt::Display for SpeechError {
                 "Speech Recognition access is required for dictation."
             }
             Self::MicrophoneUnavailable => "The selected microphone is unavailable.",
-            Self::RecognitionUnavailable => "Speech recognition is currently unavailable.",
+            Self::RecognitionUnavailable => "Speech recognition is unavailable. Check that the selected speech language is installed.",
             Self::AlreadyRunning => "Dictation is already active.",
             Self::NotRunning => "Dictation is not active.",
             Self::NoSpeechDetected => "No speech was detected.",
-            Self::Backend => "Dictation stopped unexpectedly.",
+            Self::Backend => "Dictation stopped. Check your default microphone and microphone access.",
         })
     }
 }
@@ -93,6 +93,7 @@ impl std::error::Error for SpeechError {}
 #[serde(rename_all = "camelCase")]
 pub enum DictationPhase {
     Hidden,
+    Starting,
     Listening,
     Processing,
     Success,
@@ -115,6 +116,16 @@ impl Default for DictationMachine {
 }
 
 impl DictationMachine {
+    pub fn prepare(&mut self) -> Result<(), DictationTransitionError> {
+        if !matches!(
+            self.phase,
+            DictationPhase::Hidden | DictationPhase::Success | DictationPhase::Error
+        ) {
+            return Err(self.invalid("prepare"));
+        }
+        self.phase = DictationPhase::Starting;
+        Ok(())
+    }
     pub fn phase(&self) -> DictationPhase {
         self.phase
     }
@@ -122,7 +133,10 @@ impl DictationMachine {
     pub fn begin(&mut self, session: SpeechSessionId) -> Result<(), DictationTransitionError> {
         if !matches!(
             self.phase,
-            DictationPhase::Hidden | DictationPhase::Success | DictationPhase::Error
+            DictationPhase::Hidden
+                | DictationPhase::Starting
+                | DictationPhase::Success
+                | DictationPhase::Error
         ) {
             return Err(self.invalid("begin"));
         }

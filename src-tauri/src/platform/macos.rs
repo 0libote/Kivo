@@ -1,10 +1,8 @@
 use std::{
     ffi::{CString, c_char, c_double, c_long, c_void},
-    io::Write,
-    process::{Command, Stdio},
     ptr::{self, NonNull},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
         mpsc,
     },
@@ -30,11 +28,7 @@ const ERR_SEC_ITEM_NOT_FOUND: OsStatus = -25300;
 const ERR_SEC_AUTH_FAILED: OsStatus = -25293;
 const AX_VALUE_CGRECT: i32 = 3;
 const FN_FLAG: u64 = 0x0080_0000;
-const COMMAND_FLAG: u64 = 0x0010_0000;
 const CG_SESSION_EVENT_TAP: u32 = 1;
-const KEYCODE_C: u16 = 0x08;
-const KEYCODE_V: u16 = 0x09;
-const CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEYCODE_FIELD: u32 = 9;
@@ -44,12 +38,14 @@ static NEXT_SELECTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 
 pub(super) struct PlatformImpl {
     credentials: MacCredentialStore,
+    selection: Mutex<Option<(u64, MacTextTarget)>>,
 }
 
 impl PlatformImpl {
     pub(super) fn new() -> PlatformResult<Self> {
         Ok(Self {
             credentials: MacCredentialStore,
+            selection: Mutex::new(None),
         })
     }
 
@@ -74,106 +70,21 @@ impl PlatformImpl {
         let owner = active_application_from_ax(application.as_ptr(), "get_selected_text")?;
         let bounds = selection_bounds(element.as_ptr()).into_iter().collect();
 
+        let range =
+            copy_ax_attribute(element.as_ptr(), "AXSelectedTextRange", "get_selected_text")?;
+        let token = NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed);
+        *self
+            .selection
+            .lock()
+            .map_err(|_| os_error("get_selected_text", "Selection state unavailable."))? =
+            Some((token, MacTextTarget { element, range }));
         Ok(SelectionSnapshot {
             text,
             bounds,
             owner,
             strategy: crate::text::TextAccessStrategy::Accessibility,
-            native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
+            native_token: token,
         })
-    }
-
-    /// Clipboard-fallback capture. Must run before the popup takes focus so
-    /// the simulated Cmd+C lands in the user's application. Blocking.
-    pub(super) fn capture_selection_via_clipboard(&self) -> PlatformResult<SelectionSnapshot> {
-        ensure_accessibility("capture_selection_via_clipboard")?;
-        // Identify the owner while its window is still focused; the popup
-        // will steal focus immediately after this returns.
-        let owner = focused_application().unwrap_or_else(|_| ActiveApplication {
-            process_id: 0,
-            name: "Unknown Application".to_owned(),
-            identifier: None,
-            native_handle: 0,
-        });
-        // Best-effort AX bounds hint for placement; absence is fine because
-        // the popup anchors to the cursor.
-        let bounds = focused_ax_elements("capture_selection_via_clipboard")
-            .ok()
-            .and_then(|(_, element)| selection_bounds(element.as_ptr()))
-            .into_iter()
-            .collect();
-
-        let backup = clipboard_text().ok();
-        let before = pasteboard_change_count();
-        send_command_keystroke(KEYCODE_C, "capture_selection_via_clipboard")?;
-
-        let changed = wait_for_pasteboard_change(before, std::time::Duration::from_secs(2));
-        // Always restore silently when we touched nothing observable.
-        if !changed {
-            restore_clipboard_backup(backup.as_deref(), before);
-            return Err(PlatformError::new(
-                PlatformErrorKind::NotFound,
-                "capture_selection_via_clipboard",
-                "Select some text first.",
-            ));
-        }
-        let after = pasteboard_change_count();
-        let text = clipboard_text().map_err(|_| {
-            restore_clipboard_backup(backup.as_deref(), after);
-            os_error(
-                "capture_selection_via_clipboard",
-                "The selected text could not be read.",
-            )
-        })?;
-        restore_clipboard_backup(backup.as_deref(), after);
-        if text.trim().is_empty() {
-            return Err(PlatformError::new(
-                PlatformErrorKind::NotFound,
-                "capture_selection_via_clipboard",
-                "Select some text first.",
-            ));
-        }
-
-        Ok(SelectionSnapshot {
-            text,
-            bounds,
-            owner,
-            strategy: crate::text::TextAccessStrategy::ClipboardFallback,
-            native_token: NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed),
-        })
-    }
-
-    /// Paste-based replacement for clipboard-captured selections. Restores the
-    /// previous clipboard content silently before returning, on both success
-    /// and failure paths after the clipboard was overwritten.
-    pub(super) fn paste_replacement(
-        &self,
-        snapshot: &SelectionSnapshot,
-        replacement: &str,
-    ) -> PlatformResult<()> {
-        ensure_accessibility("paste_replacement")?;
-        if snapshot.owner.process_id == 0 {
-            return Err(PlatformError::new(
-                PlatformErrorKind::InvalidState,
-                "paste_replacement",
-                "The original application is no longer available.",
-            ));
-        }
-        activate_process(snapshot.owner.process_id, "paste_replacement")?;
-        let backup = clipboard_text().ok();
-        set_clipboard_text(replacement)?;
-        let written = pasteboard_change_count();
-        // Let the pasteboard settle before keystrokes land.
-        std::thread::sleep(std::time::Duration::from_millis(120));
-        if let Err(error) = send_command_keystroke(KEYCODE_V, "paste_replacement") {
-            restore_clipboard_backup(backup.as_deref(), written);
-            return Err(error);
-        }
-        // No cross-process paste-completion signal exists; 500ms covers
-        // slower targets (Electron, IDEs) while staying responsive.
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        restore_clipboard_backup(backup.as_deref(), written);
-        Ok(())
     }
 
     pub(super) fn cursor_position(&self) -> PlatformResult<ScreenPoint> {
@@ -186,12 +97,10 @@ impl PlatformImpl {
         }
         let location = unsafe { CGEventGetLocation(event) };
         unsafe { CFRelease(event) };
-        let (main_height_points, scale) = main_display_metrics()?;
         Ok(quartz_to_physical_top_left(
             location.x,
             location.y,
-            main_height_points,
-            scale,
+            main_display_scale()?,
         ))
     }
 
@@ -202,6 +111,20 @@ impl PlatformImpl {
     ) -> PlatformResult<()> {
         ensure_accessibility("replace_selected_text")?;
         activate_process(snapshot.owner.process_id, "replace_selected_text")?;
+        let selection = self
+            .selection
+            .lock()
+            .map_err(|_| os_error("replace_selected_text", "Selection state unavailable."))?;
+        if !selection
+            .as_ref()
+            .is_some_and(|(token, target)| *token == snapshot.native_token && target.is_current())
+        {
+            return Err(PlatformError::new(
+                PlatformErrorKind::InvalidState,
+                "replace_selected_text",
+                "The original text field or selection changed.",
+            ));
+        }
         let (application, element) = focused_ax_elements("replace_selected_text")?;
         let pid = ax_process_id(application.as_ptr(), "replace_selected_text")?;
         if pid != snapshot.owner.process_id {
@@ -231,15 +154,17 @@ impl PlatformImpl {
         )
     }
 
-    pub(super) fn insert_text_at_cursor(&self, text: &str) -> PlatformResult<()> {
-        ensure_accessibility("insert_text_at_cursor")?;
-        let (_, element) = focused_ax_elements("insert_text_at_cursor")?;
-        set_ax_string_attribute(
+    pub(super) fn capture_insertion_target(
+        &self,
+    ) -> PlatformResult<Box<dyn crate::text::InsertionTarget>> {
+        ensure_accessibility("capture_insertion_target")?;
+        let (_, element) = focused_ax_elements("capture_insertion_target")?;
+        let range = copy_ax_attribute(
             element.as_ptr(),
-            "AXSelectedText",
-            text,
-            "insert_text_at_cursor",
-        )
+            "AXSelectedTextRange",
+            "capture_insertion_target",
+        )?;
+        Ok(Box::new(MacTextTarget { element, range }))
     }
 
     pub(super) fn permission_status(
@@ -464,43 +389,27 @@ fn selection_bounds(element: CfTypeRef) -> Option<ScreenRect> {
     if !copied || rect.size.width < 0.0 || rect.size.height < 0.0 {
         return None;
     }
+    let scale = main_display_scale().ok()?;
     Some(ScreenRect {
-        x: rect.origin.x,
-        y: rect.origin.y,
-        width: rect.size.width,
-        height: rect.size.height,
+        x: rect.origin.x * scale,
+        y: rect.origin.y * scale,
+        width: rect.size.width * scale,
+        height: rect.size.height * scale,
     })
 }
 
-fn focused_application() -> PlatformResult<ActiveApplication> {
-    let (application, _) = focused_ax_elements("capture_selection_via_clipboard")?;
-    active_application_from_ax(application.as_ptr(), "capture_selection_via_clipboard")
-}
-
-/// Quartz display points (origin at the bottom-left of the primary display)
-/// to physical pixels with a top-left origin, matching Tauri monitor space.
-/// Per-display scale differences on mixed-scale multi-monitor setups are
-/// absorbed later by clamping to the containing monitor.
-fn quartz_to_physical_top_left(
-    x_quartz: f64,
-    y_quartz: f64,
-    main_height_points: f64,
-    scale: f64,
-) -> ScreenPoint {
+/// CGEvent and AX coordinates already have a top-left origin. Unlike AppKit
+/// window coordinates, they must not be flipped vertically.
+fn quartz_to_physical_top_left(x: f64, y: f64, scale: f64) -> ScreenPoint {
     ScreenPoint {
-        x: x_quartz * scale,
-        y: (main_height_points - y_quartz) * scale,
+        x: x * scale,
+        y: y * scale,
     }
 }
 
-fn main_display_metrics() -> PlatformResult<(f64, f64)> {
-    let pixels_high = unsafe { CGDisplayPixelsHigh(CGMainDisplayID()) } as f64;
-    if pixels_high <= 0.0 {
-        return Err(os_error(
-            "cursor_position",
-            "The display metrics are unavailable.",
-        ));
-    }
+fn main_display_scale() -> PlatformResult<f64> {
+    // ponytail: the current main screen supplies scale; mixed-DPI secondary
+    // displays need native validation before claiming exact cursor placement.
     let scale = unsafe {
         let class = objc_getClass(c"NSScreen".as_ptr());
         if class.is_null() {
@@ -521,103 +430,7 @@ fn main_display_metrics() -> PlatformResult<(f64, f64)> {
             "The display scale is unavailable.",
         ));
     }
-    Ok((pixels_high / scale, scale))
-}
-
-fn pasteboard_change_count() -> i64 {
-    unsafe {
-        let class = objc_getClass(c"NSPasteboard".as_ptr());
-        if class.is_null() {
-            return -1;
-        }
-        let board = msg_send_id(class, sel("generalPasteboard"));
-        if board.is_null() {
-            return -1;
-        }
-        msg_send_i64(board, sel("changeCount"))
-    }
-}
-
-fn clipboard_text() -> PlatformResult<String> {
-    let output = Command::new("pbpaste")
-        .output()
-        .map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
-    if !output.status.success() {
-        return Err(os_error("clipboard", "The clipboard could not be read."));
-    }
-    String::from_utf8(output.stdout)
-        .map_err(|_| os_error("clipboard", "The clipboard text was not valid UTF-8."))
-}
-
-fn set_clipboard_text(text: &str) -> PlatformResult<()> {
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|_| os_error("clipboard", "The clipboard is unavailable."))?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| os_error("clipboard", "The clipboard is unavailable."))?
-        .write_all(text.as_bytes())
-        .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
-    child
-        .wait()
-        .map_err(|_| os_error("clipboard", "The clipboard could not be written."))?;
-    Ok(())
-}
-
-/// Silently restores the pre-capture clipboard text, but only when nothing
-/// else changed the pasteboard since (`observed` guards against clobbering a
-/// newer copy). A `None` backup means the clipboard held no text; it is left
-/// alone so non-text content is never destroyed.
-fn restore_clipboard_backup(backup: Option<&str>, observed: i64) {
-    let Some(backup) = backup else { return };
-    if observed >= 0 && pasteboard_change_count() != observed {
-        return;
-    }
-    let _ = set_clipboard_text(backup);
-}
-
-fn wait_for_pasteboard_change(before: i64, timeout: Duration) -> bool {
-    if before < 0 {
-        return false;
-    }
-    let deadline = Instant::now() + timeout;
-    loop {
-        std::thread::sleep(CLIPBOARD_POLL_INTERVAL);
-        if pasteboard_change_count() != before {
-            return true;
-        }
-        if Instant::now() >= deadline {
-            return false;
-        }
-    }
-}
-
-fn send_command_keystroke(virtual_key: u16, operation: &'static str) -> PlatformResult<()> {
-    unsafe {
-        let down = CGEventCreateKeyboardEvent(ptr::null(), virtual_key, true);
-        let up = CGEventCreateKeyboardEvent(ptr::null(), virtual_key, false);
-        if down.is_null() || up.is_null() {
-            if !down.is_null() {
-                CFRelease(down);
-            }
-            if !up.is_null() {
-                CFRelease(up);
-            }
-            return Err(os_error(
-                operation,
-                "The keyboard event could not be created.",
-            ));
-        }
-        CGEventSetFlags(down, COMMAND_FLAG);
-        CGEventSetFlags(up, COMMAND_FLAG);
-        CGEventPost(CG_SESSION_EVENT_TAP, down);
-        CGEventPost(CG_SESSION_EVENT_TAP, up);
-        CFRelease(down);
-        CFRelease(up);
-    }
-    Ok(())
+    Ok(scale)
 }
 
 fn copy_ax_attribute(
@@ -1081,6 +894,48 @@ impl Drop for MacSpeechSession {
     }
 }
 
+struct MacTextTarget {
+    element: CfOwned,
+    range: CfOwned,
+}
+
+// AXUIElement references are retained remote accessibility objects, not AppKit
+// views. Targets are owned by one dictation or protected by the selection mutex.
+unsafe impl Send for MacTextTarget {}
+
+impl MacTextTarget {
+    fn is_current(&self) -> bool {
+        let Ok((_, current)) = focused_ax_elements("validate_text_target") else {
+            return false;
+        };
+        let Ok(range) = copy_ax_attribute(
+            current.as_ptr(),
+            "AXSelectedTextRange",
+            "validate_text_target",
+        ) else {
+            return false;
+        };
+        unsafe {
+            CFEqual(current.as_ptr(), self.element.as_ptr())
+                && CFEqual(range.as_ptr(), self.range.as_ptr())
+        }
+    }
+}
+impl crate::text::InsertionTarget for MacTextTarget {
+    fn insert(&self, text: &str) -> Result<(), crate::text::TextError> {
+        if !self.is_current() {
+            return Err(crate::text::TextError::SelectionExpired);
+        }
+        set_ax_string_attribute(
+            self.element.as_ptr(),
+            "AXSelectedText",
+            text,
+            "insert_text_at_cursor",
+        )
+        .map_err(|_| crate::text::TextError::InsertionFailed)
+    }
+}
+
 struct CfOwned(CfTypeRef);
 
 impl CfOwned {
@@ -1287,12 +1142,6 @@ unsafe fn msg_send_u64(receiver: *mut c_void, selector: *const c_void) -> u64 {
     unsafe { function(receiver, selector) }
 }
 
-unsafe fn msg_send_i64(receiver: *mut c_void, selector: *const c_void) -> i64 {
-    let function: unsafe extern "C" fn(*mut c_void, *const c_void) -> i64 =
-        unsafe { std::mem::transmute(objc_msgSend as *const ()) };
-    unsafe { function(receiver, selector) }
-}
-
 unsafe fn msg_send_f64(receiver: *mut c_void, selector: *const c_void) -> f64 {
     let function: unsafe extern "C" fn(*mut c_void, *const c_void) -> f64 =
         unsafe { std::mem::transmute(objc_msgSend as *const ()) };
@@ -1348,15 +1197,7 @@ unsafe extern "C" {
     ) -> *const c_void;
     fn CGEventCreate(source: *const c_void) -> *mut c_void;
     fn CGEventGetLocation(event: *mut c_void) -> CgPoint;
-    fn CGEventCreateKeyboardEvent(
-        source: *const c_void,
-        virtual_key: u16,
-        key_down: bool,
-    ) -> *mut c_void;
-    fn CGEventSetFlags(event: *mut c_void, flags: u64);
-    fn CGEventPost(tap: u32, event: *mut c_void);
-    fn CGMainDisplayID() -> u32;
-    fn CGDisplayPixelsHigh(display: u32) -> usize;
+
     fn CGEventTapEnable(tap: *const c_void, enable: bool);
     fn CGEventGetFlags(event: *const c_void) -> u64;
     fn CGEventGetIntegerValueField(event: *const c_void, field: u32) -> i64;
@@ -1365,6 +1206,7 @@ unsafe extern "C" {
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
     fn CFRelease(value: CfTypeRef);
+    fn CFEqual(first: CfTypeRef, second: CfTypeRef) -> bool;
     fn CFGetTypeID(value: CfTypeRef) -> usize;
     fn CFStringGetTypeID() -> usize;
     fn CFStringCreateWithCString(
@@ -1457,13 +1299,11 @@ mod tests {
 
     #[test]
     fn quartz_points_convert_to_physical_top_left() {
-        // 1440x900-point display at 2x: bottom-left Quartz origin becomes
-        // top-left physical pixels.
-        let bottom_left = quartz_to_physical_top_left(0.0, 0.0, 900.0, 2.0);
-        assert_eq!((bottom_left.x, bottom_left.y), (0.0, 1800.0));
-        let top_left = quartz_to_physical_top_left(0.0, 900.0, 900.0, 2.0);
+        let top_left = quartz_to_physical_top_left(0.0, 0.0, 2.0);
         assert_eq!((top_left.x, top_left.y), (0.0, 0.0));
-        let middle = quartz_to_physical_top_left(720.0, 450.0, 900.0, 2.0);
-        assert_eq!((middle.x, middle.y), (1440.0, 900.0));
+        let bottom_right = quartz_to_physical_top_left(1440.0, 900.0, 2.0);
+        assert_eq!((bottom_right.x, bottom_right.y), (2880.0, 1800.0));
+        let above = quartz_to_physical_top_left(100.0, -100.0, 2.0);
+        assert_eq!((above.x, above.y), (200.0, -200.0));
     }
 }

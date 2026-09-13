@@ -17,7 +17,7 @@ const chat = { hasSelection: false, applicationName: "Quick chat", canReplace: f
 
 async function installHarness(page: Page, context = chat) {
   await page.goto("/?surface=writing-tools");
-  await expect(page.getByRole("option", { name: "Summarize", exact: true })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
   await page.evaluate(async (context) => {
     const path = "/src/platform/native.ts";
     const { nativeBridge } = await import(path) as { nativeBridge: NativeBridge & { emit: (event: string, context: SelectionContext) => void } };

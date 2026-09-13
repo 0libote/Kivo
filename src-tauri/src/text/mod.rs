@@ -85,6 +85,12 @@ impl CapturedSelection {
     }
 }
 
+/// Native target retained only for the current dictation. Delivery must verify
+/// that the original control is still focused; it must never activate a target.
+pub trait InsertionTarget: Send {
+    fn insert(&self, text: &str) -> Result<(), TextError>;
+}
+
 pub trait TextService: Send + Sync {
     fn capture_selection(&self) -> TextFuture<'_, Result<CapturedSelection, TextError>>;
     fn replace_selected_text<'a>(
@@ -92,7 +98,7 @@ pub trait TextService: Send + Sync {
         selection: &'a CapturedSelection,
         replacement: &'a str,
     ) -> TextFuture<'a, Result<(), TextError>>;
-    fn insert_text_at_cursor<'a>(&'a self, text: &'a str) -> TextFuture<'a, Result<(), TextError>>;
+    fn capture_insertion_target(&self) -> Result<Box<dyn InsertionTarget>, TextError>;
     /// Mouse cursor in physical pixels with a top-left origin, for
     /// cursor-anchored popup placement. Best effort: `None` falls back to the
     /// selection anchor.
@@ -195,6 +201,14 @@ impl WritingPopupMachine {
 
     pub fn fail(&mut self) {
         self.phase = WritingPopupPhase::Error;
+    }
+
+    pub fn recover_result(&mut self) -> Result<(), WritingTransitionError> {
+        let WritingPopupPhase::Processing(action) = self.phase else {
+            return Err(self.invalid("recover a result"));
+        };
+        self.phase = WritingPopupPhase::Result(action);
+        Ok(())
     }
 
     pub fn dismiss(&mut self) {
