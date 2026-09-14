@@ -36,6 +36,10 @@ export interface UpdateResult {
   currentVersion: string;
   availableVersion?: string;
   available: boolean;
+  downloadUrl?: string;
+  channel?: "stable" | "beta";
+  currentSha?: string;
+  availableSha?: string;
 }
 
 export interface NativeBridge {

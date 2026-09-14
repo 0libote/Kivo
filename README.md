@@ -135,7 +135,7 @@ Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. macOS uses Tauri's signed updater metadata; Windows checks GitHub Releases and hands off to the installer download. An up-to-date stable installation does not get offered a rolling beta. Rolling betas still require manual download when their version number has not changed.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases and hand off to the installer download: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. Beta builds are unsigned and always require a manual download.
 
 ## Privacy and diagnostics
 

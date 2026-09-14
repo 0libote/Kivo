@@ -343,6 +343,9 @@ jobs:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
+      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so the
+      # in-app updater can tell same-version betas apart by commit.
+      KIVO_BUILD_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -389,6 +392,9 @@ jobs:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
+      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so the
+      # in-app updater can tell same-version betas apart by commit.
+      KIVO_BUILD_SHA: ${{ github.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -454,12 +460,17 @@ jobs:
           test -n "$exe" || { echo "Windows installer not found in artifact"; exit 1; }
           tarball="beta/Kivo_${version}_aarch64.app.tar.gz"
           tar -czf "$tarball" -C "$(dirname "$appdir")" "$(basename "$appdir")"
+          # Rolling beta manifest for the in-app updater. The version number
+          # rarely changes between betas, so the app detects new builds by
+          # commit SHA (see check_for_updates in src-tauri/src/shell.rs).
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          VERSION="$version" BUILT_AT="$built_at" node -e "const fs = require('node:fs'); fs.writeFileSync('beta/continuous.json', JSON.stringify({ version: process.env.VERSION, sha: process.env.GITHUB_SHA, builtAt: process.env.BUILT_AT }, null, 2) + '\n');"
           gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
           gh release create continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
             --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
-          gh release upload continuous "$dmg" "$tarball" "$exe" --clobber
+          gh release upload continuous "$dmg" "$tarball" "$exe" beta/continuous.json --clobber
           gh release edit continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
