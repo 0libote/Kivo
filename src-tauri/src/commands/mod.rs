@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
+        AiModelInfo, GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
         dictation_cleanup_prompt, writing_prompt,
     },
     config::{
@@ -128,8 +128,18 @@ impl AppCore {
             .credentials
             .load_api_key()?
             .ok_or(AppCoreError::AiNotConfigured)?;
-        self.ai.test_key(&api_key).await?;
+        let (model, backup) = self.ai_models();
+        self.ai.test_key(&api_key, &model).await?;
+        if let Some(backup) = backup {
+            self.ai.test_key(&api_key, &backup).await?;
+        }
         Ok(CredentialStatus { configured: true })
+    }
+
+    fn ai_models(&self) -> (String, Option<String>) {
+        self.settings()
+            .map(|settings| (settings.ai.model, settings.ai.backup_model))
+            .unwrap_or_else(|_| (crate::ai::DEFAULT_GEMINI_MODEL.to_owned(), None))
     }
 
     pub fn dictation_phase(&self) -> Result<DictationPhase, AppCoreError> {
@@ -262,16 +272,19 @@ impl AppCore {
                 return Err(error.into());
             }
         };
-        let settings = self.settings()?.dictation;
+        let settings = self.settings()?;
+        let ai_model = settings.ai.model.clone();
+        let ai_backup = settings.ai.backup_model.clone();
+        let dictation = settings.dictation;
         let mut final_text = transcript.into_text();
-        if settings.improve_with_ai
+        if dictation.improve_with_ai
             && let Ok(Some(api_key)) = self.credentials.load_api_key()
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
         {
             let cleaned = tokio::select! {
                 biased;
                 _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-                result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate(&api_key, &prompt)) => result,
+                result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate_with_fallback(&api_key, &ai_model, ai_backup.as_deref(), &prompt)) => result,
             };
             if let Ok(Ok(cleaned)) = cleaned {
                 final_text = cleaned;
@@ -436,13 +449,20 @@ impl AppCore {
                 .credentials
                 .load_api_key()?
                 .ok_or(AppCoreError::AiNotConfigured)?;
+            let (model, backup) = self.ai_models();
             if source_kind == WritingSourceKind::Link {
                 let source = LinkSource::parse(source_text)?;
-                let result = self.ai.summarize_link(&api_key, &source).await?;
+                let result = self
+                    .ai
+                    .summarize_link_with_fallback(&api_key, &model, backup.as_deref(), &source)
+                    .await?;
                 Ok::<_, AppCoreError>((result, Some(source)))
             } else {
                 let prompt = writing_prompt(action, source_text, custom_instruction.as_deref())?;
-                let result = self.ai.generate(&api_key, &prompt).await?;
+                let result = self
+                    .ai
+                    .generate_with_fallback(&api_key, &model, backup.as_deref(), &prompt)
+                    .await?;
                 Ok((result, None))
             }
         };
@@ -819,7 +839,15 @@ pub struct FrontendSettings {
     pub writing_popup_width: f64,
     pub writing_popup_height: f64,
     pub writing_allow_manual_text: bool,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+    #[serde(default)]
+    pub ai_backup_model: Option<String>,
     pub onboarding_complete: bool,
+}
+
+fn default_ai_model() -> String {
+    crate::ai::DEFAULT_GEMINI_MODEL.to_owned()
 }
 
 impl From<AppSettings> for FrontendSettings {
@@ -864,6 +892,8 @@ impl From<AppSettings> for FrontendSettings {
             writing_popup_width: settings.writing_tools.popup_width,
             writing_popup_height: settings.writing_tools.popup_height,
             writing_allow_manual_text: settings.writing_tools.allow_manual_text,
+            ai_model: settings.ai.model,
+            ai_backup_model: settings.ai.backup_model,
             onboarding_complete: settings.general.onboarding_complete,
         }
     }
@@ -895,6 +925,13 @@ impl TryFrom<FrontendSettings> for AppSettings {
             "fixed" => crate::config::PopupAnchor::Fixed,
             _ => crate::config::PopupAnchor::Cursor,
         };
+        // Unknown / empty model ids fall back to the default so old settings
+        // files and forward-compat payloads never break AI requests. Custom
+        // `gemini-*` ids are allowed (see is_usable_model); only blocked
+        // non-text families normalize away.
+        let ai_model = crate::ai::normalize_model(&settings.ai_model);
+        let ai_backup_model =
+            crate::ai::normalize_backup_model(settings.ai_backup_model.as_deref(), &ai_model);
         Ok(AppSettings {
             schema_version: crate::config::SETTINGS_SCHEMA_VERSION,
             general: crate::config::GeneralSettings {
@@ -930,6 +967,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 popup_height: settings.writing_popup_height,
                 allow_manual_text: settings.writing_allow_manual_text,
             },
+            ai: crate::config::AiSettings { model: ai_model, backup_model: ai_backup_model },
         })
     }
 }
@@ -957,6 +995,8 @@ pub struct SettingsPatch {
     writing_popup_width: Option<f64>,
     writing_popup_height: Option<f64>,
     writing_allow_manual_text: Option<bool>,
+    ai_model: Option<String>,
+    ai_backup_model: Option<Option<String>>,
     onboarding_complete: Option<bool>,
 }
 
@@ -989,6 +1029,8 @@ impl SettingsPatch {
         assign!(writing_popup_width);
         assign!(writing_popup_height);
         assign!(writing_allow_manual_text);
+        assign!(ai_model);
+        assign!(ai_backup_model);
         assign!(onboarding_complete);
         settings
     }
@@ -1198,6 +1240,11 @@ fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
             }),
     );
     Some(languages)
+}
+
+#[tauri::command]
+pub fn list_ai_models() -> Vec<AiModelInfo> {
+    crate::ai::supported_models()
 }
 
 #[tauri::command]

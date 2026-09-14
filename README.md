@@ -60,9 +60,9 @@ bun tauri build
 
 ## Gemini setup
 
-Create an API key in [Google AI Studio](https://aistudio.google.com/app/apikey), open Kivo Settings, and save it under AI. Kivo tests the key with Google's current Interactions API.
+Create an API key in [Google AI Studio](https://aistudio.google.com/app/apikey), open Kivo Settings, and save it under AI. Choose the model under AI → Model, then use Test connection to confirm your key can use it. Kivo tests the key with Google's current Interactions API.
 
-The native client uses the pinned `gemini-3.8-flash` model with low thinking for latency-sensitive edits. Requests explicitly set `store: false`. Update the model or endpoint only in `src-tauri/src/ai/mod.rs` and update its fixtures at the same time.
+The native client defaults to `gemini-3.8-flash` with low thinking for latency-sensitive edits. Requests explicitly set `store: false`. Any well-formed `gemini-*` text model id works, so newest models keep working without a Kivo update — only speech, image, video, music, and agent families are blocked. Set an optional backup model in Settings → AI: if the primary hits its rate limit, Kivo retries once on the backup before reporting an error. Update the suggestions, blocklist, or endpoint in `src-tauri/src/ai/mod.rs` (mirrored in `src/ai/models.ts`) and update fixtures at the same time.
 
 Without a key, native dictation still works and inserts the raw operating-system transcript; Gemini-dependent writing actions display a concise configuration error.
 

@@ -18,6 +18,10 @@
 .onboarding-key { width: 100%; margin-bottom: 19px; }
 .onboarding-key__input { display: flex; gap: 7px; }
 .onboarding-key__input input { flex: 1; }
+.onboarding-model { width: 100%; display: grid; gap: 8px; margin-bottom: 19px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-strong); }
+.onboarding-model__label { font-size: 13px; font-weight: 600; }
+.onboarding-model .ai-model-select__description { font-size: 12px; }
+.onboarding-model__note { margin: 0; font-size: 12px; }
 .shortcut-demo { width: 100%; display: grid; gap: 2px; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--border); }
 .shortcut-summary { min-height: 45px; display: flex; align-items: center; justify-content: space-between; padding: 8px 11px; background: var(--surface-strong); }
 .shortcut-summary > div { display: flex; gap: 3px; }

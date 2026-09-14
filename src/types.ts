@@ -50,6 +50,8 @@ export interface AppSettings {
   writingPopupWidth: number;
   writingPopupHeight: number;
   writingAllowManualText: boolean;
+  aiModel: string;
+  aiBackupModel: string | null;
   onboardingComplete: boolean;
 }
 
@@ -76,6 +78,12 @@ export interface SpeechLanguage {
 export interface ApiKeyStatus {
   configured: boolean;
   connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline";
+}
+
+export interface AiModelInfo {
+  id: string;
+  label: string;
+  description: string;
 }
 
 export interface SelectionContext {
@@ -144,6 +152,8 @@ export const DEFAULT_WRITING_ACTIONS: WritingActionId[] = [
   "custom",
 ];
 
+export const DEFAULT_AI_MODEL = "gemini-3.8-flash";
+
 export function defaultSettings(platform: Platform): AppSettings {
   return {
     launchAtLogin: false,
@@ -166,6 +176,8 @@ export function defaultSettings(platform: Platform): AppSettings {
     writingPopupWidth: 380,
     writingPopupHeight: 460,
     writingAllowManualText: true,
+    aiModel: DEFAULT_AI_MODEL,
+    aiBackupModel: null,
     onboardingComplete: false,
   };
 }

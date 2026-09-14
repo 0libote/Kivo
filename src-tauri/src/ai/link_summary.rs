@@ -108,6 +108,7 @@ impl GeminiClient {
     pub async fn summarize_link(
         &self,
         api_key: &SecretString,
+        model: &str,
         source: &LinkSource,
     ) -> Result<String, GeminiError> {
         // Revalidate even if a caller constructed/deserialized LinkSource directly.
@@ -117,7 +118,8 @@ impl GeminiClient {
         }
         let api_key =
             HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
-        let request = LinkSummaryRequest::new(self.model, &validated);
+        let model = super::normalize_model(model);
+        let request = LinkSummaryRequest::new(model.as_str(), &validated);
         let response = self
             .http
             .post(&self.endpoint)
@@ -141,6 +143,31 @@ impl GeminiClient {
             .await
             .map_err(GeminiError::InvalidResponse)?;
         parse_link_summary(interaction, &validated)
+    }
+
+    /// Same single-retry rule as text generation: only a 429 on the primary
+    /// falls through to the backup.
+    pub async fn summarize_link_with_fallback(
+        &self,
+        api_key: &SecretString,
+        primary: &str,
+        backup: Option<&str>,
+        source: &LinkSource,
+    ) -> Result<String, GeminiError> {
+        match self.summarize_link(api_key, primary, source).await {
+            Ok(output) => Ok(output),
+            Err(error) if error.is_rate_limited() => {
+                let primary = super::normalize_model(primary);
+                let backup = backup.map(super::normalize_model);
+                match backup {
+                    Some(backup) if backup != primary => {
+                        self.summarize_link(api_key, &backup, source).await
+                    }
+                    _ => Err(error),
+                }
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 

@@ -18,6 +18,7 @@ pub struct AppSettings {
     pub general: GeneralSettings,
     pub dictation: DictationSettings,
     pub writing_tools: WritingToolsSettings,
+    pub ai: AiSettings,
 }
 
 impl Default for AppSettings {
@@ -27,6 +28,7 @@ impl Default for AppSettings {
             general: GeneralSettings::default(),
             dictation: DictationSettings::default(),
             writing_tools: WritingToolsSettings::default(),
+            ai: AiSettings::default(),
         }
     }
 }
@@ -42,6 +44,8 @@ impl AppSettings {
         self.dictation.normalize();
         self.dictation.validate()?;
         self.writing_tools.normalize();
+        self.ai.normalize();
+        self.ai.validate()?;
         Ok(self)
     }
 }
@@ -301,6 +305,47 @@ impl WritingToolsSettings {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiSettings {
+    pub model: String,
+    #[serde(default)]
+    pub backup_model: Option<String>,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            model: crate::ai::DEFAULT_GEMINI_MODEL.to_owned(),
+            backup_model: None,
+        }
+    }
+}
+
+impl AiSettings {
+    fn normalize(&mut self) {
+        self.model = crate::ai::normalize_model(&self.model);
+        self.backup_model = crate::ai::normalize_backup_model(
+            self.backup_model.as_deref(),
+            &self.model,
+        );
+    }
+
+    fn validate(&self) -> Result<(), SettingsError> {
+        if !crate::ai::is_usable_model(&self.model) {
+            return Err(SettingsError::InvalidAiModel);
+        }
+        if let Some(backup) = &self.backup_model {
+            if !crate::ai::is_usable_model(backup)
+                || crate::ai::canonical_model_id(backup) == crate::ai::canonical_model_id(&self.model)
+            {
+                return Err(SettingsError::InvalidAiModel);
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub enum SettingsError {
     Io(io::Error),
@@ -309,6 +354,7 @@ pub enum SettingsError {
     InvalidShortcut,
     InvalidMicrophone,
     InvalidLanguage,
+    InvalidAiModel,
 }
 
 impl fmt::Display for SettingsError {
@@ -325,6 +371,7 @@ impl fmt::Display for SettingsError {
             Self::InvalidShortcut => "The configured shortcut is invalid.",
             Self::InvalidMicrophone => "The configured microphone is invalid.",
             Self::InvalidLanguage => "The configured language is invalid.",
+            Self::InvalidAiModel => "The configured AI model is not supported.",
         };
         formatter.write_str(message)
     }
@@ -578,5 +625,90 @@ mod tests {
             super::PopupAnchor::Cursor
         );
         assert!(settings.writing_tools.allow_manual_text);
+    }
+
+    #[test]
+    fn ai_model_defaults_and_legacy_files() {
+        // Default matches the frontend contract (src/types.ts DEFAULT_AI_MODEL).
+        assert_eq!(
+            AppSettings::default().ai.model,
+            crate::ai::DEFAULT_GEMINI_MODEL
+        );
+        assert_eq!(AppSettings::default().ai.backup_model, None);
+
+        // Supported ids survive normalization (trimmed), including new ids
+        // that were never in the curated suggestion list.
+        let mut settings = AppSettings::default();
+        settings.ai.model = "  gemini-2.5-flash  ".into();
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.model,
+            "gemini-2.5-flash"
+        );
+        let mut settings = AppSettings::default();
+        settings.ai.model = "models/gemini-4.0-flash".into();
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.model,
+            "gemini-4.0-flash"
+        );
+
+        // Unknown, TTS/image, and empty ids fall back to the default instead
+        // of bricking AI requests.
+        for model in [
+            "",
+            "not-a-model",
+            "gemini-2.5-flash-preview-tts",
+            "gemini-2.5-flash-image",
+        ] {
+            let mut settings = AppSettings::default();
+            settings.ai.model = model.into();
+            assert_eq!(
+                settings.validate_and_normalize().unwrap().ai.model,
+                crate::ai::DEFAULT_GEMINI_MODEL,
+                "model {model} should fall back"
+            );
+        }
+
+        // Files written before the ai section existed deserialize via serde
+        // defaults and keep working.
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "general": {},
+            "dictation": { "shortcut": { "accelerator": "Fn" } },
+            "writingTools": {
+                "shortcut": { "accelerator": "Ctrl+Shift+Space" },
+                "enabledActions": ["proofread"],
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.model, crate::ai::DEFAULT_GEMINI_MODEL);
+        assert_eq!(settings.ai.backup_model, None);
+    }
+
+    #[test]
+    fn ai_backup_model_normalizes_to_none_when_empty_same_or_unusable() {
+        // A distinct usable backup survives.
+        let mut settings = AppSettings::default();
+        settings.ai.backup_model = Some("gemini-2.5-flash".into());
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.backup_model,
+            Some("gemini-2.5-flash".to_owned())
+        );
+        // Empty, same-as-primary, and blocked ids collapse to None.
+        for backup in [
+            Some(""),
+            Some("  "),
+            Some("gemini-3.8-flash"),
+            Some("gemini-2.5-flash-preview-tts"),
+            Some("not-a-model"),
+        ] {
+            let mut settings = AppSettings::default();
+            settings.ai.backup_model = backup.map(str::to_owned);
+            assert_eq!(
+                settings.validate_and_normalize().unwrap().ai.backup_model,
+                None,
+                "backup {backup:?} should collapse"
+            );
+        }
     }
 }

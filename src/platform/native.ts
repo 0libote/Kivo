@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  type AiModelInfo,
   type ApiKeyStatus,
   type AppContext,
   type AppSettings,
@@ -54,6 +55,7 @@ export interface NativeBridge {
   openPermissionSettings(kind: PermissionKind): Promise<void>;
   listMicrophones(): Promise<MicrophoneDevice[]>;
   listSpeechLanguages(): Promise<SpeechLanguage[]>;
+  listAiModels(): Promise<AiModelInfo[]>;
   getApiKeyStatus(): Promise<ApiKeyStatus>;
   saveApiKey(apiKey: string): Promise<ApiKeyStatus>;
   clearApiKey(): Promise<ApiKeyStatus>;
@@ -137,6 +139,7 @@ class TauriBridge implements NativeBridge {
   openPermissionSettings = (kind: PermissionKind) => call<void>("open_permission_settings", { kind });
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
+  listAiModels = () => call<AiModelInfo[]>("list_ai_models");
   getApiKeyStatus = () => call<ApiKeyStatus>("get_api_key_status");
   saveApiKey = (apiKey: string) => call<ApiKeyStatus>("store_api_key", { apiKey });
   clearApiKey = () => call<ApiKeyStatus>("remove_api_key");
@@ -245,6 +248,11 @@ class MockBridge implements NativeBridge {
       { code: "en-US", name: "English (United States)", installed: true, downloadable: false },
       { code: "fr-FR", name: "French (France)", installed: false, downloadable: true },
     ];
+  }
+
+  async listAiModels(): Promise<AiModelInfo[]> {
+    const { FALLBACK_AI_MODELS } = await import("../ai/models");
+    return structuredClone(FALLBACK_AI_MODELS);
   }
 
   async getApiKeyStatus() {

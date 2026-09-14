@@ -144,6 +144,102 @@ struct HttpFixture {
     worker: Option<thread::JoinHandle<()>>,
 }
 
+/// Serves a fixed sequence of responses on successive connections, reporting
+/// every request body. Used to prove the backup-model retry: the first
+/// request fails (e.g. 429) and the retry carries the backup model.
+struct HttpSequenceFixture {
+    endpoint: String,
+    bodies: mpsc::Receiver<serde_json::Value>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
+impl HttpSequenceFixture {
+    fn new(responses: Vec<(u16, &'static str)>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/interactions", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (bodies_tx, bodies) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker = thread::spawn(move || {
+            for (status, response) in responses {
+                let mut stream = loop {
+                    if worker_stop.load(Ordering::Acquire) {
+                        return;
+                    }
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(2))
+                        }
+                        Err(error) => panic!("local HTTP fixture failed: {error}"),
+                    }
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let (body_start, body_length) = loop {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert_ne!(read, 0, "HTTP request ended before its headers");
+                    bytes.extend_from_slice(&buffer[..read]);
+                    if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+                        let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (name, value) = line.split_once(':')?;
+                                name.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().unwrap())
+                            })
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while bytes.len() < body_start + body_length {
+                    let mut buffer = [0; 4096];
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert_ne!(read, 0, "HTTP request ended before its body");
+                    bytes.extend_from_slice(&buffer[..read]);
+                }
+                let body =
+                    serde_json::from_slice(&bytes[body_start..body_start + body_length]).unwrap();
+                let _ = bodies_tx.send(body);
+                let response = format!(
+                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        Self {
+            endpoint,
+            bodies,
+            stop,
+            worker: Some(worker),
+        }
+    }
+
+    fn next_request(&mut self) -> serde_json::Value {
+        self.bodies
+            .recv_timeout(Duration::from_secs(3))
+            .expect("expected another HTTP request")
+    }
+}
+
+impl Drop for HttpSequenceFixture {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        let joined = self.worker.take().unwrap().join();
+        if !thread::panicking() {
+            joined.unwrap();
+        }
+    }
+}
+
 impl HttpFixture {
     fn new(status: u16, response: &'static str, delayed: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -312,6 +408,56 @@ async fn selected_text_summary_preserves_explicit_replacement() {
         core.replace_with_last_result().await,
         Err(AppCoreError::NoResult)
     ));
+}
+
+#[tokio::test]
+async fn rate_limited_primary_retries_once_on_the_backup_model() {
+    let mut server = HttpSequenceFixture::new(vec![
+        (429, r#"{"error":{"code":"rate_limited"}}"#),
+        (200, TEXT_RESPONSE),
+    ]);
+    let (core, text) = core(&server.endpoint, Some("Original selection"));
+    core.settings.write().unwrap().ai.backup_model = Some("gemini-2.5-flash".into());
+    core.open_writing_tools().await.unwrap();
+    let result = core
+        .run_writing_action(
+            WritingAction::Proofread,
+            None,
+            None,
+            WritingSourceKind::Text,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(result, WritingOutcome::Replaced));
+    assert_eq!(*text.replacements.lock().unwrap(), vec![(1, "Summary".into())]);
+    let first = server.next_request();
+    let second = server.next_request();
+    assert_eq!(first["model"], "gemini-3.8-flash");
+    assert_eq!(second["model"], "gemini-2.5-flash");
+}
+
+#[tokio::test]
+async fn non_rate_limit_errors_never_spend_backup_quota() {
+    let mut server = HttpSequenceFixture::new(vec![(
+        401,
+        r#"{"error":{"code":"authentication"}}"#,
+    )]);
+    let (core, _) = core(&server.endpoint, Some("Original selection"));
+    core.settings.write().unwrap().ai.backup_model = Some("gemini-2.5-flash".into());
+    core.open_writing_tools().await.unwrap();
+    let error = core
+        .run_writing_action(
+            WritingAction::Proofread,
+            None,
+            None,
+            WritingSourceKind::Text,
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppCoreError::Gemini(_)));
+    // Exactly one request: authentication failures must not retry.
+    let _ = server.next_request();
+    assert!(server.bodies.recv_timeout(Duration::from_millis(200)).is_err());
 }
 
 #[tokio::test]

@@ -48,6 +48,8 @@ const typesTs = read("src/types.ts");
 const shellRs = read("src-tauri/src/shell.rs");
 const commandsRs = read("src-tauri/src/commands/mod.rs");
 const nativeTs = read("src/platform/native.ts");
+const aiRs = read("src-tauri/src/ai/mod.rs");
+const aiModelsTs = read("src/ai/models.ts");
 
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
 function rustDefault(fnName: string, host: "Macos" | "Windows"): string | null {
@@ -164,6 +166,74 @@ check(
   "harness requires speech recognition only on macOS",
   nativeTs.includes('required: this.platform === "macos"'),
   "MockBridge speech-recognition requirement drifted",
+);
+
+// --- 6. AI model default + suggestions + blocklist stay in sync ----------------
+const rustDefaultModel = /DEFAULT_GEMINI_MODEL:\s*&str\s*=\s*"([^"]+)"/.exec(aiRs)?.[1] ?? null;
+const tsDefaultModel = /DEFAULT_AI_MODEL\s*=\s*"([^"]+)"/.exec(typesTs)?.[1] ?? null;
+check("Rust default model parses", rustDefaultModel !== null, "DEFAULT_GEMINI_MODEL not found in ai/mod.rs");
+check("TS default model parses", tsDefaultModel !== null, "DEFAULT_AI_MODEL not found in src/types.ts");
+if (rustDefaultModel && tsDefaultModel) {
+  check(
+    "AI default model matches",
+    rustDefaultModel === tsDefaultModel,
+    `Rust "${rustDefaultModel}" vs TS "${tsDefaultModel}"`,
+  );
+}
+const allowlistBlock = aiRs.slice(
+  aiRs.indexOf("SUPPORTED_GEMINI_MODELS"),
+  aiRs.indexOf("];", aiRs.indexOf("SUPPORTED_GEMINI_MODELS")) + 2,
+);
+const allowlistIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]);
+check("suggestions block parses", allowlistIds.length > 0, "SUPPORTED_GEMINI_MODELS ids not found in ai/mod.rs");
+for (const excluded of ["tts", "live", "-image", "banana", "transcribe", "embed", "veo-", "lyria-", "deep-research", "robotics"]) {
+  check(
+    `suggestions exclude "${excluded}"`,
+    allowlistIds.every(id => !id.includes(excluded)),
+    `"${excluded}"-like model id found in SUPPORTED_GEMINI_MODELS; only text models may be suggested`,
+  );
+}
+check(
+  "frontend suggestions mirror backend suggestions",
+  aiModelsTs.includes(rustDefaultModel ?? "gemini-3.8-flash") && FALLBACK_IDS_MATCH(),
+  "src/ai/models.ts FALLBACK_AI_MODELS drifted from SUPPORTED_GEMINI_MODELS",
+);
+function FALLBACK_IDS_MATCH(): boolean {
+  const rustIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
+  const tsIds = [...aiModelsTs.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
+  return rustIds.length > 0 && rustIds.length === tsIds.length && rustIds.every(id => tsIds.includes(id));
+}
+function blocklist(name: string, source: string): string[] {
+  const anchor = source.indexOf(`const ${name}`);
+  if (anchor === -1) return [];
+  const tail = source.slice(anchor);
+  const endBracket = tail.search(/\]\s*(as const)?\s*;/);
+  if (endBracket === -1) return [];
+  return [...tail.slice(0, endBracket).matchAll(/"([^"]+)"/g)].map(m => m[1]);
+}
+const rustBlocklist = blocklist("BLOCKED_MODEL_SUBSTRINGS", aiRs);
+const tsBlocklist = blocklist("BLOCKED_AI_MODEL_PATTERNS", aiModelsTs);
+check("Rust blocklist parses", rustBlocklist.length > 0, "BLOCKED_MODEL_SUBSTRINGS not found in ai/mod.rs");
+check("TS blocklist parses", tsBlocklist.length > 0, "BLOCKED_AI_MODEL_PATTERNS not found in src/ai/models.ts");
+check(
+  "blocklists match",
+  rustBlocklist.length === tsBlocklist.length && rustBlocklist.every(p => tsBlocklist.includes(p)),
+  `Rust [${rustBlocklist}] vs TS [${tsBlocklist}]; keep BLOCKED_MODEL_SUBSTRINGS and BLOCKED_AI_MODEL_PATTERNS in sync`,
+);
+check(
+  "backup model is plumbed end to end",
+  configRs.includes("backup_model") && commandsRs.includes("ai_backup_model") && typesTs.includes("aiBackupModel"),
+  "AiSettings.backup_model / FrontendSettings.ai_backup_model / AppSettings.aiBackupModel missing",
+);
+check(
+  "rate-limit fallback retries once on the backup",
+  aiRs.includes("generate_with_fallback") && aiRs.includes("is_rate_limited") && commandsRs.includes("summarize_link_with_fallback"),
+  "generate_with_fallback / summarize_link_with_fallback / is_rate_limited missing",
+);
+check(
+  "native bridge exposes list_ai_models",
+  nativeTs.includes("listAiModels") && nativeTs.includes("list_ai_models") && commandsRs.includes("list_ai_models"),
+  "NativeBridge.listAiModels / list_ai_models command missing",
 );
 
 if (failures > 0) {
