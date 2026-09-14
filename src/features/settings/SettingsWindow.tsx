@@ -483,7 +483,7 @@ function AboutSection({
         </SettingRow>
       </SettingsGroup>
       {updateResult?.available ? (
-        <button className="text-link" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">Download the latest release from GitHub</button>
+        <button className="text-link" onClick={() => void nativeBridge.openExternal(updateResult.downloadUrl ?? "https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">{updateResult.channel === "beta" ? "Download the latest beta build from GitHub" : "Download the latest release from GitHub"}</button>
       ) : null}
       <div className="about-links" aria-label="Project links">
         <button className="text-link" type="button" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo").catch(() => setNotice("The repository could not be opened."))}>Source code on GitHub</button>
@@ -496,7 +496,13 @@ function AboutSection({
 
 function updateDescription(updateResult: UpdateResult | null): string {
   if (updateResult === null) return "Check manually for a newer version.";
-  if (updateResult.available) return `Version ${updateResult.availableVersion} is available.`;
+  if (updateResult.available) {
+    if (updateResult.channel === "beta") {
+      const sha = updateResult.availableSha?.slice(0, 7);
+      return sha ? `A newer beta build is available (${sha}).` : "A newer beta build is available.";
+    }
+    return `Version ${updateResult.availableVersion} is available.`;
+  }
   return "Kivo is up to date.";
 }
 

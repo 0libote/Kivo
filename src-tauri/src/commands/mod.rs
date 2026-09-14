@@ -1404,6 +1404,10 @@ pub struct UpdateResult {
     pub(crate) current_version: String,
     pub(crate) available: bool,
     pub(crate) available_version: Option<String>,
+    pub(crate) download_url: Option<String>,
+    pub(crate) channel: Option<String>,
+    pub(crate) current_sha: Option<String>,
+    pub(crate) available_sha: Option<String>,
 }
 
 #[tauri::command]

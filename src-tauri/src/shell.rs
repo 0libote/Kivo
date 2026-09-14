@@ -15,8 +15,6 @@ use tauri::{
 };
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
-#[cfg(not(target_os = "windows"))]
-use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
     commands::{AppCore, CommandError, FrontendSettings, UpdateResult},
@@ -1374,113 +1372,128 @@ fn clipboard_error() -> PlatformError {
 }
 
 pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, CommandError> {
+    #[derive(serde::Deserialize)]
+    struct GitHubRelease {
+        tag_name: String,
+        html_url: Option<String>,
+    }
+
+    // Rolling beta manifest published by the CI `publish-continuous` job as
+    // `continuous.json` on the `continuous` pre-release. `builtAt` and any
+    // future fields are ignored: only `version` + `sha` drive detection.
+    #[derive(serde::Deserialize)]
+    struct ContinuousManifest {
+        version: String,
+        #[serde(default)]
+        sha: Option<String>,
+    }
+
     let current_version = app.package_info().version.to_string();
+    let current_sha = current_build_sha();
 
-    #[cfg(target_os = "windows")]
-    {
-        #[derive(serde::Deserialize)]
-        struct GitHubRelease {
-            tag_name: String,
-        }
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .map_err(|_| update_check_error())?;
+    let user_agent = "Kivo desktop updater";
 
-        #[derive(serde::Deserialize)]
-        struct ContinuousManifest {
-            version: String,
-        }
-
-        let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(12))
-            .build()
-            .map_err(|_| update_check_error())?;
-        let user_agent = "Kivo desktop updater";
-
-        // 1. Prefer the latest stable release. A 404 just means no stable
-        // release has been published yet, so fall through to continuous.
-        let stable = client
-            .get("https://api.github.com/repos/0libote/Kivo/releases/latest")
-            .header("accept", "application/vnd.github+json")
-            .header("user-agent", user_agent)
-            .send()
+    // 1. Prefer the latest stable release. When any stable release exists the
+    // rolling beta is obsolete by definition, so return here without checking
+    // `continuous` — stable installs never get dragged onto a beta.
+    // A 404 just means no stable release has been published yet.
+    let stable = client
+        .get("https://api.github.com/repos/0libote/Kivo/releases/latest")
+        .header("accept", "application/vnd.github+json")
+        .header("user-agent", user_agent)
+        .send()
+        .await
+        .map_err(|_| update_check_error())?;
+    if stable.status().is_success() {
+        let release = stable
+            .json::<GitHubRelease>()
             .await
             .map_err(|_| update_check_error())?;
-        if stable.status().is_success() {
-            let release = stable
-                .json::<GitHubRelease>()
-                .await
-                .map_err(|_| update_check_error())?;
-            let available_version = stable_version_from_tag(&release.tag_name);
-            let available = available_version
-                .as_deref()
-                .is_some_and(|version| version_is_newer(version, &current_version));
-            return Ok(UpdateResult {
-                current_version,
-                available_version,
-                available,
-            });
-        } else if stable.status() != reqwest::StatusCode::NOT_FOUND {
-            return Err(update_check_error());
-        }
-
-        // 2. Fall back to the rolling `continuous` pre-release so the updater
-        // works before the first stable `app-v*` release exists. Tauri
-        // publishes `latest.json` there with the built package version.
-        let continuous = client
-            .get("https://github.com/0libote/Kivo/releases/download/continuous/latest.json")
-            .header("accept", "application/json")
-            .header("user-agent", user_agent)
-            .send()
-            .await
-            .map_err(|_| update_check_error())?;
-        if continuous.status().is_success() {
-            let manifest = continuous
-                .json::<ContinuousManifest>()
-                .await
-                .map_err(|_| update_check_error())?;
-            let available = version_is_newer(&manifest.version, &current_version);
-            return Ok(UpdateResult {
-                current_version,
-                available_version: available.then_some(manifest.version),
-                available,
-            });
-        }
-        if continuous.status() != reqwest::StatusCode::NOT_FOUND {
-            return Err(update_check_error());
-        }
-
-        // No stable release and no continuous pre-release yet.
-        Ok(UpdateResult {
+        let available_version = stable_version_from_tag(&release.tag_name);
+        let available = available_version
+            .as_deref()
+            .is_some_and(|version| version_is_newer(version, &current_version));
+        return Ok(UpdateResult {
             current_version,
-            available_version: None,
-            available: false,
-        })
+            available_version,
+            available,
+            download_url: Some(
+                release
+                    .html_url
+                    .unwrap_or_else(|| STABLE_RELEASES_URL.to_owned()),
+            ),
+            channel: Some("stable".into()),
+            current_sha,
+            available_sha: None,
+        });
+    } else if stable.status() != reqwest::StatusCode::NOT_FOUND {
+        return Err(update_check_error());
     }
 
-    #[cfg(not(target_os = "windows"))]
-    {
-        let update = app
-            .updater()
-            .map_err(|_| CommandError {
-                code: "updater_unavailable".into(),
-                message: "Update checks are unavailable in this build.".into(),
-                recoverable: false,
-            })?
-            .check()
+    // 2. No stable release yet: fall back to the rolling `continuous`
+    // pre-release. The version number rarely changes between betas, so a
+    // same-version build with a different commit SHA is still an update.
+    let continuous = client
+        .get("https://github.com/0libote/Kivo/releases/download/continuous/continuous.json")
+        .header("accept", "application/json")
+        .header("user-agent", user_agent)
+        .send()
+        .await
+        .map_err(|_| update_check_error())?;
+    if continuous.status().is_success() {
+        let manifest = continuous
+            .json::<ContinuousManifest>()
             .await
-            .map_err(|_| CommandError {
-                code: "update_check_failed".into(),
-                message: "Kivo couldn’t check for updates right now.".into(),
-                recoverable: true,
-            })?;
-        Ok(UpdateResult {
+            .map_err(|_| update_check_error())?;
+        let available = beta_is_newer(
+            current_sha.as_deref(),
+            manifest.sha.as_deref(),
+            &manifest.version,
+            &current_version,
+        );
+        return Ok(UpdateResult {
             current_version,
-            available_version: update.as_ref().map(|update| update.version.clone()),
-            available: update.is_some(),
-        })
+            available_version: Some(manifest.version),
+            available,
+            download_url: Some(CONTINUOUS_RELEASE_URL.to_owned()),
+            channel: Some("beta".into()),
+            current_sha,
+            available_sha: manifest.sha,
+        });
     }
+    if continuous.status() != reqwest::StatusCode::NOT_FOUND {
+        return Err(update_check_error());
+    }
+
+    // No stable release and no continuous pre-release yet.
+    Ok(UpdateResult {
+        current_version,
+        available_version: None,
+        available: false,
+        download_url: None,
+        channel: None,
+        current_sha,
+        available_sha: None,
+    })
 }
 
-#[cfg(target_os = "windows")]
+const STABLE_RELEASES_URL: &str = "https://github.com/0libote/Kivo/releases/latest";
+const CONTINUOUS_RELEASE_URL: &str = "https://github.com/0libote/Kivo/releases/tag/continuous";
+
+/// Commit SHA stamped into CI beta builds via `KIVO_BUILD_SHA`. Local builds
+/// have none, which the beta comparison treats as "definitely not the latest
+/// beta" so developers still get offered the download.
+fn current_build_sha() -> Option<String> {
+    option_env!("KIVO_BUILD_SHA")
+        .map(str::to_owned)
+        .filter(|sha| !sha.is_empty())
+}
+
 fn update_check_error() -> CommandError {
     CommandError {
         code: "update_check_failed".into(),
@@ -1489,12 +1502,10 @@ fn update_check_error() -> CommandError {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn stable_version_from_tag(tag: &str) -> Option<String> {
     tag.strip_prefix("app-v").map(str::to_owned)
 }
 
-#[cfg(any(target_os = "windows", test))]
 fn version_is_newer(candidate: &str, current: &str) -> bool {
     fn parts(version: &str) -> Option<Vec<u64>> {
         version
@@ -1504,6 +1515,27 @@ fn version_is_newer(candidate: &str, current: &str) -> bool {
             .ok()
     }
     matches!((parts(candidate), parts(current)), (Some(candidate), Some(current)) if candidate > current)
+}
+
+/// Whether the rolling beta described by the manifest is newer than the
+/// running build. A bumped version is always newer; otherwise any commit
+/// difference counts (same-version rebuilds are the normal beta case). A
+/// build without an embedded SHA (local dev) is treated as outdated whenever
+/// a beta manifest exists so the download is still offered.
+fn beta_is_newer(
+    current_sha: Option<&str>,
+    manifest_sha: Option<&str>,
+    manifest_version: &str,
+    current_version: &str,
+) -> bool {
+    if version_is_newer(manifest_version, current_version) {
+        return true;
+    }
+    match (current_sha, manifest_sha) {
+        (Some(current), Some(manifest)) => current != manifest,
+        (None, Some(_)) => true,
+        _ => false,
+    }
 }
 
 fn platform_command_error(error: PlatformError) -> CommandError {
@@ -1528,8 +1560,8 @@ fn window_error(operation: &'static str) -> PlatformError {
 #[cfg(test)]
 mod tests {
     use super::{
-        PressKind, PressOutcome, is_native_dictation_shortcut_for, press_kind, press_outcome,
-        stable_version_from_tag, version_is_newer,
+        PressKind, PressOutcome, beta_is_newer, is_native_dictation_shortcut_for, press_kind,
+        press_outcome, stable_version_from_tag, version_is_newer,
     };
     use crate::config::HostPlatform;
 
@@ -1600,5 +1632,26 @@ mod tests {
             Some("1.2.3".to_owned())
         );
         assert_eq!(stable_version_from_tag("continuous"), None);
+    }
+
+    #[test]
+    fn same_version_beta_with_a_new_commit_is_an_update() {
+        // The normal rolling-beta case: version never bumps, SHA changes.
+        assert!(beta_is_newer(Some("aaa"), Some("bbb"), "0.1.0", "0.1.0"));
+        assert!(!beta_is_newer(Some("aaa"), Some("aaa"), "0.1.0", "0.1.0"));
+    }
+
+    #[test]
+    fn beta_version_bumps_win_regardless_of_sha() {
+        assert!(beta_is_newer(Some("aaa"), Some("aaa"), "0.2.0", "0.1.0"));
+        assert!(beta_is_newer(None, None, "0.2.0", "0.1.0"));
+    }
+
+    #[test]
+    fn local_builds_without_a_sha_are_offered_the_beta() {
+        assert!(beta_is_newer(None, Some("bbb"), "0.1.0", "0.1.0"));
+        // Without a manifest SHA there is nothing commit-based to compare.
+        assert!(!beta_is_newer(Some("aaa"), None, "0.1.0", "0.1.0"));
+        assert!(!beta_is_newer(None, None, "0.1.0", "0.1.0"));
     }
 }
