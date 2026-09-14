@@ -200,7 +200,9 @@ check(
 );
 function FALLBACK_IDS_MATCH(): boolean {
   const rustIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
-  const tsIds = [...aiModelsTs.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
+  // The TS mirror stores one model per row; match the id column (labels are
+  // capitalized "Gemini …" and never match this pattern).
+  const tsIds = [...aiModelsTs.matchAll(/"(gemini-[^"]+)"/g)].map(m => m[1]);
   return rustIds.length > 0 && rustIds.length === tsIds.length && rustIds.every(id => tsIds.includes(id));
 }
 function blocklist(name: string, source: string): string[] {
