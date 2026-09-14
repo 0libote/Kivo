@@ -6,7 +6,7 @@ Kivo has no account system, telemetry, hosted backend, or provider abstraction. 
 
 ## Supported systems
 
-- macOS 26 or later, distributed directly as a signed and notarized application. The App Sandbox is intentionally disabled because system-wide Accessibility integration is incompatible with it.
+- macOS 26 or later on Apple Silicon, distributed directly as an application. Stable releases are Developer-ID signed and notarized when the Apple signing secrets are configured; the rolling `continuous` beta is ad-hoc signed (free) and needs a one-time approval in System Settings → Privacy & Security on first launch. The App Sandbox is intentionally disabled because system-wide Accessibility integration is incompatible with it.
 - Windows 11 24H2 (build 26100) or later. Distributed as a per-user `.exe` installer. Desktop SAPI speech uses installed Windows speech engines and needs no MSIX identity, Microsoft Store account, or Kivo account.
 
 Physical testing on both systems is required before a release, especially for Fn/Globe handling, Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party applications, and signing.
@@ -110,7 +110,21 @@ Kivo asks only in onboarding or when a feature is invoked:
 
 ### macOS
 
-`bun tauri build` produces the macOS app and DMG. Configure the standard Tauri Apple signing/notarization environment variables in the release environment. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
+`bun tauri build` produces the macOS app and DMG. The bundle is ad-hoc signed by default (`signingIdentity: "-"` in `src-tauri/tauri.conf.json`, free, no certificate needed) so Gatekeeper shows a recoverable unverified-developer approval instead of the dead-end "damaged" dialog. The stable release workflow overrides this with a real Developer ID via `APPLE_SIGNING_IDENTITY` when the Apple signing/notarization secrets are configured. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
+
+Easiest beta install (Apple Silicon, macOS 26+):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
+```
+
+Manual DMG install: drag `Kivo.app` to `/Applications`, then run once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Kivo.app
+```
+
+Then open Kivo and approve it in System Settings → Privacy & Security if asked. Right-click → Open no longer bypasses Gatekeeper on recent macOS, and the "damaged" wording does not mean the download is corrupt — do not trash the app.
 
 ### Windows .exe
 
@@ -135,7 +149,7 @@ Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases and hand off to the installer download: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. Beta builds are unsigned and always require a manual download.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases and hand off to the installer download: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. Beta builds are ad-hoc signed (free, not notarized) and always require a manual download plus the one-time macOS approval above.
 
 ## Privacy and diagnostics
 

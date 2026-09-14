@@ -361,10 +361,12 @@ jobs:
       # No typecheck/test rerun: this is the same SHA the `frontend` and
       # `native` gates just passed, so rerunning them only burns macOS
       # minutes (`windows-beta` never reran them either).
-      # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
-      # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
-      # signed updater artifacts, so this ships a plain beta .dmg.
-      - name: Build unsigned app bundle (beta, untrusted)
+      # No APPLE_* / TAURI_SIGNING_* secrets: builds ad-hoc signed
+      # (signingIdentity "-" in tauri.conf.json, free). No prepare:release
+      # step: without TAURI_UPDATER_PUBKEY there are no signed updater
+      # artifacts, so this ships a plain beta .dmg that needs a one-time
+      # Privacy & Security approval on first launch (see release notes).
+      - name: Build ad-hoc signed app bundle (beta)
         run: bun tauri build --target aarch64-apple-darwin
       - name: Upload bundle for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -474,7 +476,7 @@ jobs:
           gh release edit continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+            --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
 
   windows-bundle-pr:
     name: Windows bundle build (approval-gated)
@@ -560,7 +562,7 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
-      - name: Build unsigned app bundle (approval-gated PR check)
+      - name: Build ad-hoc signed app bundle (approval-gated PR check)
         run: bun tauri build --target aarch64-apple-darwin
       - name: Upload bundle for manual smoke-testing
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

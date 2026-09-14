@@ -44,7 +44,7 @@ const tauriConf = JSON.parse(
   version: string;
   identifier: string;
   build: { frontendDist: string };
-  bundle: { targets: unknown; windows?: { digestAlgorithm?: string } };
+  bundle: { targets: unknown; macOS?: { signingIdentity?: string | null }; windows?: { digestAlgorithm?: string } };
   plugins: { updater: { endpoints: string[]; pubkey: string } };
 };
 check("tauri.conf version matches package.json", tauriConf.version === version, `tauri.conf has "${tauriConf.version}"`);
@@ -122,6 +122,12 @@ for (const key of ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDesc
   check(`Info.plist keeps ${key}`, infoPlist.includes(key), `${key} missing; the OS prompt shows no purpose string`);
 }
 check("Swift speech bridge source exists", existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")), "build.rs compiles this on macOS; a missing file breaks only the macOS build");
+check(
+  "macOS ad-hoc signs free builds",
+  tauriConf.bundle.macOS?.signingIdentity === "-",
+  `got ${JSON.stringify(tauriConf.bundle.macOS?.signingIdentity)}; null skips bundle signing and ships a half-signed .app that Gatekeeper reports as "damaged" with no bypass. "-" ad-hoc signs for free; release.yml still overrides with a real Developer ID via APPLE_SIGNING_IDENTITY`,
+);
+check("macOS installer script exists", existsSync(join(root, "scripts/install-macos.sh")), "the continuous release notes point at this one-liner; a missing file breaks the free install path");
 
 // --- Windows floor consistency --------------------------------------------------
 const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");

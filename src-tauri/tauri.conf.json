@@ -25,7 +25,7 @@
     "macOS": {
       "minimumSystemVersion": "26.0",
       "entitlements": "Entitlements.plist",
-      "signingIdentity": null
+      "signingIdentity": "-"
     },
     "windows": {
       "digestAlgorithm": "sha256",
