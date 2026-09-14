@@ -72,7 +72,7 @@ export interface NativeBridge {
   on<K extends keyof NativeEventMap>(event: K, handler: (payload: NativeEventMap[K]) => void): Promise<UnlistenFn>;
 }
 
-function detectedPlatform(): Platform {
+export function detectedPlatform(): Platform {
   if (/Windows/i.test(navigator.userAgent)) return "windows";
   return "macos";
 }

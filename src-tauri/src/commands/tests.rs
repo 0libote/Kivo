@@ -468,6 +468,49 @@ async fn dismiss_cancels_network_work_immediately_and_reopen_ignores_late_respon
     }
 }
 
+#[test]
+fn permission_requirements_match_each_desktop() {
+    // Host-parameterized: runs identically on macOS and Windows CI, so a
+    // requirement flipped for one desktop fails on both.
+    use crate::{config::HostPlatform, platform::PermissionKind};
+
+    // macOS: input monitoring (Fn-hold) and OS speech recognition gate the app.
+    assert!(permission_required_for(
+        PermissionKind::Accessibility,
+        HostPlatform::Macos
+    ));
+    assert!(permission_required_for(
+        PermissionKind::InputMonitoring,
+        HostPlatform::Macos
+    ));
+    assert!(permission_required_for(
+        PermissionKind::Microphone,
+        HostPlatform::Macos
+    ));
+    assert!(permission_required_for(
+        PermissionKind::SpeechRecognition,
+        HostPlatform::Macos
+    ));
+    // Windows: desktop SAPI + microphone need no OS permission prompt;
+    // only accessibility (text replacement) and microphone stay required.
+    assert!(permission_required_for(
+        PermissionKind::Accessibility,
+        HostPlatform::Windows
+    ));
+    assert!(!permission_required_for(
+        PermissionKind::InputMonitoring,
+        HostPlatform::Windows
+    ));
+    assert!(permission_required_for(
+        PermissionKind::Microphone,
+        HostPlatform::Windows
+    ));
+    assert!(!permission_required_for(
+        PermissionKind::SpeechRecognition,
+        HostPlatform::Windows
+    ));
+}
+
 #[cfg(target_os = "windows")]
 #[test]
 fn windows_lists_installed_speech_languages() {

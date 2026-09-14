@@ -15,6 +15,7 @@
     "test:ui": "playwright test",
     "prepare:release": "bun scripts/prepare-release-config.ts",
     "check:packaging": "bun scripts/check-packaging.ts",
+    "check:platform-parity": "bun scripts/check-platform-parity.ts",
     "format:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets"
   },

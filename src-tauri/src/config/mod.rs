@@ -83,6 +83,62 @@ pub enum ThemePreference {
     Dark,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// Variants for the *other* desktop are only constructed by unit tests (each
+// CI host executes both directions); without this, `clippy -D warnings`
+// would flag them as never constructed on single-host builds.
+#[allow(dead_code)]
+pub(crate) enum HostPlatform {
+    Macos,
+    Windows,
+    Other,
+}
+
+impl HostPlatform {
+    pub(crate) fn current() -> Self {
+        #[cfg(target_os = "macos")]
+        return Self::Macos;
+        #[cfg(target_os = "windows")]
+        return Self::Windows;
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        return Self::Other;
+    }
+}
+
+/// Native hold shortcut per host, parameterized so every CI platform can
+/// assert every other platform's default (a `#[cfg]`-gated test only ever
+/// exercises its own host and lets the other default drift silently).
+pub(crate) fn dictation_default_for(host: HostPlatform) -> ShortcutBinding {
+    match host {
+        HostPlatform::Macos => ShortcutBinding::new("Fn"),
+        HostPlatform::Windows => ShortcutBinding::new("Ctrl+Meta"),
+        HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
+    }
+}
+
+/// Portable Writing Tools shortcut per host. Same cross-host testability
+/// rationale as [`dictation_default_for`].
+pub(crate) fn writing_tools_default_for(host: HostPlatform) -> ShortcutBinding {
+    match host {
+        HostPlatform::Macos => ShortcutBinding::new("Ctrl+Shift+Space"),
+        HostPlatform::Windows => ShortcutBinding::new("Ctrl+Space"),
+        HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
+    }
+}
+
+/// Replacement for a foreign native dictation default carried over in a
+/// settings file, or `None` when the accelerator is valid on `host`.
+/// Pure over `host` so one test run covers both migration directions.
+fn foreign_default_replacement(accelerator: &str, host: HostPlatform) -> Option<ShortcutBinding> {
+    match host {
+        HostPlatform::Windows if accelerator == "Fn" => Some(dictation_default_for(host)),
+        HostPlatform::Macos if accelerator == "Ctrl+Meta" || accelerator == "Control+Super" => {
+            Some(dictation_default_for(host))
+        }
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DictationSettings {
@@ -119,14 +175,9 @@ impl DictationSettings {
     /// dead, so migrate exactly those while custom shortcuts (handled by the
     /// portable global-shortcut plugin on both platforms) pass through.
     fn migrate_foreign_default(&mut self) {
-        #[cfg(target_os = "windows")]
-        if self.shortcut.accelerator == "Fn" {
-            self.shortcut = ShortcutBinding::dictation_default();
-        }
-        #[cfg(target_os = "macos")]
-        if self.shortcut.accelerator == "Ctrl+Meta" || self.shortcut.accelerator == "Control+Super"
-        {
-            self.shortcut = ShortcutBinding::dictation_default();
+        let host = HostPlatform::current();
+        if let Some(replacement) = foreign_default_replacement(&self.shortcut.accelerator, host) {
+            self.shortcut = replacement;
         }
     }
 
@@ -174,25 +225,11 @@ impl ShortcutBinding {
     }
 
     pub fn dictation_default() -> Self {
-        #[cfg(target_os = "macos")]
-        return Self::new("Fn");
-
-        #[cfg(target_os = "windows")]
-        return Self::new("Ctrl+Meta");
-
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        Self::new("Control+Alt+Space")
+        dictation_default_for(HostPlatform::current())
     }
 
     pub fn writing_tools_default() -> Self {
-        #[cfg(target_os = "macos")]
-        return Self::new("Ctrl+Shift+Space");
-
-        #[cfg(target_os = "windows")]
-        return Self::new("Ctrl+Space");
-
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-        Self::new("Control+Alt+Space")
+        writing_tools_default_for(HostPlatform::current())
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
@@ -385,7 +422,10 @@ fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
 mod tests {
     use std::{env, fs, time::SystemTime};
 
-    use super::{AppSettings, SettingsRepository, ShortcutBinding, ThemePreference};
+    use super::{
+        AppSettings, HostPlatform, SettingsRepository, ShortcutBinding, ThemePreference,
+        dictation_default_for, foreign_default_replacement, writing_tools_default_for,
+    };
     use crate::ai::WritingAction;
 
     fn temporary_settings_path() -> std::path::PathBuf {
@@ -425,33 +465,70 @@ mod tests {
 
     #[test]
     fn foreign_native_dictation_shortcut_migrates_to_the_host_default() {
-        // The native hold shortcut is OS-exclusive ("Fn" on macOS,
-        // "Ctrl+Meta" on Windows); a settings file carried across platforms
-        // must fall back to the host default instead of registering nothing.
-        // Each CI platform executes its own branch of this test.
-        let mut settings = AppSettings::default();
-        #[cfg(target_os = "macos")]
-        {
-            settings.dictation.shortcut = ShortcutBinding::new("Ctrl+Meta");
-        }
-        #[cfg(target_os = "windows")]
-        {
-            settings.dictation.shortcut = ShortcutBinding::new("Fn");
-        }
-        let migrated = settings.validate_and_normalize().unwrap();
+        // Host-parameterized: every CI platform executes both migration
+        // directions, so a default changed on one OS without its counterpart
+        // fails fast instead of surfacing weeks later on the other OS.
+        // Windows host: macOS "Fn" migrates; everything else passes through.
         assert_eq!(
-            migrated.dictation.shortcut,
-            super::ShortcutBinding::dictation_default()
+            foreign_default_replacement("Fn", HostPlatform::Windows),
+            Some(ShortcutBinding::new("Ctrl+Meta"))
         );
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Alt+D", HostPlatform::Windows),
+            None
+        );
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Meta", HostPlatform::Windows),
+            None
+        );
+        // macOS host: both Windows spellings ("Ctrl+Meta" as stored,
+        // "Control+Super" as normalized in shell.rs) migrate.
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Meta", HostPlatform::Macos),
+            Some(ShortcutBinding::new("Fn"))
+        );
+        assert_eq!(
+            foreign_default_replacement("Control+Super", HostPlatform::Macos),
+            Some(ShortcutBinding::new("Fn"))
+        );
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Alt+D", HostPlatform::Macos),
+            None
+        );
+        assert_eq!(foreign_default_replacement("Fn", HostPlatform::Macos), None);
 
-        // Custom shortcuts go through the portable global-shortcut plugin on
-        // both platforms and must survive normalization untouched.
+        // End-to-end through normalization on the current host: the host's
+        // own default survives while custom shortcuts pass through untouched.
         let mut settings = AppSettings::default();
         settings.dictation.shortcut = ShortcutBinding::new("Ctrl+Alt+D");
         let migrated = settings.validate_and_normalize().unwrap();
         assert_eq!(
             migrated.dictation.shortcut,
             ShortcutBinding::new("Ctrl+Alt+D")
+        );
+    }
+
+    #[test]
+    fn platform_defaults_match_the_frontend_contract() {
+        // Mirror of src/types.ts defaultSettings() and the frontend
+        // platform-defaults test. If either side changes a default, update
+        // both together (and scripts/check-platform-parity.ts enforces it in
+        // CI without compiling).
+        assert_eq!(
+            dictation_default_for(HostPlatform::Macos),
+            ShortcutBinding::new("Fn")
+        );
+        assert_eq!(
+            dictation_default_for(HostPlatform::Windows),
+            ShortcutBinding::new("Ctrl+Meta")
+        );
+        assert_eq!(
+            writing_tools_default_for(HostPlatform::Macos),
+            ShortcutBinding::new("Ctrl+Shift+Space")
+        );
+        assert_eq!(
+            writing_tools_default_for(HostPlatform::Windows),
+            ShortcutBinding::new("Ctrl+Space")
         );
     }
 

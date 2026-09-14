@@ -92,6 +92,59 @@ for (const icon of [
   check(`icon exists: ${icon}`, existsSync(join(root, icon)), "missing file breaks the corresponding bundle");
 }
 
+// --- Rust package version -----------------------------------------------------
+const cargoToml = readFileSync(join(root, "src-tauri/Cargo.toml"), "utf8");
+const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(cargoToml)?.[1];
+check("Cargo.toml version matches package.json", cargoVersion === version, `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`);
+
+// --- Capability windows match the windows the shell creates -------------------
+// The bundler allows any label, so a renamed window label merges fine and
+// then fails at runtime when show_surface cannot find the window.
+const capabilities = JSON.parse(readFileSync(join(root, "src-tauri/capabilities/default.json"), "utf8")) as { windows: string[] };
+const shellSource = readFileSync(join(root, "src-tauri/src/shell.rs"), "utf8");
+const createdWindows = [...shellSource.matchAll(/build_window\(\s*app,\s*"([^"]+)"/g)].map((match) => match[1]);
+check("capabilities/default.json parses a window list", Array.isArray(capabilities.windows) && capabilities.windows.length > 0, "windows list missing");
+check(
+  "capability windows match the windows the shell creates",
+  JSON.stringify([...capabilities.windows].sort()) === JSON.stringify([...createdWindows].sort()),
+  `capabilities has [${capabilities.windows}] but shell.rs creates [${createdWindows}]`,
+);
+
+// --- macOS bundle metadata (fails the dmg build late when missing) -------------
+const entitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
+check("Entitlements.plist keeps microphone access", entitlements.includes("com.apple.security.device.audio-input"), "audio-input entitlement missing; dictation has no mic on macOS");
+const infoPlist = readFileSync(join(root, "src-tauri/Info.plist"), "utf8");
+for (const key of ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription", "NSAccessibilityUsageDescription"]) {
+  check(`Info.plist keeps ${key}`, infoPlist.includes(key), `${key} missing; the OS prompt shows no purpose string`);
+}
+check("Swift speech bridge source exists", existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")), "build.rs compiles this on macOS; a missing file breaks only the macOS build");
+
+// --- Windows floor consistency --------------------------------------------------
+const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");
+const hookBuild = /\$\{AtLeastBuild\}\s*(\d+)/.exec(hooksSource)?.[1];
+const manifestBuild = /MinVersion="10\.0\.(\d+)\.0"/.exec(manifest)?.[1];
+check(
+  "NSIS floor matches the MSIX MinVersion build",
+  hookBuild !== undefined && hookBuild === manifestBuild,
+  `hooks.nsh enforces build ${hookBuild} but AppxManifest MinVersion is build ${manifestBuild}; installers would disagree about the supported floor`,
+);
+
+// --- Windows overlay config stays an overlay ------------------------------------
+const windowsConfRaw = readFileSync(join(root, "src-tauri/tauri.windows.conf.json"), "utf8");
+const windowsConfTop = JSON.parse(windowsConfRaw) as Record<string, unknown>;
+check(
+  "tauri.windows.conf.json does not fork identity",
+  !("identifier" in windowsConfTop) && !("productName" in windowsConfTop) && !("version" in windowsConfTop),
+  "the Windows overlay must only narrow bundle targets; identity/version stay in tauri.conf.json or releases fork",
+);
+
+// --- Updater key is injected at release time, never committed --------------------
+check(
+  "committed updater pubkey stays empty",
+  tauriConf.plugins.updater.pubkey === "",
+  "a pubkey in the repo would silently ship beta builds with the wrong update trust; prepare-release-config.ts injects it from secrets",
+);
+
 // --- Artifact name parity (what CI uploads vs. what releases expect) ---------
 console.info(`info - expected NSIS artifact: src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe`);
 console.info(`info - optional legacy MSIX artifact: src-tauri/target/release/bundle/msix/Kivo_${version}_x64.msix`);

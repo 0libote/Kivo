@@ -3,16 +3,37 @@ name: CI & Build
 # Unified pipeline: CI checks -> code/security review -> unsigned beta build.
 #
 # - pull_request: runs CI + review only (build jobs are skipped), except the
-#   approval-gated `windows-bundle-pr` job: a maintainer adds the
-#   `test-windows-build` label as the approval (labels need write access, so
-#   the label IS the approval, even for owner commits) to get a real Windows
-#   installer for that PR.
+#   approval-gated `windows-bundle-pr` / `macos-bundle-pr` jobs: a maintainer
+#   adds the `test-windows-build` / `test-macos-build` label as the approval
+#   (labels need write access, so the label IS the approval, even for owner
+#   commits) to get a real installer for that PR.
 # - push to main / workflow_dispatch: runs CI, then review, then the rolling
 #   unsigned beta (continuous pre-release) only if everything ahead passes.
 # Takes longer end-to-end, but a red check anywhere stops the build.
 #
 # The tag-based `Release` workflow remains the separate signed path for
 # stable `app-v*` releases.
+#
+# Speed shape (deliberate):
+# - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
+#   `e2e`, `codeql`, `audit` and `dep-review` all start immediately. There
+#   are no `needs` chains between independent checks, so the slow native
+#   builds never gate the fast static gates (previously audit/codeql waited
+#   ~30min on `native` before even starting).
+# - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
+#   the `native` matrix (macOS + Windows) owns clippy + tests, so each
+#   desktop's `#[cfg(target_os)]` sources still compile on every PR. The
+#   matrix no longer pays for a bun install (pure-Rust checks) or a
+#   duplicated fmt run.
+# - Foreign-desktop *logic* (shortcut defaults, cross-OS settings migration,
+#   native-shortcut checks, permission requirements) is tested
+#   host-parameterized: every runner executes both directions (see
+#   `HostPlatform` in src-tauri/src/config plus `check:platform-parity`),
+#   instead of `#[cfg]`-gated tests that only ever exercise their own host
+#   and let the other desktop drift silently.
+# - Concurrency is job-level, never workflow-level: superseded PR pushes
+#   cancel in-flight CI jobs, while main pushes/dispatches never cancel, so
+#   beta builds cannot starve (a workflow-level group starved them before).
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -23,16 +44,13 @@ on:
 permissions:
   contents: read
 
-# NOTE: no workflow-level concurrency. An earlier revision had
-# `group: CI & Build-<ref>` with cancel-in-progress on PRs only, and the
-# beta jobs never started on green main pushes/dispatches while it was
-# present. Temporary removal to isolate the cause; will restore equivalent
-# protection (scoped so it cannot starve betas) once identified.
-
 jobs:
   frontend:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: ci-frontend-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -49,8 +67,13 @@ jobs:
     # JavaScript is portable, but paths, line endings, and toolchain behavior
     # still differ on Windows. Typecheck + unit tests only; lint and the web
     # build stay on the ubuntu `frontend` job so they are not paid for twice.
+    # The static gates also run here (seconds, no extra install) to prove the
+    # gate scripts themselves work with Windows paths/line endings.
     runs-on: windows-latest
     timeout-minutes: 15
+    concurrency:
+      group: ci-frontend-windows-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -59,59 +82,102 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
       - run: bun run test
+      - run: bun run check:packaging
+      - run: bun run check:platform-parity
 
   packaging:
-    name: Packaging parity gate
-    # Fast static check (seconds, no compile) that the macOS and Windows
-    # packaging metadata agree: versions, MSIX floor/identity, icons,
-    # updater endpoints. The real bundle builds only run on main/tags, so
-    # this gate is what stops a packaging breakage from merging in a PR.
-    # No install step: scripts/check-packaging.ts uses node builtins only.
+    name: Packaging + platform parity gates
+    # Fast static checks (seconds, no compile): packaging metadata agreement
+    # plus macOS/Windows branch parity (shortcut defaults, native-shortcut
+    # strings, permission requirements, harness matrix). The real bundle
+    # builds only run on main/tags, so these gates are what stop packaging
+    # or single-OS breakage from merging in a PR.
+    # No install step: both scripts use node builtins only.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: ci-packaging-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
       - run: bun run check:packaging
+      - run: bun run check:platform-parity
+
+  rust-static:
+    name: Rust static (fmt, lockfile)
+    # Cheap ubuntu job for everything that needs no compilation: rustfmt
+    # parses every file including the `#[cfg(target_os)]` sources that only
+    # compile on the other desktop, and `cargo metadata --locked` fails fast
+    # on a Cargo.toml/Cargo.lock drift that would otherwise only surface
+    # inside the macOS/Windows native builds below.
+    # NOTE: full `cargo check/clippy --target <foreign desktop>` was tried
+    # here and deliberately dropped: third-party C build scripts (aws-lc-sys
+    # for Windows, objc2 helpers for macOS) need that desktop's C toolchain,
+    # which no ubuntu runner has. Foreign-target compilation stays covered
+    # by the per-OS `native` matrix (every PR compiles both desktops), and
+    # foreign-target *logic* is covered without compiling by the
+    # host-parameterized unit tests (config/shell/commands) plus
+    # `check:platform-parity` in the `packaging` job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: ci-rust-static-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
 
   native:
+    # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
+    # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
+    # lockfile checks live in `rust-static`, and no bun install is needed
+    # here (pure-Rust checks), so expensive runners are not billed for work
+    # ubuntu already did.
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    concurrency:
+      group: ci-native-${{ matrix.os }}-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          components: clippy,rustfmt
+          components: clippy
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
-  # Automated code review / security gates. Each gate runs independently so
-  # one failure never hides the signal from the others. The `security-gate`
-  # aggregator must pass before any beta build starts. It fails the pipeline
-  # on: CodeQL findings, known-vulnerable dependencies (bun + cargo),
-  # packaging drift between macOS and Windows metadata, UI test failures,
-  # or risky PR dependencies.
+  # Automated code review / security gates. Each gate runs independently and
+  # starts immediately (no `needs` on the CI jobs above) so one slow suite
+  # never hides the signal from the others. The `security-gate` aggregator
+  # must pass before any beta build starts.
   # NOTE: CodeQL only scans javascript-typescript (it has no Rust support);
-  # Rust review is clippy -D warnings plus cargo-audit in the `native` and
-  # `audit` jobs, enforced on both macos-latest and windows-latest.
+  # Rust review is clippy -D warnings (per-OS in `native`) plus cargo-audit
+  # in the `audit` job, enforced for both desktop targets.
   e2e:
     name: UI tests (Playwright)
+    # Ubuntu + Chromium only (cheap). Both platform branches are still
+    # covered: the browser harness derives its platform from
+    # navigator.userAgent, and the suite spoofs Windows and macOS agents
+    # (see windows-branches.pw.ts, overhaul.pw.ts, summaries.pw.ts).
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: ci-e2e-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -138,9 +204,11 @@ jobs:
 
   codeql:
     name: Code review (CodeQL)
-    needs: [frontend, native]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: ci-codeql-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
       actions: read
@@ -154,9 +222,11 @@ jobs:
 
   audit:
     name: Dependency audit (bun + cargo)
-    needs: [frontend, native]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: ci-audit-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -185,7 +255,6 @@ jobs:
 
   dep-review:
     name: Review PR dependency changes
-    needs: [frontend, native]
     # Deliberately no job-level `if`: this job must complete (never skip)
     # on every event. When it skipped off-PR, downstream
     # `needs.security-gate.outputs.*` comparisons evaluated false at
@@ -194,6 +263,9 @@ jobs:
     # stays PR-only via the step guard; off-PR the job is checkout + no-op.
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    concurrency:
+      group: ci-dep-review-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     permissions:
       contents: read
     steps:
@@ -251,7 +323,7 @@ jobs:
           cat "$GITHUB_OUTPUT"
 
   macos-beta:
-    needs: [frontend, frontend-windows, native, security-gate]
+    needs: [frontend, frontend-windows, native, rust-static, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
     # Serializes concurrent runs racing the `continuous` delete/create/
     # upload below. (Temporarily removed during beta-starvation diagnosis;
@@ -369,10 +441,13 @@ jobs:
     # runs. The unsigned .exe is kept as a short-lived run artifact for
     # manual smoke-testing only, never attached to a release. No secrets
     # are used, so this is also safe on forks.
-    needs: [frontend, frontend-windows, native, packaging]
+    needs: [frontend, frontend-windows, native, rust-static, packaging]
     if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-windows-build')
     runs-on: windows-latest
     timeout-minutes: 45
+    concurrency:
+      group: ci-windows-bundle-pr-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
     env:
@@ -393,6 +468,7 @@ jobs:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
+      - run: bun run check:platform-parity
       - name: Build unsigned NSIS installer (approval-gated PR check)
         run: bun tauri build --bundles nsis
       - name: Upload installer for manual smoke-testing
@@ -401,3 +477,52 @@ jobs:
           name: kivo-windows-nsis-pr
           retention-days: 7
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  macos-bundle-pr:
+    name: macOS bundle build (approval-gated)
+    # Approval model mirrors `windows-bundle-pr`: PRs do NOT build the macOS
+    # bundle by default (macOS runners are the most expensive minutes). A
+    # maintainer approves with the `test-macos-build` label. Without this
+    # job, macOS-only bundle breakage (icons, entitlements, Swift bridge,
+    # dmg config) merges and fails the beta on main instead of the PR.
+    # No secrets are used, so this is also safe on forks.
+    needs: [frontend, frontend-windows, native, rust-static, packaging]
+    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-macos-build')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    concurrency:
+      group: ci-macos-bundle-pr-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+    env:
+      # Same beta-only fast release tuning as macos-beta: this is a smoke
+      # check, not a shippable artifact.
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
+      CARGO_PROFILE_RELEASE_STRIP: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: aarch64-apple-darwin
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: src-tauri
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check:packaging
+      - run: bun run check:platform-parity
+      - name: Build unsigned app bundle (approval-gated PR check)
+        run: bun tauri build --target aarch64-apple-darwin
+      - name: Upload bundle for manual smoke-testing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-macos-bundle-pr
+          retention-days: 7
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app

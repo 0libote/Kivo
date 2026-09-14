@@ -20,7 +20,7 @@ use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
     commands::{AppCore, CommandError, FrontendSettings, UpdateResult},
-    config::{AppSettings, SettingsRuntime, SettingsRuntimeError},
+    config::{AppSettings, HostPlatform, SettingsRuntime, SettingsRuntimeError},
     platform::{
         HoldShortcut, HoldShortcutEvent, OverlayKind, PermissionKind, PlatformError,
         PlatformErrorKind, PlatformServices, ShortcutRegistration,
@@ -389,8 +389,17 @@ fn register_dictation_shortcut(
 }
 
 fn is_native_dictation_shortcut(shortcut: &str) -> bool {
-    (cfg!(target_os = "macos") && shortcut == "Fn")
-        || (cfg!(target_os = "windows") && shortcut == "Control+Super")
+    is_native_dictation_shortcut_for(shortcut, HostPlatform::current())
+}
+
+/// Host-parameterized native-shortcut check so one test run covers both
+/// platforms. The stored default is "Ctrl+Meta" but shell.rs normalizes
+/// Ctrl→Control / Meta→Super before this check, hence "Control+Super".
+fn is_native_dictation_shortcut_for(shortcut: &str, host: HostPlatform) -> bool {
+    matches!(
+        (host, shortcut),
+        (HostPlatform::Macos, "Fn") | (HostPlatform::Windows, "Control+Super")
+    )
 }
 
 fn dispatch_dictation_event(app: AppHandle, event: HoldShortcutEvent) {
@@ -1518,8 +1527,39 @@ fn window_error(operation: &'static str) -> PlatformError {
 
 #[cfg(test)]
 mod tests {
-    use super::{PressKind, PressOutcome};
-    use super::{press_kind, press_outcome, stable_version_from_tag, version_is_newer};
+    use super::{
+        PressKind, PressOutcome, is_native_dictation_shortcut_for, press_kind, press_outcome,
+        stable_version_from_tag, version_is_newer,
+    };
+    use crate::config::HostPlatform;
+
+    #[test]
+    fn native_dictation_shortcuts_are_os_exclusive_on_both_hosts() {
+        // Runs on every CI platform: a Windows-only shortcut must never be
+        // treated as native on macOS and vice versa.
+        assert!(is_native_dictation_shortcut_for("Fn", HostPlatform::Macos));
+        assert!(!is_native_dictation_shortcut_for(
+            "Control+Super",
+            HostPlatform::Macos
+        ));
+        assert!(!is_native_dictation_shortcut_for(
+            "Fn",
+            HostPlatform::Windows
+        ));
+        assert!(is_native_dictation_shortcut_for(
+            "Control+Super",
+            HostPlatform::Windows
+        ));
+        // Portable shortcuts always go through the global-shortcut plugin.
+        for host in [
+            HostPlatform::Macos,
+            HostPlatform::Windows,
+            HostPlatform::Other,
+        ] {
+            assert!(!is_native_dictation_shortcut_for("Ctrl+Alt+D", host));
+            assert!(!is_native_dictation_shortcut_for("Control+Space", host));
+        }
+    }
 
     #[test]
     fn github_release_versions_are_compared_without_lexical_ordering() {

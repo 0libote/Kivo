@@ -55,8 +55,9 @@ jobs:
       - run: bun lint
       - run: bun run test
       - run: bun run check:packaging
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: bun run check:platform-parity
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       - run: bun run prepare:release
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
@@ -99,8 +100,9 @@ jobs:
       - run: bun lint
       - run: bun run test
       - run: bun run check:packaging
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: bun run check:platform-parity
+      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
       # NSIS needs no paid certificate or store account. If an Authenticode
       # certificate is available, sign the final installer.
       - name: Build Windows .exe installer

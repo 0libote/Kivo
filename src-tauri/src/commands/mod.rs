@@ -1426,32 +1426,51 @@ fn selection_context(context: WritingPopupContext) -> SelectionContext {
     }
 }
 
+/// Whether a permission gates core functionality on `host`. Pure over the
+/// host so every CI platform tests both requirement matrices: input
+/// monitoring (Fn-hold detection) and OS speech recognition only exist on
+/// macOS, while accessibility and microphone gate both desktops.
+pub(crate) fn permission_required_for(
+    permission: crate::platform::PermissionKind,
+    host: crate::config::HostPlatform,
+) -> bool {
+    match permission {
+        crate::platform::PermissionKind::Accessibility => true,
+        crate::platform::PermissionKind::Microphone => true,
+        crate::platform::PermissionKind::InputMonitoring
+        | crate::platform::PermissionKind::SpeechRecognition => {
+            matches!(host, crate::config::HostPlatform::Macos)
+        }
+    }
+}
+
 fn permission_statuses(
     platform: &crate::platform::PlatformServices,
 ) -> Result<Vec<FrontendPermissionStatus>, crate::platform::PlatformError> {
+    let host = crate::config::HostPlatform::current();
     [
         (
             crate::platform::PermissionKind::Accessibility,
             "accessibility",
-            true,
+            permission_required_for(crate::platform::PermissionKind::Accessibility, host),
             "Read and replace selected text.",
         ),
         (
             crate::platform::PermissionKind::InputMonitoring,
             "input-monitoring",
-            cfg!(target_os = "macos"),
+            permission_required_for(crate::platform::PermissionKind::InputMonitoring, host),
             "Detect the Fn hold shortcut.",
         ),
         (
             crate::platform::PermissionKind::Microphone,
             "microphone",
-            true,
+            permission_required_for(crate::platform::PermissionKind::Microphone, host),
             "Listen while dictation is active.",
         ),
         (
             crate::platform::PermissionKind::SpeechRecognition,
             "speech-recognition",
-            cfg!(target_os = "macos"),
+            permission_required_for(crate::platform::PermissionKind::SpeechRecognition, host),
             "Transcribe speech using the operating system.",
         ),
     ]
