@@ -444,11 +444,16 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          dmg=(beta/macos/*.dmg)
-          app=(beta/macos/*.app)
-          exe=(beta/windows/*-setup.exe)
+          # upload-artifact preserves the matched parents (dmg/…, macos/…),
+          # so locate by name instead of assuming a flat layout.
+          dmg="$(find beta/macos -maxdepth 3 -name '*.dmg' | head -n 1)"
+          appdir="$(find beta/macos -maxdepth 3 -name '*.app' | head -n 1)"
+          exe="$(find beta/windows -name '*-setup.exe' | head -n 1)"
+          test -n "$dmg" || { echo "macOS dmg not found in artifact"; exit 1; }
+          test -n "$appdir" || { echo "macOS .app not found in artifact"; exit 1; }
+          test -n "$exe" || { echo "Windows installer not found in artifact"; exit 1; }
           tarball="beta/Kivo_${version}_aarch64.app.tar.gz"
-          tar -czf "$tarball" -C beta/macos "$(basename "$app")"
+          tar -czf "$tarball" -C "$(dirname "$appdir")" "$(basename "$appdir")"
           gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
           gh release create continuous \
             --prerelease \
