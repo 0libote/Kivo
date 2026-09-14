@@ -322,49 +322,19 @@ jobs:
           fi
           cat "$GITHUB_OUTPUT"
 
-  # Beta delivery. The two desktop builds run IN PARALLEL behind a single
-  # `continuous-setup` job that owns the one racy operation (delete/recreate
-  # the `continuous` release). Both builders then only *add* assets with
-  # distinct filenames, which is race-free, cutting the beta wall time from
-  # ~7min serial to ~4.5min (the slower builder). All three jobs share the
-  # `continuous-prerelease` group so overlapping main pushes still serialize
-  # across runs.
-  continuous-setup:
-    name: Reset the continuous release
+  # Beta delivery. The two desktop builds run IN PARALLEL and hand off via
+  # short-lived, run-scoped artifacts. A single `publish-continuous` job
+  # owns every mutation of the `continuous` release (delete/recreate, asset
+  # uploads, notes), so overlapping main pushes serialize there while the
+  # slow builders overlap. Beta wall time drops from ~7min serial to ~4.5min
+  # (the slower builder plus seconds to publish).
+  macos-beta:
     needs: [frontend, frontend-windows, native, rust-static, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
-    concurrency:
-      group: continuous-prerelease
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Reset the continuous release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
-          gh release create continuous \
-            --prerelease \
-            --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
-
-  macos-beta:
-    needs: [continuous-setup]
-    if: needs.continuous-setup.result == 'success'
-    # Shared `continuous-prerelease` group: serializes overlapping runs
-    # (see `continuous-setup`); within a run this builds in parallel with
-    # `windows-beta`, which only adds distinctly-named assets.
-    concurrency:
-      group: continuous-prerelease
-      cancel-in-progress: false
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
     env:
       # Beta-only fast release tuning. Keeps output in target/release/ (what
       # the Tauri bundler expects) while skipping the fat-LTO single-codegen
@@ -391,39 +361,27 @@ jobs:
       # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
       # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
       # signed updater artifacts, so this ships a plain beta .dmg.
-      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build unsigned app bundle (beta, untrusted)
+        run: bun tauri build --target aarch64-apple-darwin
+      - name: Upload bundle for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          tagName: continuous
-          releaseName: Kivo continuous (beta)
-          releaseBody: Rolling unsigned beta pre-release rebuilt from every commit to main. Prefer stable app-v* releases when available.
-          releaseDraft: false
-          prerelease: true
-          args: --target aarch64-apple-darwin
-      - name: Stamp release notes with the built commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit continuous \
-            --prerelease \
-            --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+          name: kivo-beta-macos
+          # Consumed minutes later by `publish-continuous`; not for humans.
+          retention-days: 1
+          # NOTE: explicit `--target` redirects cargo output to
+          # target/<triple>/release, not target/release.
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
 
   windows-beta:
-    needs: [continuous-setup]
-    if: needs.continuous-setup.result == 'success'
-    # Shared `continuous-prerelease` group: serializes overlapping runs
-    # (see `continuous-setup`); within a run this builds in parallel with
-    # `macos-beta`. Only uploads its distinctly-named .exe, so the two
-    # concurrent uploads cannot clobber each other.
-    concurrency:
-      group: continuous-prerelease
-      cancel-in-progress: false
+    needs: [frontend, frontend-windows, native, rust-static, security-gate]
+    if: needs.security-gate.outputs.beta_ready == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
-      contents: write
+      contents: read
     env:
       # Same beta-only fast release tuning as macos-beta above. Single NSIS
       # build only (no second MSIX cargo invocation).
@@ -447,15 +405,60 @@ jobs:
       # `tauri build --no-bundle`, paying the LTO link twice).
       - name: Build unsigned NSIS installer (beta, untrusted)
         run: bun tauri build --bundles nsis
-      - name: Attach Windows artifacts to the continuous pre-release
-        shell: pwsh
+      - name: Upload installer for the publish job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-beta-windows
+          # Consumed minutes later by `publish-continuous`; not for humans.
+          retention-days: 1
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  publish-continuous:
+    name: Publish the continuous pre-release
+    # Owns every mutation of the `continuous` release (delete/recreate,
+    # asset uploads, notes) so overlapping main pushes serialize here
+    # while the builders above overlap. Asset names match what the old
+    # tauri-action/gh flow shipped (dmg + app tarball + setup exe).
+    needs: [macos-beta, windows-beta]
+    if: needs.macos-beta.result == 'success' && needs.windows-beta.result == 'success'
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: kivo-beta-macos
+          path: beta/macos
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: kivo-beta-windows
+          path: beta/windows
+      - name: Publish assets to the continuous pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          # Forward slashes: PowerShell accepts them and they avoid YAML
-          # backslash-escape confusion.
-          gh release upload continuous "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          dmg=(beta/macos/*.dmg)
+          app=(beta/macos/*.app)
+          exe=(beta/windows/*-setup.exe)
+          tarball="beta/Kivo_${version}_aarch64.app.tar.gz"
+          tar -czf "$tarball" -C beta/macos "$(basename "$app")"
+          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
+          gh release create continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+          gh release upload continuous "$dmg" "$tarball" "$exe" --clobber
+          gh release edit continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
 
   windows-bundle-pr:
     name: Windows bundle build (approval-gated)
@@ -548,6 +551,8 @@ jobs:
         with:
           name: kivo-macos-bundle-pr
           retention-days: 7
+          # NOTE: explicit `--target` redirects cargo output to
+          # target/<triple>/release, not target/release.
           path: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.app
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
