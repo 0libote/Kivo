@@ -455,8 +455,22 @@ function AiSection({
               setNotice(null);
               setApiStatus((current) => ({ ...current, connection: "testing" }));
               void nativeBridge.testApiKey()
-                .then(setApiStatus)
-                .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Couldn’t connect to Gemini."))
+                .then((status) => {
+                  setApiStatus(status);
+                  setNotice("Gemini is ready for writing requests.");
+                })
+                .catch((error: unknown) => {
+                  // Never leave the indicator stuck at "testing": a failed
+                  // test must land on a terminal connection state so the user
+                  // can correct the key and retry instead of looping.
+                  const code = error instanceof NativeError ? error.code : "";
+                  const message = error instanceof NativeError ? error.message : "Couldn’t connect to Gemini.";
+                  setNotice(message);
+                  setApiStatus((current) => ({
+                    ...current,
+                    connection: testFailureConnection(code),
+                  }));
+                })
                 .finally(() => setBusy(null));
             }}
           >
@@ -559,6 +573,16 @@ function connectionLabel(status: ApiKeyStatus) {
     untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline",
   };
   return labels[status.connection];
+}
+
+/** Map a failed Test connection to a terminal indicator state so the UI
+ * never sticks at "testing". Mirrors the native CommandError codes
+ * (see GeminiError::code in src-tauri/src/ai/mod.rs). */
+function testFailureConnection(code: string): ApiKeyStatus["connection"] {
+  if (code === "invalid_api_key") return "invalid";
+  if (code === "rate_limited") return "rate-limited";
+  if (code === "transport" || code === "invalid_response") return "offline";
+  return "untested";
 }
 
 function connectionDescription(status: ApiKeyStatus) {

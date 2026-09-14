@@ -4,8 +4,8 @@ use reqwest::{Url, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ApiErrorEnvelope, GeminiClient, GeminiError, GenerationConfig, InteractionResponse,
-    LinkSourceKind, parse_interaction,
+    GeminiClient, GeminiError, GenerationConfig, InteractionResponse, LinkSourceKind,
+    parse_api_error_code, parse_interaction,
 };
 use crate::security::SecretString;
 
@@ -132,10 +132,10 @@ impl GeminiClient {
         let status = response.status();
         if !status.is_success() {
             let code = response
-                .json::<ApiErrorEnvelope>()
+                .json::<serde_json::Value>()
                 .await
                 .ok()
-                .map(|body| body.error.code);
+                .and_then(|body| parse_api_error_code(&body));
             return Err(GeminiError::Api { status, code });
         }
         let interaction = response
@@ -259,9 +259,13 @@ fn parse_link_summary(
                 && step.result.as_array().is_some_and(|results| {
                     results.iter().any(|result| {
                         result["status"] == "success"
-                            && result["url"].as_str().is_some_and(|url| {
-                                LinkSource::parse(url).is_ok_and(|retrieved| retrieved == *source)
-                            })
+                            && ["url", "retrieved_url", "retrievedUrl"]
+                                .iter()
+                                .filter_map(|field| result[field].as_str())
+                                .any(|url| {
+                                    LinkSource::parse(url)
+                                        .is_ok_and(|retrieved| retrieved == *source)
+                                })
                     })
                 })
         });

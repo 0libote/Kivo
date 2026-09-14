@@ -396,10 +396,10 @@ impl GeminiClient {
         let status = response.status();
         if !status.is_success() {
             let error_code = response
-                .json::<ApiErrorEnvelope>()
+                .json::<serde_json::Value>()
                 .await
                 .ok()
-                .map(|body| body.error.code);
+                .and_then(|body| parse_api_error_code(&body));
             return Err(GeminiError::Api {
                 status,
                 code: error_code,
@@ -414,10 +414,17 @@ impl GeminiClient {
     }
 
     pub async fn test_key(&self, api_key: &SecretString, model: &str) -> Result<(), GeminiError> {
+        // NOTE: max_output_tokens is a *combined* thinking + output budget
+        // (see AI Studio "thinking" docs). Even with thinking_level "low" the
+        // model spends thinking tokens, so a tiny budget (e.g. 8) hits
+        // MAX_TOKENS and the API returns status "incomplete" with truncated
+        // or empty output — meaning Test connection could never succeed.
+        // 128 matches the minimum writing budget below and leaves headroom
+        // for thinking on a trivial "OK" reply.
         let prompt = AiPrompt {
             system_instruction: "Return exactly OK.".into(),
             input: "Connection test".into(),
-            max_output_tokens: 8,
+            max_output_tokens: 128,
         };
         self.generate(api_key, model, &prompt).await.map(|_| ())
     }
@@ -494,14 +501,59 @@ struct InteractionContent {
     text: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct ApiErrorEnvelope {
-    error: ApiError,
-}
+/// Normalize the Gemini error payload into a short machine-readable code.
+///
+/// The real Interactions API does not return `{"error": {"code": "<string>"}}`.
+/// Failures arrive as either an object or a single-element array, with a
+/// numeric `code` (HTTP status), a `status` string such as
+/// `"INVALID_ARGUMENT"` / `"UNAUTHENTICATED"` / `"PERMISSION_DENIED"` /
+/// `"RESOURCE_EXHAUSTED"`, and machine-readable `details[].reason` values
+/// such as `"API_KEY_INVALID"`. Auth failures surface as HTTP 400 (not
+/// 401/403), so callers must inspect the body — not just the HTTP status —
+/// to tell "check your API key" apart from a generic failure.
+fn parse_api_error_code(body: &serde_json::Value) -> Option<String> {
+    let error = match body {
+        serde_json::Value::Array(items) => items.first()?,
+        _ => body,
+    };
+    let error = error.get("error").unwrap_or(error);
+    let status = error.get("status").and_then(serde_json::Value::as_str);
+    let reason = error
+        .get("details")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|details| {
+            details
+                .iter()
+                .find_map(|detail| detail.get("reason").and_then(serde_json::Value::as_str))
+        })
+        .or_else(|| error.get("reason").and_then(serde_json::Value::as_str));
+    // Legacy / test-fixture shape: {"error": {"code": "<string>"}}.
+    let legacy = error.get("code").and_then(|code| match code {
+        serde_json::Value::String(value) => Some(value.clone()),
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    });
 
-#[derive(Deserialize)]
-struct ApiError {
-    code: String,
+    if matches!(status, Some("UNAUTHENTICATED") | Some("PERMISSION_DENIED"))
+        || matches!(reason, Some("API_KEY_INVALID"))
+    {
+        return Some("authentication".into());
+    }
+    // Invalid-key failures arrive as 400 INVALID_ARGUMENT; only treat them
+    // as auth errors when the payload carries an auth reason, so genuine
+    // bad-request errors keep their generic message.
+    if matches!(status, Some("INVALID_ARGUMENT"))
+        && matches!(
+            reason,
+            Some(reason) if reason.contains("API_KEY") || reason.contains("AUTH")
+        )
+    {
+        return Some("authentication".into());
+    }
+    if matches!(status, Some("RESOURCE_EXHAUSTED")) {
+        return Some("rate_limited".into());
+    }
+    status.map(str::to_owned).or(legacy)
 }
 
 fn parse_interaction(response: InteractionResponse) -> Result<String, GeminiError> {
@@ -548,6 +600,17 @@ impl GeminiError {
         )
     }
 
+    fn is_auth_code(code: Option<&str>) -> bool {
+        matches!(
+            code,
+            Some("authentication")
+                | Some("permission_denied")
+                | Some("UNAUTHENTICATED")
+                | Some("PERMISSION_DENIED")
+                | Some("API_KEY_INVALID")
+        )
+    }
+
     pub fn user_message(&self) -> &'static str {
         match self {
             Self::InvalidApiKey => "The Gemini API key is invalid.",
@@ -557,15 +620,20 @@ impl GeminiError {
             Self::InaccessibleSource => {
                 "Couldn't read that source. It may be unavailable or require sign-in. Paste the text or transcript instead."
             }
+            // Invalid keys surface as HTTP 400 INVALID_ARGUMENT with an
+            // API_KEY_INVALID reason (not 401/403), so the body code —
+            // normalized by parse_api_error_code — is the real signal.
             Self::Api { status, code }
                 if *status == StatusCode::UNAUTHORIZED
                     || *status == StatusCode::FORBIDDEN
-                    || code.as_deref() == Some("authentication")
-                    || code.as_deref() == Some("permission_denied") =>
+                    || Self::is_auth_code(code.as_deref()) =>
             {
                 "Couldn't connect to Gemini. Check your API key."
             }
-            Self::Api { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS => {
+            Self::Api { status, code }
+                if *status == StatusCode::TOO_MANY_REQUESTS
+                    || matches!(code.as_deref(), Some("rate_limited" | "RESOURCE_EXHAUSTED")) =>
+            {
                 "Gemini is temporarily rate limited. Try again shortly."
             }
             Self::Transport(_) => "Couldn't reach Gemini. Check your connection.",
@@ -580,7 +648,22 @@ impl GeminiError {
             Self::InaccessibleSource => "inaccessible_source",
             Self::Transport(_) => "transport",
             Self::InvalidResponse(_) => "invalid_response",
-            Self::Api { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS => "rate_limited",
+            Self::Api { status, code }
+                if *status == StatusCode::TOO_MANY_REQUESTS
+                    || matches!(code.as_deref(), Some("rate_limited" | "RESOURCE_EXHAUSTED")) =>
+            {
+                "rate_limited"
+            }
+            // Surface auth failures as invalid_api_key so the Settings UI can
+            // move the connection indicator to "invalid" instead of leaving
+            // it stuck at "testing".
+            Self::Api { status, code }
+                if *status == StatusCode::UNAUTHORIZED
+                    || *status == StatusCode::FORBIDDEN
+                    || Self::is_auth_code(code.as_deref()) =>
+            {
+                "invalid_api_key"
+            }
             Self::Api { .. } => "api_error",
             Self::Incomplete(_) => "incomplete",
             Self::EmptyResponse => "empty_response",
@@ -612,10 +695,10 @@ impl std::error::Error for GeminiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GenerationConfig, InteractionRequest,
+        DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig, InteractionRequest,
         InteractionResponse, ResponseFormat, WritingAction, dictation_cleanup_prompt,
         is_blocked_model, is_usable_model, normalize_backup_model, normalize_model,
-        parse_interaction, supported_models, writing_prompt,
+        parse_api_error_code, parse_interaction, supported_models, writing_prompt,
     };
 
     #[test]
@@ -889,5 +972,58 @@ mod tests {
             normalize_backup_model(Some("not-a-model"), "gemini-3.8-flash"),
             None
         );
+    }
+
+    #[test]
+    fn error_codes_match_the_real_interactions_api_shape() {
+        // Live failures arrive array-wrapped with a numeric code, a status
+        // string, and details[].reason — e.g. an invalid key is HTTP 400
+        // INVALID_ARGUMENT / API_KEY_INVALID, not 401.
+        let invalid_key = serde_json::json!([{
+            "error": {
+                "code": 400,
+                "message": "API key not valid. Please pass a valid API key.",
+                "status": "INVALID_ARGUMENT",
+                "details": [{
+                    "@type": "type.googleapis.com/google.rpc.ErrorInfo",
+                    "reason": "API_KEY_INVALID",
+                    "domain": "googleapis.com",
+                }]
+            }
+        }]);
+        assert_eq!(
+            parse_api_error_code(&invalid_key).as_deref(),
+            Some("authentication")
+        );
+        let error = GeminiError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            code: parse_api_error_code(&invalid_key),
+        };
+        assert_eq!(error.code(), "invalid_api_key");
+        assert_eq!(
+            error.user_message(),
+            "Couldn't connect to Gemini. Check your API key."
+        );
+
+        // Legacy object shape with a string code keeps working.
+        let legacy = serde_json::json!({"error": {"code": "permission_denied"}});
+        assert_eq!(
+            parse_api_error_code(&legacy).as_deref(),
+            Some("permission_denied")
+        );
+
+        // Numeric codes without a status string survive as strings.
+        let numeric = serde_json::json!({"error": {"code": 503}});
+        assert_eq!(parse_api_error_code(&numeric).as_deref(), Some("503"));
+
+        // Rate limits stay rate-limited.
+        let exhausted = serde_json::json!({
+            "error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "message": "Slow down."}
+        });
+        let error = GeminiError::Api {
+            status: reqwest::StatusCode::TOO_MANY_REQUESTS,
+            code: parse_api_error_code(&exhausted),
+        };
+        assert_eq!(error.code(), "rate_limited");
     }
 }
