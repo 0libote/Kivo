@@ -34,10 +34,13 @@ function read(relative: string): string {
 
 /** Slice a top-level `fn name ... \n}\n` body so literal checks stay scoped. */
 function fnBody(source: string, name: string): string {
+  // Line-ending agnostic: Windows checkouts use CRLF, so a literal "\n}\n"
+  // search never matches there (and the ubuntu-only run would not catch it).
   const start = source.indexOf(`fn ${name}`);
   if (start === -1) return "";
-  const end = source.indexOf("\n}\n", start);
-  return end === -1 ? "" : source.slice(start, end);
+  const tail = source.slice(start);
+  const end = tail.search(/\r?\n\}\r?\n/);
+  return end === -1 ? "" : tail.slice(0, end);
 }
 
 const configRs = read("src-tauri/src/config/mod.rs");
