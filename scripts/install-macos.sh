@@ -2,7 +2,7 @@
 #
 # Kivo macOS installer (free distribution, no Apple Developer ID).
 #
-#   curl -fsSL https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
+#   curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
 #
 # What this does:
 #   1. Verifies Apple Silicon + macOS 26+ (the only supported beta target).
@@ -40,7 +40,7 @@ major="$(printf '%s' "$os_version" | cut -d. -f1)"
 # --- Resolve the current beta asset ------------------------------------------
 log "Resolving the latest beta..."
 manifest_url="https://github.com/$REPO/releases/download/continuous/continuous.json"
-manifest="$(curl -fsSL "$manifest_url")" || err "could not download $manifest_url"
+manifest="$(curl -fsSL --proto '=https' --tlsv1.2 "$manifest_url")" || err "could not download $manifest_url"
 version="$(printf '%s' "$manifest" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')"
 [[ -n "$version" ]] || err "could not parse a version from continuous.json"
 asset="Kivo_${version}_aarch64.app.tar.gz"
@@ -50,7 +50,7 @@ log "Installing Kivo $version (beta)..."
 # --- Download + install -------------------------------------------------------
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL --progress-bar "$url" -o "$tmp/kivo.tgz" || err "download failed: $url"
+curl -fsSL --proto '=https' --tlsv1.2 --progress-bar "$url" -o "$tmp/kivo.tgz" || err "download failed: $url"
 tar -xzf "$tmp/kivo.tgz" -C "$tmp" || err "could not extract $asset"
 app_path="$(find "$tmp" -maxdepth 2 -name "$APP_NAME" -type d | head -n 1)"
 [[ -n "$app_path" ]] || err "no $APP_NAME found inside $asset"

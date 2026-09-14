@@ -476,7 +476,7 @@ jobs:
           gh release edit continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
-            --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+            --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
 
   windows-bundle-pr:
     name: Windows bundle build (approval-gated)

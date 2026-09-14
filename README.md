@@ -115,7 +115,7 @@ Kivo asks only in onboarding or when a feature is invoked:
 Easiest beta install (Apple Silicon, macOS 26+):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
+curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
 ```
 
 Manual DMG install: drag `Kivo.app` to `/Applications`, then run once:
