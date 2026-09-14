@@ -52,7 +52,7 @@ const nativeTs = read("src/platform/native.ts");
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
 function rustDefault(fnName: string, host: "Macos" | "Windows"): string | null {
   const match = new RegExp(
-    `${fnName}[\\s\\S]*?HostPlatform::${host} => ShortcutBinding::new\\("([^"]+)"\\)`,
+    String.raw`${fnName}[\s\S]*?HostPlatform::${host} => ShortcutBinding::new\("([^"]+)"\)`,
   ).exec(configRs);
   return match?.[1] ?? null;
 }
@@ -60,7 +60,7 @@ function rustDefault(fnName: string, host: "Macos" | "Windows"): string | null {
 /** `key: platform === "macos" ? "a" : "b"` inside defaultSettings. */
 function tsDefault(key: "dictationShortcut" | "writingShortcut"): [string, string] | null {
   const match = new RegExp(
-    `${key}: platform === "macos" \\? "([^"]+)" : "([^"]+)"`,
+    String.raw`${key}: platform === "macos" \? "([^"]+)" : "([^"]+)"`,
   ).exec(typesTs);
   return match ? [match[1], match[2]] : null;
 }

@@ -104,10 +104,14 @@ const capabilities = JSON.parse(readFileSync(join(root, "src-tauri/capabilities/
 const shellSource = readFileSync(join(root, "src-tauri/src/shell.rs"), "utf8");
 const createdWindows = [...shellSource.matchAll(/build_window\(\s*app,\s*"([^"]+)"/g)].map((match) => match[1]);
 check("capabilities/default.json parses a window list", Array.isArray(capabilities.windows) && capabilities.windows.length > 0, "windows list missing");
+// Set-diff instead of sorting: bare sort() compares UTF-16 code units, so
+// ordering (and therefore the comparison) is locale-dependent.
+const missingWindows = createdWindows.filter((window) => !capabilities.windows.includes(window));
+const extraWindows = capabilities.windows.filter((window) => !createdWindows.includes(window));
 check(
   "capability windows match the windows the shell creates",
-  JSON.stringify([...capabilities.windows].sort()) === JSON.stringify([...createdWindows].sort()),
-  `capabilities has [${capabilities.windows}] but shell.rs creates [${createdWindows}]`,
+  missingWindows.length === 0 && extraWindows.length === 0,
+  `missing from capabilities: [${missingWindows}]; not created by shell.rs: [${extraWindows}]`,
 );
 
 // --- macOS bundle metadata (fails the dmg build late when missing) -------------
