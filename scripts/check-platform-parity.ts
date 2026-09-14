@@ -186,7 +186,7 @@ const allowlistBlock = aiRs.slice(
 );
 const allowlistIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]);
 check("suggestions block parses", allowlistIds.length > 0, "SUPPORTED_GEMINI_MODELS ids not found in ai/mod.rs");
-for (const excluded of ["tts", "live", "-image", "banana", "transcribe", "embed", "veo-", "lyria-", "deep-research", "robotics"]) {
+for (const excluded of ["tts", "live", "audio", "-image", "banana", "transcribe", "embed", "veo-", "omni", "lyria-", "computer-use", "deep-research", "robotics"]) {
   check(
     `suggestions exclude "${excluded}"`,
     allowlistIds.every(id => !id.includes(excluded)),

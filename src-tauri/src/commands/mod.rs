@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        AiModelInfo, GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
-        dictation_cleanup_prompt, writing_prompt,
+        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction, dictation_cleanup_prompt,
+        writing_prompt,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
@@ -129,9 +129,21 @@ impl AppCore {
             .load_api_key()?
             .ok_or(AppCoreError::AiNotConfigured)?;
         let (model, backup) = self.ai_models();
-        self.ai.test_key(&api_key, &model).await?;
-        if let Some(backup) = backup {
-            self.ai.test_key(&api_key, &backup).await?;
+        // Lightweight metadata GETs (no generation, no quota) checked
+        // concurrently so a configured backup doesn't double the wait.
+        // Same behavior on macOS and Windows: pure HTTPS via reqwest.
+        match backup {
+            Some(backup) => {
+                let (primary_result, backup_result) = tokio::join!(
+                    self.ai.check_model(&api_key, &model),
+                    self.ai.check_model(&api_key, &backup),
+                );
+                primary_result?;
+                backup_result?;
+            }
+            None => {
+                self.ai.check_model(&api_key, &model).await?;
+            }
         }
         Ok(CredentialStatus { configured: true })
     }
@@ -140,6 +152,17 @@ impl AppCore {
         self.settings()
             .map(|settings| (settings.ai.model, settings.ai.backup_model))
             .unwrap_or_else(|_| (crate::ai::DEFAULT_GEMINI_MODEL.to_owned(), None))
+    }
+
+    /// Synchronous key load for the model picker. Returns `None` when no key
+    /// is stored or it cannot be read; the caller falls back to curated
+    /// suggestions instead of surfacing an error.
+    fn stored_api_key_for_models(&self) -> Option<SecretString> {
+        self.credentials.load_api_key().ok().flatten()
+    }
+
+    fn ai_models_client(&self) -> &GeminiClient {
+        &self.ai
     }
 
     pub fn dictation_phase(&self) -> Result<DictationPhase, AppCoreError> {
@@ -1246,8 +1269,31 @@ fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
 }
 
 #[tauri::command]
-pub fn list_ai_models() -> Vec<AiModelInfo> {
-    crate::ai::supported_models()
+pub async fn list_ai_models(
+    core: State<'_, AppCore>,
+) -> Result<Vec<crate::ai::ListedAiModel>, CommandError> {
+    // Dynamic source of truth: ListModels filtered by the blocklist only,
+    // so newest text models appear without a Kivo update. Falls back to the
+    // curated list when no key is stored or the fetch fails (offline /
+    // invalid key), so the selector never appears empty. Identical on macOS
+    // and Windows: the key stays in the Rust process and is sent via header.
+    let api_key = core
+        .credential_status()
+        .ok()
+        .filter(|status| status.configured)
+        .and_then(|_| {
+            // CredentialStore has no async API; load synchronously here.
+            // AppCore exposes it via a short-lived helper below.
+            core.stored_api_key_for_models()
+        });
+    let models = match api_key {
+        Some(api_key) => match core.ai_models_client().list_models(&api_key).await {
+            Ok(models) if !models.is_empty() => models,
+            _ => crate::ai::curated_listed_models(),
+        },
+        None => crate::ai::curated_listed_models(),
+    };
+    Ok(models)
 }
 
 #[tauri::command]

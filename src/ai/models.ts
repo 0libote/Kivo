@@ -4,14 +4,16 @@ import { DEFAULT_AI_MODEL } from "../types";
 /**
  * Curated suggestions mirroring `SUPPORTED_GEMINI_MODELS` in
  * `src-tauri/src/ai/mod.rs`. The native `list_ai_models` command is the
- * source of truth; this list is only used in the browser harness and while
- * the native list is loading, so the selector never appears empty.
+ * source of truth (dynamic ListModels filtered by the blocklist only); this
+ * list is only used in the browser harness and while the native list is
+ * loading, so the selector never appears empty.
  *
- * Validation is allow-all: any well-formed `gemini-*` id works so newest
+ * Validation is blocklist-only: any well-formed `gemini-*` id works so newest
  * models keep working without a Kivo update. Only blocked non-text families
- * are rejected — TTS / Live (`tts`, `-live`), image (`image`, `banana`),
- * transcription, embedding, video (`veo-`), music (`lyria-`), robotics, and
- * research agents. Mirrors `BLOCKED_MODEL_SUBSTRINGS` in `ai/mod.rs`.
+ * are rejected — TTS / Live / realtime audio (`tts`, `-live`, `audio`),
+ * image (`image`, `banana`), transcription, embedding, video (`veo-`,
+ * `omni`), music (`lyria-`), computer-use agents, robotics, and research
+ * agents. Mirrors `BLOCKED_MODEL_SUBSTRINGS` in `ai/mod.rs`.
  *
  * Stored as compact rows (one model per line) rather than repeated object
  * literals so the intentional mirror doesn't trip duplication gates; the
@@ -37,12 +39,15 @@ export const FALLBACK_AI_MODELS: AiModelInfo[] = FALLBACK_ROWS.map(
 export const BLOCKED_AI_MODEL_PATTERNS = [
   "tts",
   "-live",
+  "audio",
   "image",
   "banana",
   "transcribe",
   "embed",
   "veo-",
+  "omni",
   "lyria-",
+  "computer-use",
   "robotics",
   "deep-research",
 ] as const;

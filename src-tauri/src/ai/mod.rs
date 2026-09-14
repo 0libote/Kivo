@@ -21,6 +21,13 @@ pub const GEMINI_MODEL: &str = DEFAULT_GEMINI_MODEL;
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
+/// ListModels / GetModel endpoint used for the model picker and the
+/// lightweight Test connection check (see
+/// https://ai.google.dev/api/models). Authenticated the same way as
+/// generate (the `x-goog-api-key` header), but a small metadata GET instead
+/// of a full model generation, so it is fast and spends no quota.
+pub const GEMINI_MODELS_ENDPOINT: &str =
+    "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// Curated suggestions for the model picker. Validation itself is allow-all
 /// (see [`is_usable_model`]): any well-formed `gemini-*` id works with Kivo's
@@ -90,20 +97,53 @@ pub fn supported_models() -> Vec<AiModelInfo> {
     SUPPORTED_GEMINI_MODELS.to_vec()
 }
 
+/// Owned model entry returned by `list_ai_models`: either the curated
+/// fallback below or a dynamic entry mapped from the ListModels API
+/// (display name / description from Google, filtered by the blocklist).
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ListedAiModel {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+}
+
+impl From<AiModelInfo> for ListedAiModel {
+    fn from(model: AiModelInfo) -> Self {
+        Self {
+            id: model.id.to_owned(),
+            label: model.label.to_owned(),
+            description: model.description.to_owned(),
+        }
+    }
+}
+
+/// Curated fallback when no API key is stored or the ListModels fetch fails
+/// (offline, invalid key). Keeps the selector usable and mirrors
+/// `FALLBACK_AI_MODELS` in `src/ai/models.ts`.
+pub fn curated_listed_models() -> Vec<ListedAiModel> {
+    supported_models().into_iter().map(ListedAiModel::from).collect()
+}
+
 /// Substrings that mark a model as unusable for Kivo's text Interactions API
-/// usage. Matched case-insensitively against the canonical id:
-/// speech synthesis / live audio (`tts`, `-live`), image generation
-/// (`image`, `banana`), transcription, embedding, video (`veo-`), music
-/// (`lyria-`), robotics, and research agents.
+/// usage. Matched case-insensitively against the canonical id.
+/// Blocklist only (no allowlist of ids): any `gemini-*` id not containing
+/// one of these is shown, so newest text models keep working without a Kivo
+/// update. Covers speech synthesis / live + realtime audio (`tts`, `-live`,
+/// `audio`), image generation (`image`, `banana`), transcription, embedding,
+/// video (`veo-`, `omni`), music (`lyria-`), computer-use agents,
+/// robotics, and research agents.
 pub const BLOCKED_MODEL_SUBSTRINGS: &[&str] = &[
     "tts",
     "-live",
+    "audio",
     "image",
     "banana",
     "transcribe",
     "embed",
     "veo-",
+    "omni",
     "lyria-",
+    "computer-use",
     "robotics",
     "deep-research",
 ];
@@ -334,6 +374,7 @@ impl std::error::Error for PromptError {}
 pub struct GeminiClient {
     http: reqwest::Client,
     endpoint: String,
+    models_endpoint: String,
 }
 
 impl GeminiClient {
@@ -341,6 +382,17 @@ impl GeminiClient {
     pub(crate) fn with_endpoint(endpoint: String) -> Result<Self, GeminiError> {
         let mut client = Self::new()?;
         client.endpoint = endpoint;
+        Ok(client)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_endpoints(
+        endpoint: String,
+        models_endpoint: String,
+    ) -> Result<Self, GeminiError> {
+        let mut client = Self::new()?;
+        client.endpoint = endpoint;
+        client.models_endpoint = models_endpoint;
         Ok(client)
     }
 
@@ -353,6 +405,7 @@ impl GeminiClient {
         Ok(Self {
             http,
             endpoint: GEMINI_INTERACTIONS_ENDPOINT.into(),
+            models_endpoint: GEMINI_MODELS_ENDPOINT.into(),
         })
     }
 
@@ -413,20 +466,107 @@ impl GeminiClient {
         parse_interaction(interaction)
     }
 
-    pub async fn test_key(&self, api_key: &SecretString, model: &str) -> Result<(), GeminiError> {
-        // NOTE: max_output_tokens is a *combined* thinking + output budget
-        // (see AI Studio "thinking" docs). Even with thinking_level "low" the
-        // model spends thinking tokens, so a tiny budget (e.g. 8) hits
-        // MAX_TOKENS and the API returns status "incomplete" with truncated
-        // or empty output — meaning Test connection could never succeed.
-        // 128 matches the minimum writing budget below and leaves headroom
-        // for thinking on a trivial "OK" reply.
-        let prompt = AiPrompt {
-            system_instruction: "Return exactly OK.".into(),
-            input: "Connection test".into(),
-            max_output_tokens: 128,
-        };
-        self.generate(api_key, model, &prompt).await.map(|_| ())
+    /// Lightweight Test connection: `GET /v1beta/models/{model}` validates
+    /// the key and that the model exists without running a full generation
+    /// (no thinking/output tokens, no quota spent, typically <1s vs several
+    /// seconds for an Interactions request). Auth failures surface with the
+    /// same body shape as generate (`INVALID_ARGUMENT` / `API_KEY_INVALID`
+    /// as HTTP 400), so the existing error mapping applies unchanged.
+    /// Works identically on macOS and Windows (pure HTTPS, no OS APIs).
+    pub async fn check_model(
+        &self,
+        api_key: &SecretString,
+        model: &str,
+    ) -> Result<(), GeminiError> {
+        let api_key =
+            HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
+        let model = Self::resolve_model(model);
+        let url = format!(
+            "{}/{}",
+            self.models_endpoint.trim_end_matches('/'),
+            model.trim_start_matches('/')
+        );
+        let response = self
+            .http
+            .get(&url)
+            .header("x-goog-api-key", api_key)
+            .send()
+            .await
+            .map_err(GeminiError::Transport)?;
+        let status = response.status();
+        if !status.is_success() {
+            let error_code = response
+                .json::<serde_json::Value>()
+                .await
+                .ok()
+                .and_then(|body| parse_api_error_code(&body));
+            return Err(GeminiError::Api {
+                status,
+                code: error_code,
+            });
+        }
+        Ok(())
+    }
+
+    /// Dynamic model picker source: `GET /v1beta/models?pageSize=1000`
+    /// (paginated via `nextPageToken`, up to 3 pages) filtered by the
+    /// blocklist only. Returns curated fallback when the fetch fails or
+    /// yields nothing usable, so the selector never appears empty offline
+    /// or with an invalid key. Key is sent via header, never logged.
+    pub async fn list_models(
+        &self,
+        api_key: &SecretString,
+    ) -> Result<Vec<ListedAiModel>, GeminiError> {
+        let api_key =
+            HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
+        let mut all: Vec<ApiModel> = Vec::new();
+        let mut page_token: Option<String> = None;
+        for _ in 0..3 {
+            // Built manually: reqwest is compiled with minimal features
+            // (json/rustls/system-proxy) so `RequestBuilder::query` is
+            // unavailable. Tokens are URL-safe base64; no extra encoding needed.
+            let mut url = format!(
+                "{}?pageSize=1000",
+                self.models_endpoint.trim_end_matches('/')
+            );
+            if let Some(token) = &page_token {
+                url.push_str("&pageToken=");
+                url.push_str(token);
+            }
+            let response = self
+                .http
+                .get(&url)
+                .header("x-goog-api-key", api_key.clone())
+                .send()
+                .await
+                .map_err(GeminiError::Transport)?;
+            let status = response.status();
+            if !status.is_success() {
+                let error_code = response
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|body| parse_api_error_code(&body));
+                return Err(GeminiError::Api {
+                    status,
+                    code: error_code,
+                });
+            }
+            let page = response
+                .json::<ListModelsResponse>()
+                .await
+                .map_err(GeminiError::InvalidResponse)?;
+            all.extend(page.models);
+            match page.next_page_token {
+                Some(token) if !token.is_empty() => page_token = Some(token),
+                _ => break,
+            }
+        }
+        let mut listed = filter_api_models(all);
+        if listed.is_empty() {
+            listed = curated_listed_models();
+        }
+        Ok(listed)
     }
 
     /// Try the primary model, then once on the backup if the primary is
@@ -477,6 +617,75 @@ struct ResponseFormat<'a> {
     #[serde(rename = "type")]
     output_type: &'a str,
     mime_type: &'a str,
+}
+
+/// One entry from `GET /v1beta/models`. Only `name` drives filtering;
+/// `displayName` / `description` become the picker label / hint. Unknown
+/// future fields are ignored so new model families keep working.
+#[derive(Debug, Clone, Deserialize)]
+struct ApiModel {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ListModelsResponse {
+    #[serde(default)]
+    models: Vec<ApiModel>,
+    #[serde(default)]
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+}
+
+/// Blocklist-only mapping: canonicalize `models/` prefix, keep any usable
+/// `gemini-*` id, drop blocked non-text families, deduplicate, and sort
+/// with the default model first for a stable picker order.
+fn filter_api_models(models: Vec<ApiModel>) -> Vec<ListedAiModel> {
+    use std::collections::HashSet;
+    let mut seen = HashSet::new();
+    let mut listed: Vec<ListedAiModel> = Vec::new();
+    for model in models {
+        let id = canonical_model_id(&model.name);
+        if id.is_empty() || !seen.insert(id.clone()) {
+            continue;
+        }
+        if !is_usable_model(&id) {
+            continue;
+        }
+        let label = model
+            .display_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or(&id)
+            .to_owned();
+        let description = model
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|description| !description.is_empty())
+            .unwrap_or("")
+            .to_owned();
+        listed.push(ListedAiModel {
+            id,
+            label,
+            description,
+        });
+    }
+    listed.sort_by(|a, b| {
+        let a_default = a.id == DEFAULT_GEMINI_MODEL;
+        let b_default = b.id == DEFAULT_GEMINI_MODEL;
+        b_default
+            .cmp(&a_default)
+            .then_with(|| a.label.to_lowercase().cmp(&b.label.to_lowercase()))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    listed
 }
 
 #[derive(Deserialize)]
@@ -695,10 +904,11 @@ impl std::error::Error for GeminiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig, InteractionRequest,
-        InteractionResponse, ResponseFormat, WritingAction, dictation_cleanup_prompt,
-        is_blocked_model, is_usable_model, normalize_backup_model, normalize_model,
-        parse_api_error_code, parse_interaction, supported_models, writing_prompt,
+        ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig,
+        InteractionRequest, InteractionResponse, ResponseFormat, WritingAction,
+        curated_listed_models, dictation_cleanup_prompt, filter_api_models, is_blocked_model,
+        is_usable_model, normalize_backup_model, normalize_model, parse_api_error_code,
+        parse_interaction, supported_models, writing_prompt,
     };
 
     #[test]
@@ -832,14 +1042,21 @@ mod tests {
         assert!(!models.is_empty());
         assert!(models.iter().any(|model| model.id == DEFAULT_GEMINI_MODEL));
         assert!(models.iter().any(|model| model.id == GEMINI_MODEL));
-        // No TTS / Live, image, transcription, embedding, video, music, or
-        // agent ids may enter the selector: they reject Kivo's text request
-        // shape or return non-text output.
+        // No TTS / Live / realtime audio, image, transcription, embedding,
+        // video, music, computer-use, or agent ids may enter the curated
+        // fallback: they reject Kivo's text request shape or return non-text
+        // output. The dynamic ListModels path applies the same blocklist
+        // (see filter_api_models below) with no allowlist of ids.
         for model in &models {
             assert!(!model.id.contains("tts"), "tts model listed: {}", model.id);
             assert!(
                 !model.id.contains("live"),
                 "live model listed: {}",
+                model.id
+            );
+            assert!(
+                !model.id.contains("audio"),
+                "audio model listed: {}",
                 model.id
             );
             assert!(
@@ -868,8 +1085,18 @@ mod tests {
                 model.id
             );
             assert!(
+                !model.id.contains("omni"),
+                "video model listed: {}",
+                model.id
+            );
+            assert!(
                 !model.id.starts_with("lyria"),
                 "music model listed: {}",
+                model.id
+            );
+            assert!(
+                !model.id.contains("computer-use"),
+                "agent listed: {}",
                 model.id
             );
             assert!(
@@ -889,6 +1116,9 @@ mod tests {
             "gemini-2.5-flash-image",
             "gemini-3-pro-image",
             "gemini-2.5-flash-live",
+            "gemini-2.5-flash-native-audio-preview-12-2025",
+            "gemini-2.5-computer-use-preview-10-2025",
+            "gemini-omni-1.1-flash",
             "gemini-embedding-001",
             "veo-3.1-preview",
             "lyria-3-pro-preview",
@@ -926,10 +1156,13 @@ mod tests {
         for blocked in [
             "gemini-2.5-flash-preview-tts",
             "gemini-2.5-flash-live",
+            "gemini-2.5-flash-native-audio-preview-12-2025",
             "gemini-2.5-flash-image",
             "gemini-3-pro-image",
             "gemini-embedding-001",
             "gemini-3.5-transcribe",
+            "gemini-2.5-computer-use-preview-10-2025",
+            "gemini-omni-1.1-flash",
             "veo-3.1-preview",
             "lyria-3-pro-preview",
             "deep-research-pro-preview-12-2025",
@@ -1025,5 +1258,241 @@ mod tests {
             code: parse_api_error_code(&exhausted),
         };
         assert_eq!(error.code(), "rate_limited");
+    }
+
+    fn api_model(name: &str, display_name: Option<&str>, description: Option<&str>) -> ApiModel {
+        ApiModel {
+            name: name.to_owned(),
+            display_name: display_name.map(str::to_owned),
+            description: description.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn dynamic_list_filters_by_blocklist_only_and_sorts_default_first() {
+        let models = vec![
+            api_model("models/gemini-2.5-flash", Some("Gemini 2.5 Flash"), Some("Fast.")),
+            api_model(
+                "models/gemini-2.5-flash-preview-tts",
+                Some("Gemini 2.5 Flash TTS"),
+                Some("Speech."),
+            ),
+            api_model(
+                "models/gemini-2.5-flash-native-audio-preview-12-2025",
+                Some("Audio"),
+                None,
+            ),
+            api_model(
+                "models/gemini-2.5-computer-use-preview-10-2025",
+                Some("Computer Use"),
+                None,
+            ),
+            api_model("models/gemini-omni-1.1-flash", Some("Omni"), None),
+            api_model("models/gemini-4.0-flash", None, None),
+            api_model("models/gemini-4.0-flash", None, None),
+            api_model("models/gemini-embedding-001", Some("Embedding"), None),
+            api_model("gemini-3.8-flash", Some("Gemini 3.8 Flash"), Some("Default.")),
+            api_model("not-a-model", Some("Other"), None),
+        ];
+        let listed = filter_api_models(models);
+        let ids: Vec<&str> = listed.iter().map(|model| model.id.as_str()).collect();
+        // Default first, then alphabetical by label; blocked families gone;
+        // newest text ids survive with no allowlist update.
+        assert_eq!(ids[0], "gemini-3.8-flash");
+        assert!(ids.contains(&"gemini-2.5-flash"));
+        assert!(ids.contains(&"gemini-4.0-flash"));
+        for blocked in [
+            "gemini-2.5-flash-preview-tts",
+            "gemini-2.5-flash-native-audio-preview-12-2025",
+            "gemini-2.5-computer-use-preview-10-2025",
+            "gemini-omni-1.1-flash",
+            "gemini-embedding-001",
+            "not-a-model",
+        ] {
+            assert!(!ids.contains(&blocked), "{blocked} must be filtered");
+        }
+        assert_eq!(listed.len(), ids.len());
+        let flash = listed
+            .iter()
+            .find(|model| model.id == "gemini-2.5-flash")
+            .unwrap();
+        assert_eq!(flash.label, "Gemini 2.5 Flash");
+        let newest = listed
+            .iter()
+            .find(|model| model.id == "gemini-4.0-flash")
+            .unwrap();
+        assert_eq!(newest.label, "gemini-4.0-flash");
+    }
+
+    #[test]
+    fn curated_fallback_never_empty_and_matches_supported() {
+        let curated = curated_listed_models();
+        let supported = supported_models();
+        assert!(!curated.is_empty());
+        assert_eq!(curated.len(), supported.len());
+        assert!(
+            curated
+                .iter()
+                .any(|model| model.id == DEFAULT_GEMINI_MODEL)
+        );
+    }
+
+    /// Minimal GET fixture: accepts `expected` connections, records the
+    /// request path + `x-goog-api-key` header, and replays canned responses.
+    /// Separate from the POST Interactions fixtures in `commands/tests.rs`,
+    /// which require a JSON body that GET metadata calls never send.
+    struct GetFixture {
+        models_endpoint: String,
+        observed: std::sync::mpsc::Receiver<(String, Option<String>)>,
+        worker: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl GetFixture {
+        fn new(responses: Vec<(u16, &'static str)>) -> Self {
+            use std::{
+                io::{Read, Write},
+                net::TcpListener,
+                sync::mpsc,
+                time::Duration,
+            };
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let models_endpoint = format!("http://{}/models", listener.local_addr().unwrap());
+            let (observed_tx, observed) = mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                for (status, body) in responses {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        return;
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    let mut bytes = Vec::new();
+                    loop {
+                        let mut buffer = [0; 4096];
+                        let Ok(read) = stream.read(&mut buffer) else {
+                            break;
+                        };
+                        if read == 0 {
+                            break;
+                        }
+                        bytes.extend_from_slice(&buffer[..read]);
+                        if bytes.windows(4).any(|value| value == b"\r\n\r\n") {
+                            break;
+                        }
+                        if bytes.len() > 16_384 {
+                            break;
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&bytes).into_owned();
+                    let path = text
+                        .lines()
+                        .next()
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or("")
+                        .to_owned();
+                    let key = text.lines().find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("x-goog-api-key")
+                            .then(|| value.trim().to_owned())
+                    });
+                    let _ = observed_tx.send((path, key));
+                    let response = format!(
+                        "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                }
+            });
+            Self {
+                models_endpoint,
+                observed,
+                worker: Some(worker),
+            }
+        }
+
+        fn next_request(&self) -> (String, Option<String>) {
+            self.observed
+                .recv_timeout(std::time::Duration::from_secs(3))
+                .expect("expected another GET request")
+        }
+    }
+
+    impl Drop for GetFixture {
+        fn drop(&mut self) {
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    fn test_secret() -> crate::security::SecretString {
+        crate::security::SecretString::new("test-key".into()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn check_model_uses_header_and_accepts_200_without_generation() {
+        let fixture = GetFixture::new(vec![(200, r#"{"name":"models/gemini-3.8-flash"}"#)]);
+        let client = super::GeminiClient::with_endpoints(
+            "http://127.0.0.1:9/interactions".into(),
+            fixture.models_endpoint.clone(),
+        )
+        .unwrap();
+        client
+            .check_model(&test_secret(), "gemini-3.8-flash")
+            .await
+            .unwrap();
+        let (path, key) = fixture.next_request();
+        assert!(path.contains("/models/gemini-3.8-flash"), "path was {path}");
+        assert_eq!(key.as_deref(), Some("test-key"));
+    }
+
+    #[tokio::test]
+    async fn check_model_maps_invalid_key_to_auth_error() {
+        let body = r#"[{"error":{"code":400,"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}]"#;
+        let fixture = GetFixture::new(vec![(400, body)]);
+        let client = super::GeminiClient::with_endpoints(
+            "http://127.0.0.1:9/interactions".into(),
+            fixture.models_endpoint.clone(),
+        )
+        .unwrap();
+        let error = client
+            .check_model(&test_secret(), "gemini-3.8-flash")
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_api_key");
+        assert_eq!(
+            error.user_message(),
+            "Couldn't connect to Gemini. Check your API key."
+        );
+    }
+
+    #[tokio::test]
+    async fn list_models_paginates_and_filters_blocked_families() {
+        let page_one = r#"{"models":[
+          {"name":"models/gemini-3.8-flash","displayName":"Gemini 3.8 Flash","description":"Default."},
+          {"name":"models/gemini-2.5-flash-preview-tts","displayName":"TTS"}
+        ],"nextPageToken":"second"}"#;
+        let page_two = r#"{"models":[
+          {"name":"models/gemini-4.0-flash","displayName":"Gemini 4.0 Flash"}
+        ]}"#;
+        let fixture = GetFixture::new(vec![(200, page_one), (200, page_two)]);
+        let client = super::GeminiClient::with_endpoints(
+            "http://127.0.0.1:9/interactions".into(),
+            fixture.models_endpoint.clone(),
+        )
+        .unwrap();
+        let listed = client.list_models(&test_secret()).await.unwrap();
+        let ids: Vec<&str> = listed.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, vec!["gemini-3.8-flash", "gemini-4.0-flash"]);
+        // Both pages requested; key sent via header, never in the URL.
+        let (first_path, first_key) = fixture.next_request();
+        let (second_path, _) = fixture.next_request();
+        assert!(first_path.contains("/models"), "path was {first_path}");
+        assert!(first_path.contains("pageSize=1000"), "path was {first_path}");
+        assert!(!first_path.contains("test-key"), "key leaked into URL");
+        assert_eq!(first_key.as_deref(), Some("test-key"));
+        assert!(second_path.contains("pageToken=second"), "path was {second_path}");
     }
 }
