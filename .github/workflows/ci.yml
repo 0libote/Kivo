@@ -322,12 +322,42 @@ jobs:
           fi
           cat "$GITHUB_OUTPUT"
 
-  macos-beta:
+  # Beta delivery. The two desktop builds run IN PARALLEL behind a single
+  # `continuous-setup` job that owns the one racy operation (delete/recreate
+  # the `continuous` release). Both builders then only *add* assets with
+  # distinct filenames, which is race-free, cutting the beta wall time from
+  # ~7min serial to ~4.5min (the slower builder). All three jobs share the
+  # `continuous-prerelease` group so overlapping main pushes still serialize
+  # across runs.
+  continuous-setup:
+    name: Reset the continuous release
     needs: [frontend, frontend-windows, native, rust-static, security-gate]
     if: needs.security-gate.outputs.beta_ready == 'true'
-    # Serializes concurrent runs racing the `continuous` delete/create/
-    # upload below. (Temporarily removed during beta-starvation diagnosis;
-    # proven innocent — the cause was dep-review skipping. Restored.)
+    concurrency:
+      group: continuous-prerelease
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Reset the continuous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
+          gh release create continuous \
+            --prerelease \
+            --title "Kivo continuous (beta)" \
+            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+
+  macos-beta:
+    needs: [continuous-setup]
+    if: needs.continuous-setup.result == 'success'
+    # Shared `continuous-prerelease` group: serializes overlapping runs
+    # (see `continuous-setup`); within a run this builds in parallel with
+    # `windows-beta`, which only adds distinctly-named assets.
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
@@ -355,17 +385,9 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun typecheck
-      - run: bun run test
-      - name: Reset the continuous release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
-          gh release create continuous \
-            --prerelease \
-            --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+      # No typecheck/test rerun: this is the same SHA the `frontend` and
+      # `native` gates just passed, so rerunning them only burns macOS
+      # minutes (`windows-beta` never reran them either).
       # No APPLE_* / TAURI_SIGNING_* secrets: builds unsigned. No
       # prepare:release step: without TAURI_UPDATER_PUBKEY there are no
       # signed updater artifacts, so this ships a plain beta .dmg.
@@ -389,9 +411,12 @@ jobs:
             --notes "Rolling unsigned beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). Install: macOS - right-click the app and choose Open on first launch. Windows - run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
 
   windows-beta:
-    needs: [macos-beta]
-    if: needs.macos-beta.result == 'success'
-    # Same `continuous` race protection as macos-beta.
+    needs: [continuous-setup]
+    if: needs.continuous-setup.result == 'success'
+    # Shared `continuous-prerelease` group: serializes overlapping runs
+    # (see `continuous-setup`); within a run this builds in parallel with
+    # `macos-beta`. Only uploads its distinctly-named .exe, so the two
+    # concurrent uploads cannot clobber each other.
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
