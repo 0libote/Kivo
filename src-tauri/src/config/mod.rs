@@ -325,22 +325,20 @@ impl Default for AiSettings {
 impl AiSettings {
     fn normalize(&mut self) {
         self.model = crate::ai::normalize_model(&self.model);
-        self.backup_model = crate::ai::normalize_backup_model(
-            self.backup_model.as_deref(),
-            &self.model,
-        );
+        self.backup_model =
+            crate::ai::normalize_backup_model(self.backup_model.as_deref(), &self.model);
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
         if !crate::ai::is_usable_model(&self.model) {
             return Err(SettingsError::InvalidAiModel);
         }
-        if let Some(backup) = &self.backup_model {
-            if !crate::ai::is_usable_model(backup)
-                || crate::ai::canonical_model_id(backup) == crate::ai::canonical_model_id(&self.model)
-            {
-                return Err(SettingsError::InvalidAiModel);
-            }
+        if let Some(backup) = &self.backup_model
+            && (!crate::ai::is_usable_model(backup)
+                || crate::ai::canonical_model_id(backup)
+                    == crate::ai::canonical_model_id(&self.model))
+        {
+            return Err(SettingsError::InvalidAiModel);
         }
         Ok(())
     }

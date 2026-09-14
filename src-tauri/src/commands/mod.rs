@@ -967,7 +967,10 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 popup_height: settings.writing_popup_height,
                 allow_manual_text: settings.writing_allow_manual_text,
             },
-            ai: crate::config::AiSettings { model: ai_model, backup_model: ai_backup_model },
+            ai: crate::config::AiSettings {
+                model: ai_model,
+                backup_model: ai_backup_model,
+            },
         })
     }
 }

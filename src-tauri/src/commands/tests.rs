@@ -1,6 +1,6 @@
 use std::{
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::{atomic::AtomicBool, mpsc},
     thread,
 };
@@ -135,6 +135,59 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
 const TEXT_RESPONSE: &str = r#"{"status":"completed","outputs":[{"type":"text","text":"Summary"}],"steps":[{"type":"model_output","content":[{"type":"text","text":"Summary"}]}]}"#;
 const WEBSITE_RESPONSE: &str = r#"{"status":"completed","steps":[{"type":"url_context_result","result":[{"status":"success","url":"https://example.com/article"}]},{"type":"model_output","content":[{"type":"text","text":"Summary"}]}]}"#;
 
+/// Accept one fixture connection and return the stream plus its parsed JSON
+/// body, or `None` when the fixture is stopping. Shared by the single-shot
+/// and multi-response fixtures so the socket framing lives in one place.
+fn read_fixture_request(
+    listener: &TcpListener,
+    stop: &AtomicBool,
+) -> Option<(TcpStream, serde_json::Value)> {
+    let mut stream = loop {
+        if stop.load(Ordering::Acquire) {
+            return None;
+        }
+        match listener.accept() {
+            Ok((stream, _)) => break stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(2))
+            }
+            Err(error) => panic!("local HTTP fixture failed: {error}"),
+        }
+    };
+    // Accepted sockets can inherit nonblocking mode on macOS.
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    let mut bytes = Vec::new();
+    let (body_start, body_length) = loop {
+        let mut buffer = [0; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "HTTP request ended before its headers");
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+            let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+            let length = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            break (end + 4, length);
+        }
+    };
+    while bytes.len() < body_start + body_length {
+        let mut buffer = [0; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        assert_ne!(read, 0, "HTTP request ended before its body");
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    let body = serde_json::from_slice(&bytes[body_start..body_start + body_length]).unwrap();
+    Some((stream, body))
+}
+
 /// A single local request, with a gate for proving cancellation before an HTTP response.
 struct HttpFixture {
     endpoint: String,
@@ -164,49 +217,9 @@ impl HttpSequenceFixture {
         let worker_stop = stop.clone();
         let worker = thread::spawn(move || {
             for (status, response) in responses {
-                let mut stream = loop {
-                    if worker_stop.load(Ordering::Acquire) {
-                        return;
-                    }
-                    match listener.accept() {
-                        Ok((stream, _)) => break stream,
-                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(2))
-                        }
-                        Err(error) => panic!("local HTTP fixture failed: {error}"),
-                    }
+                let Some((mut stream, body)) = read_fixture_request(&listener, &worker_stop) else {
+                    return;
                 };
-                stream.set_nonblocking(false).unwrap();
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                let mut bytes = Vec::new();
-                let (body_start, body_length) = loop {
-                    let mut buffer = [0; 4096];
-                    let read = stream.read(&mut buffer).unwrap();
-                    assert_ne!(read, 0, "HTTP request ended before its headers");
-                    bytes.extend_from_slice(&buffer[..read]);
-                    if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
-                        let headers = std::str::from_utf8(&bytes[..end]).unwrap();
-                        let length = headers
-                            .lines()
-                            .find_map(|line| {
-                                let (name, value) = line.split_once(':')?;
-                                name.eq_ignore_ascii_case("content-length")
-                                    .then(|| value.trim().parse::<usize>().unwrap())
-                            })
-                            .unwrap();
-                        break (end + 4, length);
-                    }
-                };
-                while bytes.len() < body_start + body_length {
-                    let mut buffer = [0; 4096];
-                    let read = stream.read(&mut buffer).unwrap();
-                    assert_ne!(read, 0, "HTTP request ended before its body");
-                    bytes.extend_from_slice(&buffer[..read]);
-                }
-                let body =
-                    serde_json::from_slice(&bytes[body_start..body_start + body_length]).unwrap();
                 let _ = bodies_tx.send(body);
                 let response = format!(
                     "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
@@ -250,50 +263,9 @@ impl HttpFixture {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let worker = thread::spawn(move || {
-            let mut stream = loop {
-                if worker_stop.load(Ordering::Acquire) {
-                    return;
-                }
-                match listener.accept() {
-                    Ok((stream, _)) => break stream,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(2))
-                    }
-                    Err(error) => panic!("local HTTP fixture failed: {error}"),
-                }
+            let Some((mut stream, body)) = read_fixture_request(&listener, &worker_stop) else {
+                return;
             };
-            // Accepted sockets can inherit nonblocking mode on macOS.
-            stream.set_nonblocking(false).unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
-            let mut bytes = Vec::new();
-            let (body_start, body_length) = loop {
-                let mut buffer = [0; 4096];
-                let read = stream.read(&mut buffer).unwrap();
-                assert_ne!(read, 0, "HTTP request ended before its headers");
-                bytes.extend_from_slice(&buffer[..read]);
-                if let Some(end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
-                    let headers = std::str::from_utf8(&bytes[..end]).unwrap();
-                    let length = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse::<usize>().unwrap())
-                        })
-                        .unwrap();
-                    break (end + 4, length);
-                }
-            };
-            while bytes.len() < body_start + body_length {
-                let mut buffer = [0; 4096];
-                let read = stream.read(&mut buffer).unwrap();
-                assert_ne!(read, 0, "HTTP request ended before its body");
-                bytes.extend_from_slice(&buffer[..read]);
-            }
-            let body =
-                serde_json::from_slice(&bytes[body_start..body_start + body_length]).unwrap();
             let _ = arrived_tx.send(body);
             if delayed {
                 let _ = release_rx.recv_timeout(Duration::from_secs(3));
@@ -429,7 +401,10 @@ async fn rate_limited_primary_retries_once_on_the_backup_model() {
         .await
         .unwrap();
     assert!(matches!(result, WritingOutcome::Replaced));
-    assert_eq!(*text.replacements.lock().unwrap(), vec![(1, "Summary".into())]);
+    assert_eq!(
+        *text.replacements.lock().unwrap(),
+        vec![(1, "Summary".into())]
+    );
     let first = server.next_request();
     let second = server.next_request();
     assert_eq!(first["model"], "gemini-3.8-flash");
@@ -438,10 +413,8 @@ async fn rate_limited_primary_retries_once_on_the_backup_model() {
 
 #[tokio::test]
 async fn non_rate_limit_errors_never_spend_backup_quota() {
-    let mut server = HttpSequenceFixture::new(vec![(
-        401,
-        r#"{"error":{"code":"authentication"}}"#,
-    )]);
+    let mut server =
+        HttpSequenceFixture::new(vec![(401, r#"{"error":{"code":"authentication"}}"#)]);
     let (core, _) = core(&server.endpoint, Some("Original selection"));
     core.settings.write().unwrap().ai.backup_model = Some("gemini-2.5-flash".into());
     core.open_writing_tools().await.unwrap();
@@ -457,7 +430,12 @@ async fn non_rate_limit_errors_never_spend_backup_quota() {
     assert!(matches!(error, AppCoreError::Gemini(_)));
     // Exactly one request: authentication failures must not retry.
     let _ = server.next_request();
-    assert!(server.bodies.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(
+        server
+            .bodies
+            .recv_timeout(Duration::from_millis(200))
+            .is_err()
+    );
 }
 
 #[tokio::test]

@@ -26,6 +26,16 @@ interface AiModelSelectProps {
   readonly excludeId?: string | null;
 }
 
+function customIdError(draft: string, excluded: string | null): string | null {
+  if (draft.trim() === "") return "Enter a model ID like gemini-2.5-flash.";
+  if (isBlockedAiModelId(draft)) {
+    return "That model can't be used for text requests (speech, image, video, or agent models aren't supported).";
+  }
+  if (!isUsableAiModelId(draft)) return "Enter a model ID like gemini-2.5-flash.";
+  if (canonicalAiModelId(draft) === excluded) return "Backup must differ from the primary model.";
+  return null;
+}
+
 /**
  * Model selector. Quick picks come from the native `list_ai_models` command
  * (bundled fallback while loading); any well-formed `gemini-*` id can also
@@ -65,8 +75,14 @@ export function AiModelSelect({
   const excluded = excludeId == null ? null : canonicalAiModelId(excludeId);
   const inList = normalized != null && models.some(model => model.id === normalized);
   const showingCustom = normalized != null && !inList;
-  const selectValue =
-    normalized == null ? NONE_VALUE : inList ? normalized : CUSTOM_VALUE;
+
+  let selectValue = CUSTOM_VALUE;
+  if (normalized == null) {
+    selectValue = NONE_VALUE;
+  } else if (inList) {
+    selectValue = normalized;
+  }
+
   const selected = normalized == null
     ? null
     : (models.find(model => model.id === normalized) ?? null);
@@ -79,18 +95,7 @@ export function AiModelSelect({
     }
   }
 
-  const draftError =
-    draft == null
-      ? null
-      : draft.trim() === ""
-        ? "Enter a model ID like gemini-2.5-flash."
-        : isBlockedAiModelId(draft)
-          ? "That model can't be used for text requests (speech, image, video, or agent models aren't supported)."
-          : !isUsableAiModelId(draft)
-            ? "Enter a model ID like gemini-2.5-flash."
-            : canonicalAiModelId(draft) === excluded
-              ? "Backup must differ from the primary model."
-              : null;
+  const draftError = draft == null ? null : customIdError(draft, excluded);
 
   return (
     <div className="ai-model-select">

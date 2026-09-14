@@ -145,12 +145,6 @@ pub fn is_usable_model(id: &str) -> bool {
     !is_blocked_model(&canonical)
 }
 
-/// Backwards-compatible alias: historically an allowlist check, now any
-/// usable model id.
-pub fn is_supported_model(id: &str) -> bool {
-    is_usable_model(id)
-}
-
 pub fn normalize_model(id: &str) -> String {
     let canonical = canonical_model_id(id);
     if is_usable_model(&canonical) {
@@ -620,8 +614,8 @@ mod tests {
     use super::{
         DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GenerationConfig, InteractionRequest,
         InteractionResponse, ResponseFormat, WritingAction, dictation_cleanup_prompt,
-        is_blocked_model, is_supported_model, is_usable_model, normalize_backup_model,
-        normalize_model, parse_interaction, supported_models, writing_prompt,
+        is_blocked_model, is_usable_model, normalize_backup_model, normalize_model,
+        parse_interaction, supported_models, writing_prompt,
     };
 
     #[test]
@@ -760,7 +754,11 @@ mod tests {
         // shape or return non-text output.
         for model in &models {
             assert!(!model.id.contains("tts"), "tts model listed: {}", model.id);
-            assert!(!model.id.contains("live"), "live model listed: {}", model.id);
+            assert!(
+                !model.id.contains("live"),
+                "live model listed: {}",
+                model.id
+            );
             assert!(
                 !model.id.contains("image"),
                 "image model listed: {}",
@@ -771,9 +769,21 @@ mod tests {
                 "image model listed: {}",
                 model.id
             );
-            assert!(!model.id.contains("transcribe"), "audio model listed: {}", model.id);
-            assert!(!model.id.contains("embed"), "embedding model listed: {}", model.id);
-            assert!(!model.id.starts_with("veo"), "video model listed: {}", model.id);
+            assert!(
+                !model.id.contains("transcribe"),
+                "audio model listed: {}",
+                model.id
+            );
+            assert!(
+                !model.id.contains("embed"),
+                "embedding model listed: {}",
+                model.id
+            );
+            assert!(
+                !model.id.starts_with("veo"),
+                "video model listed: {}",
+                model.id
+            );
             assert!(
                 !model.id.starts_with("lyria"),
                 "music model listed: {}",
@@ -801,7 +811,7 @@ mod tests {
             "lyria-3-pro-preview",
             "deep-research-pro-preview-12-2025",
         ] {
-            assert!(!is_supported_model(excluded), "{excluded} must not be offered");
+            assert!(!is_usable_model(excluded), "{excluded} must not be offered");
         }
     }
 
@@ -843,8 +853,11 @@ mod tests {
             "gemini-robotics-er-2-preview",
             "nano-banana-pro-preview",
         ] {
-            assert!(is_blocked_model(blocked) || !is_usable_model(blocked), "{blocked} must be rejected");
-            assert!(!is_supported_model(blocked), "{blocked} must not be offered");
+            assert!(
+                is_blocked_model(blocked) || !is_usable_model(blocked),
+                "{blocked} must be rejected"
+            );
+            assert!(!is_usable_model(blocked), "{blocked} must not be offered");
         }
         // Malformed ids are rejected too.
         for malformed in ["", "not-a-model", "GEMINI-2.5-FLASH", "gemini"] {
