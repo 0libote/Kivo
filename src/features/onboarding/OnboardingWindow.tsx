@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { DictationPractice } from "../../components/DictationPractice";
+import { AiModelSelect } from "../settings/AiModelSelect";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { formatShortcut } from "../../components/ShortcutRecorder";
@@ -97,6 +98,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
             setMessage={setMessage}
             setSavingKey={setSavingKey}
             settings={settings}
+            updateSettings={updateSettings}
           />
         ) : null}
 
@@ -209,10 +211,11 @@ interface ApiKeyStepProps {
   readonly setMessage: (value: string | null) => void;
   readonly setSavingKey: (value: boolean) => void;
   readonly settings: AppSettings;
+  readonly updateSettings: (patch: Partial<AppSettings>) => Promise<AppSettings>;
 }
 
 function ApiKeyStep(props: ApiKeyStepProps) {
-  const { apiKey, apiStatus, platform, savingKey, setApiKey, setApiStatus, setMessage, setSavingKey, settings } = props;
+  const { apiKey, apiStatus, platform, savingKey, setApiKey, setApiStatus, setMessage, setSavingKey, settings, updateSettings } = props;
   return (
     <div className="onboarding-step">
       <div className="onboarding-step__icon"><Icon name="spark" size={24} /></div>
@@ -239,6 +242,30 @@ function ApiKeyStep(props: ApiKeyStepProps) {
             >{savingKey ? "Saving…" : "Save"}</Button>
           </div>
         )}
+      </div>
+      <div className="onboarding-model">
+        <label className="onboarding-model__label" htmlFor="onboarding-ai-model">Model</label>
+        <AiModelSelect
+          ariaLabel="AI model"
+          id="onboarding-ai-model"
+          onChange={(aiModel) => {
+            if (aiModel == null) return;
+            void updateSettings({ aiModel }).catch(() => setMessage("The model couldn’t be saved."));
+          }}
+          value={settings.aiModel}
+        />
+        <label className="onboarding-model__label" htmlFor="onboarding-ai-backup-model">Backup model (optional)</label>
+        <AiModelSelect
+          allowNone
+          ariaLabel="Backup AI model"
+          excludeId={settings.aiModel}
+          id="onboarding-ai-backup-model"
+          onChange={(aiBackupModel) => {
+            void updateSettings({ aiBackupModel }).catch(() => setMessage("The backup model couldn’t be saved."));
+          }}
+          value={settings.aiBackupModel}
+        />
+        <p className="onboarding-copy onboarding-model__note">Newest text models work automatically — speech, image, video, and agent models are blocked. If the primary hits its rate limit, Kivo retries once on the backup.</p>
       </div>
       <div className="shortcut-demo">
         <ShortcutSummary label="Dictate" platform={platform} shortcut={settings.dictationShortcut} />

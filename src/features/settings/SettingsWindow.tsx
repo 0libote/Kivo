@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { AiModelSelect } from "./AiModelSelect";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { Button } from "../../components/Button";
@@ -161,6 +162,8 @@ function SectionContent(props: SectionContentProps) {
           setApiStatus={props.setApiStatus}
           setBusy={props.setBusy}
           setNotice={props.setNotice}
+          settings={props.settings}
+          save={props.save}
         />
       );
     case "about":
@@ -363,6 +366,8 @@ function AiSection({
   setApiStatus,
   setBusy,
   setNotice,
+  settings,
+  save,
 }: {
   readonly apiKey: string;
   readonly apiStatus: ApiKeyStatus;
@@ -371,10 +376,40 @@ function AiSection({
   readonly setApiStatus: (value: ApiKeyStatus | ((current: ApiKeyStatus) => ApiKeyStatus)) => void;
   readonly setBusy: (value: string | null) => void;
   readonly setNotice: (value: string | null) => void;
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
 }) {
   return (
     <SettingsContent title="AI" subtitle="Kivo sends only the text needed for your request directly to Google Gemini.">
-      <SettingsGroup>
+      <SettingsGroup header="Model">
+        <SettingRow label="Model" description="Newest text models work automatically — only speech, image, video, and agent models are hidden. Or type any gemini-* ID via Custom." stacked>
+          <AiModelSelect
+            disabled={busy !== null}
+            onChange={(aiModel) => {
+              if (aiModel == null) return;
+              void save({ aiModel })
+                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
+                .catch(() => {});
+            }}
+            value={settings.aiModel}
+          />
+        </SettingRow>
+        <SettingRow label="Backup model" description="If the primary hits its rate limit, Kivo retries once on the backup before reporting an error." stacked>
+          <AiModelSelect
+            allowNone
+            ariaLabel="Backup AI model"
+            disabled={busy !== null}
+            excludeId={settings.aiModel}
+            onChange={(aiBackupModel) => {
+              void save({ aiBackupModel })
+                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
+                .catch(() => {});
+            }}
+            value={settings.aiBackupModel}
+          />
+        </SettingRow>
+      </SettingsGroup>
+      <SettingsGroup header="API key">
         <SettingRow label="Google AI Studio API key" description={apiStatus.configured ? "A key is stored securely by the operating system." : "Required for writing actions and optional dictation cleanup."} stacked>
           <div className="api-key-editor">
             <input
@@ -528,9 +563,9 @@ function connectionLabel(status: ApiKeyStatus) {
 
 function connectionDescription(status: ApiKeyStatus) {
   if (!status.configured) return "Add a key to connect Kivo to Gemini.";
-  if (status.connection === "connected") return "Gemini is ready for writing requests.";
+  if (status.connection === "connected") return "The selected model is ready for writing requests.";
   if (status.connection === "invalid") return "Check the key and save it again.";
   if (status.connection === "rate-limited") return "Gemini is temporarily rate limited. Try again shortly.";
   if (status.connection === "offline") return "Kivo couldn’t reach Gemini. Check your connection.";
-  return "Test the saved key before using Writing Tools.";
+  return "Test the saved key with the selected model before using Writing Tools.";
 }

@@ -18,6 +18,22 @@ test("settings navigation and controls work", async ({ page }) => {
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.getByRole("heading", { name: "AI" })).toBeVisible();
   await expect(page.getByLabel("Google AI Studio API key")).toBeVisible();
+  const modelSelect = page.getByLabel("AI model", { exact: true });
+  await expect(modelSelect).toBeVisible();
+  const options = await modelSelect.locator("option").allTextContents();
+  expect(options.length).toBeGreaterThan(0);
+  for (const option of options) {
+    expect(option.toLowerCase()).not.toContain("tts");
+    expect(option.toLowerCase()).not.toContain("image");
+    expect(option.toLowerCase()).not.toContain("banana");
+    expect(option.toLowerCase()).not.toContain("live");
+  }
+  await modelSelect.selectOption("gemini-2.5-flash");
+  await expect(modelSelect).toHaveValue("gemini-2.5-flash");
+  const backupSelect = page.getByLabel("Backup AI model", { exact: true });
+  await expect(backupSelect).toBeVisible();
+  await backupSelect.selectOption("gemini-2.5-flash-lite");
+  await expect(backupSelect).toHaveValue("gemini-2.5-flash-lite");
   assertNoErrors();
 });
 
@@ -32,6 +48,8 @@ test("onboarding completes the concise four-screen flow", async ({ page }) => {
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: /Add Gemini/ })).toBeVisible();
   await expect(page.locator(".shortcut-demo").getByText("Writing Tools", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("AI model", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Backup AI model", { exact: true })).toBeVisible();
   assertNoErrors();
 });
 

@@ -29,6 +29,13 @@
 .settings-group__footer--split { justify-content: space-between; }
 .api-key-editor { width: 100%; display: flex; gap: 7px; }
 .api-key-editor input { flex: 1; min-width: 0; }
+.ai-model-select { width: 100%; display: grid; gap: 6px; }
+.ai-model-select select { width: 100%; }
+.ai-model-select__description { color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
+.ai-model-select__custom { display: grid; gap: 4px; }
+.ai-model-select__custom input { width: 100%; }
+.ai-model-select__hint { color: var(--text-tertiary); font-size: 11px; }
+.ai-model-select__error { color: var(--danger); font-size: 11px; line-height: 1.35; }
 .text-link { padding: 0; border: 0; background: transparent; color: var(--accent); }
 .settings-notice { position: sticky; z-index: 2; bottom: 10px; max-width: 590px; margin: 10px auto 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 8px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-strong); box-shadow: 0 6px 20px rgba(0,0,0,.15); }
 .settings-notice button { padding: 4px; border: 0; background: transparent; color: var(--text-secondary); }

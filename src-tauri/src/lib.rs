@@ -90,6 +90,7 @@ pub fn run() {
             commands::open_permission_settings,
             commands::list_microphones,
             commands::list_speech_languages,
+            commands::list_ai_models,
             commands::get_api_key_status,
             commands::store_api_key,
             commands::remove_api_key,
