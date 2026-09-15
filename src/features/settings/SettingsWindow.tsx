@@ -15,10 +15,11 @@ import {
   type ApiKeyStatus,
   type AppContext,
   type AppSettings,
+  type MicrophoneDevice,
   type PermissionKind,
   type PermissionStatus,
+  type SpeechLanguage,
 } from "../../types";
-import type { MicrophoneDevice, SpeechLanguage } from "../../types";
 import { writingAction } from "../writing-tools/actions";
 
 type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "permissions" | "about";
@@ -287,7 +288,7 @@ function PermissionsSection({
                     disabled={busy !== null || !loaded}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
                   >
-                    {busy === kind ? "Waiting…" : denied ? "Open Settings" : "Allow"}
+                    {permissionActionLabel(busy === kind, denied)}
                   </Button>
                 )}
               </span>
@@ -300,6 +301,12 @@ function PermissionsSection({
       </div>
     </SettingsContent>
   );
+}
+
+function permissionActionLabel(waiting: boolean, denied: boolean): string {
+  if (waiting) return "Waiting…";
+  if (denied) return "Open Settings";
+  return "Allow";
 }
 
 function permissionLabel(kind: PermissionKind, dictationShortcut: string): string {
