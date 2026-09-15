@@ -53,7 +53,8 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-text-action:hover { color: var(--text); text-decoration: underline; }
 .writing-text-action[aria-pressed="true"] { color: var(--text); font-weight: 600; text-decoration: underline; }
 .writing-summary { max-height: calc(var(--writing-max-height, 460px) - 4px); overflow-y: auto; }
-.writing-summary__kind { display: flex; gap: 4px; padding: 8px 12px 0; }
+.writing-summary__kind { display: flex; align-items: center; gap: 4px; margin: 0; padding: 8px 12px 0; border: 0; }
+.writing-summary__kind legend { padding: 0; color: var(--text-tertiary); font-size: 11px; }
 .writing-summary__input { display: grid; gap: 7px; padding: 12px; }
 .writing-summary__input label { color: var(--text-secondary); font-size: 12px; }
 .writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }

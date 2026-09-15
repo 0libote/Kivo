@@ -35,13 +35,10 @@ function isClosableMode(mode: WritingToolsState["mode"]): boolean {
 
 function handleEscape(
   mode: WritingToolsState["mode"],
-  hasSelection: boolean,
   close: () => void,
   dispatch: PopupDispatch,
 ): void {
-  // With no selection there is no menu to go back to, so Escape always
-  // closes instead of landing on a dead-end entry.
-  if (isClosableMode(mode) || !hasSelection) {
+  if (isClosableMode(mode)) {
     close();
   } else {
     dispatch({ type: "BACK" });
@@ -89,7 +86,13 @@ function useWritingHotkeys(options: {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        handleEscape(mode, hasSelection, close, dispatch);
+        // With no selection there is no menu to go back to, so Escape
+        // always closes instead of landing on a dead-end entry.
+        if (!hasSelection) {
+          close();
+        } else {
+          handleEscape(mode, close, dispatch);
+        }
         return;
       }
       if (mode !== "menu") return;
@@ -547,10 +550,11 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled, hasSele
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
       </header>
       {!hasSelection ? (
-        <div className="writing-summary__kind" role="group" aria-label="Summary source">
+        <fieldset className="writing-summary__kind">
+          <legend>Source</legend>
           <button aria-pressed={kind === "text"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })} type="button">Text</button>
           <button aria-pressed={kind === "link"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "link" })} type="button">Link</button>
-        </div>
+        </fieldset>
       ) : null}
       <div className="writing-summary__input">
         <label htmlFor="summary-input">{kind === "link" ? "Webpage or YouTube URL" : "Webpage text or video transcript"}</label>
