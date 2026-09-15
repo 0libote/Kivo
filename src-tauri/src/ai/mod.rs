@@ -56,9 +56,19 @@ pub const SUPPORTED_GEMINI_MODELS: &[AiModelInfo] = &[
         description: "Frontier speed and quality for everyday writing tasks.",
     },
     AiModelInfo {
+        id: "gemini-3.6-flash",
+        label: "Gemini 3.6 Flash",
+        description: "Previous-generation Flash balancing speed and multimodal ability.",
+    },
+    AiModelInfo {
         id: "gemini-3.5-flash",
         label: "Gemini 3.5 Flash",
         description: "Stable frontier model for agentic and coding-adjacent rewrites.",
+    },
+    AiModelInfo {
+        id: "gemini-3.5-flash-lite",
+        label: "Gemini 3.5 Flash-Lite",
+        description: "Cost-efficient stable model for high-volume simple tasks.",
     },
     AiModelInfo {
         id: "gemini-3-flash-preview",
@@ -450,13 +460,14 @@ impl GeminiClient {
         parse_interaction(interaction)
     }
 
-    /// Lightweight Test connection: `GET /v1beta/models/{model}` validates
-    /// the key and that the model exists without running a full generation
-    /// (no thinking/output tokens, no quota spent, typically <1s vs several
-    /// seconds for an Interactions request). Auth failures surface with the
+    /// Single-model availability probe: `GET /v1beta/models/{model}` validates
+    /// that the model id exists without running a full generation (no
+    /// thinking/output tokens, no quota spent). Auth failures surface with the
     /// same body shape as generate (`INVALID_ARGUMENT` / `API_KEY_INVALID`
     /// as HTTP 400), so the existing error mapping applies unchanged.
     /// Works identically on macOS and Windows (pure HTTPS, no OS APIs).
+    /// Note: Test connection prefers [`GeminiClient::list_models`], which
+    /// validates the key and reports every usable model in one fetch.
     pub async fn check_model(
         &self,
         api_key: &SecretString,
@@ -746,6 +757,9 @@ fn parse_api_error_code(body: &serde_json::Value) -> Option<String> {
     if matches!(status, Some("RESOURCE_EXHAUSTED")) {
         return Some("rate_limited".into());
     }
+    if matches!(status, Some("NOT_FOUND")) {
+        return Some("not_found".into());
+    }
     status.map(str::to_owned).or(legacy)
 }
 
@@ -786,11 +800,32 @@ pub enum GeminiError {
 }
 
 impl GeminiError {
+    /// Quota exhaustion surfaces as HTTP 429, but also as HTTP 400/403 with
+    /// a `RESOURCE_EXHAUSTED` status (normalized to `rate_limited` by
+    /// [`parse_api_error_code`]). Both mean "retry later / on the backup",
+    /// never "the key is wrong".
     pub fn is_rate_limited(&self) -> bool {
-        matches!(
-            self,
-            Self::Api { status, .. } if *status == StatusCode::TOO_MANY_REQUESTS
-        )
+        match self {
+            Self::Api { status, code } => {
+                *status == StatusCode::TOO_MANY_REQUESTS
+                    || matches!(code.as_deref(), Some("rate_limited" | "RESOURCE_EXHAUSTED"))
+            }
+            _ => false,
+        }
+    }
+
+    /// The model id is unknown, retired, or not available to the key's
+    /// project/tier (`GET /v1beta/models/{model}` and Interactions both
+    /// report this as 404 `NOT_FOUND`). Distinct from auth failures: the key
+    /// itself may be fine, so callers must not report "check your API key".
+    pub fn is_not_found(&self) -> bool {
+        match self {
+            Self::Api { status, code } => {
+                *status == StatusCode::NOT_FOUND
+                    || matches!(code.as_deref(), Some("not_found" | "NOT_FOUND" | "404"))
+            }
+            _ => false,
+        }
     }
 
     fn is_auth_code(code: Option<&str>) -> bool {
@@ -829,6 +864,11 @@ impl GeminiError {
             {
                 "Gemini is temporarily rate limited. Try again shortly."
             }
+            // Unknown / retired model ids (404 NOT_FOUND) are not key
+            // problems: say so explicitly instead of the generic fallback.
+            Self::Api { .. } if self.is_not_found() => {
+                "That model isn't available with your API key. Choose another model under AI → Model."
+            }
             Self::Transport(_) => "Couldn't reach Gemini. Check your connection.",
             _ => "Gemini couldn't complete that request.",
         }
@@ -857,6 +897,9 @@ impl GeminiError {
             {
                 "invalid_api_key"
             }
+            // Surfaced distinctly so Test connection can tell "pick another
+            // model" apart from "the key is wrong".
+            Self::Api { .. } if self.is_not_found() => "model_not_found",
             Self::Api { .. } => "api_error",
             Self::Incomplete(_) => "incomplete",
             Self::EmptyResponse => "empty_response",
@@ -1235,6 +1278,42 @@ mod tests {
         assert_eq!(error.code(), "rate_limited");
     }
 
+    #[test]
+    fn error_codes_distinguish_unavailable_models_and_body_only_rate_limits() {
+        // Unknown / retired model ids arrive as 404 NOT_FOUND on both the
+        // Models GET and the Interactions POST. They must not read as key
+        // problems: Test connection relies on this to advise picking another
+        // model instead of re-entering the key.
+        let not_found = serde_json::json!({
+            "error": {"code": 404, "status": "NOT_FOUND", "message": "Model not found."}
+        });
+        assert_eq!(
+            parse_api_error_code(&not_found).as_deref(),
+            Some("not_found")
+        );
+        let error = GeminiError::Api {
+            status: reqwest::StatusCode::NOT_FOUND,
+            code: parse_api_error_code(&not_found),
+        };
+        assert!(error.is_not_found());
+        assert!(!error.is_rate_limited());
+        assert_eq!(error.code(), "model_not_found");
+        assert!(error.user_message().contains("isn't available"));
+
+        // Quota exhaustion is not always HTTP 429: a 400/403 carrying
+        // RESOURCE_EXHAUSTED must still trigger the backup retry.
+        let exhausted_body = serde_json::json!({
+            "error": {"code": 400, "status": "RESOURCE_EXHAUSTED", "message": "Quota."}
+        });
+        let error = GeminiError::Api {
+            status: reqwest::StatusCode::BAD_REQUEST,
+            code: parse_api_error_code(&exhausted_body),
+        };
+        assert!(error.is_rate_limited());
+        assert!(!error.is_not_found());
+        assert_eq!(error.code(), "rate_limited");
+    }
+
     fn api_model(name: &str, display_name: Option<&str>, description: Option<&str>) -> ApiModel {
         ApiModel {
             name: name.to_owned(),
@@ -1425,6 +1504,23 @@ mod tests {
         let (path, key) = fixture.next_request();
         assert!(path.contains("/models/gemini-3.8-flash"), "path was {path}");
         assert_eq!(key.as_deref(), Some("test-key"));
+    }
+
+    #[tokio::test]
+    async fn check_model_maps_missing_model_to_model_not_found() {
+        let body = r#"{"error":{"code":404,"status":"NOT_FOUND","message":"Model not found."}}"#;
+        let fixture = GetFixture::new(vec![(404, body)]);
+        let client = super::GeminiClient::with_endpoints(
+            "http://127.0.0.1:9/interactions".into(),
+            fixture.models_endpoint.clone(),
+        )
+        .unwrap();
+        let error = client
+            .check_model(&test_secret(), "gemini-3.8-flash")
+            .await
+            .unwrap_err();
+        assert!(error.is_not_found());
+        assert_eq!(error.code(), "model_not_found");
     }
 
     #[tokio::test]

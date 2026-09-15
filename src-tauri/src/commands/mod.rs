@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
+        GeminiClient, GeminiError, LinkSource, ListedAiModel, PromptError, WritingAction,
         dictation_cleanup_prompt, writing_prompt,
     },
     config::{
@@ -129,21 +129,14 @@ impl AppCore {
             .load_api_key()?
             .ok_or(AppCoreError::AiNotConfigured)?;
         let (model, backup) = self.ai_models();
-        // Lightweight metadata GETs (no generation, no quota) checked
-        // concurrently so a configured backup doesn't double the wait.
+        // A single ListModels fetch validates the key and reports every
+        // model id the key can actually use, so Test connection doubles as
+        // the availability check for the selected primary/backup models: no
+        // separate per-model GET and no full generation (fast, no quota).
         // Same behavior on macOS and Windows: pure HTTPS via reqwest.
-        match backup {
-            Some(backup) => {
-                let (primary_result, backup_result) = tokio::join!(
-                    self.ai.check_model(&api_key, &model),
-                    self.ai.check_model(&api_key, &backup),
-                );
-                primary_result?;
-                backup_result?;
-            }
-            None => {
-                self.ai.check_model(&api_key, &model).await?;
-            }
+        let models = self.ai.list_models(&api_key).await?;
+        if let Some(missing) = find_unavailable_model(&models, &model, backup.as_deref()) {
+            return Err(AppCoreError::AiModelUnavailable { model: missing });
         }
         Ok(CredentialStatus { configured: true })
     }
@@ -642,6 +635,22 @@ impl AppCore {
     }
 }
 
+/// First of the selected primary/backup model ids missing from a successful
+/// ListModels result, if any. A missing id means it is retired or not enabled
+/// for the key's project/tier (the key itself is valid: ListModels succeeded),
+/// so Test connection reports "pick another model" instead of "bad key".
+fn find_unavailable_model(
+    models: &[ListedAiModel],
+    primary: &str,
+    backup: Option<&str>,
+) -> Option<String> {
+    [Some(primary), backup]
+        .into_iter()
+        .flatten()
+        .map(crate::ai::canonical_model_id)
+        .find(|id| !models.iter().any(|model| model.id == *id))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WritingPopupContext {
@@ -697,6 +706,7 @@ pub enum WritingSourceKind {
 pub enum AppCoreError {
     Unavailable,
     AiNotConfigured,
+    AiModelUnavailable { model: String },
     ActionDisabled,
     SelectionExpired,
     NoResult,
@@ -740,6 +750,7 @@ impl AppCoreError {
         match self {
             Self::Unavailable => "core_unavailable",
             Self::AiNotConfigured => "ai_not_configured",
+            Self::AiModelUnavailable { .. } => "model_unavailable",
             Self::ActionDisabled => "action_disabled",
             Self::SelectionExpired => "selection_expired",
             Self::NoResult => "no_result",
@@ -760,6 +771,9 @@ impl AppCoreError {
         match self {
             Self::Unavailable => "The application is temporarily unavailable.".into(),
             Self::AiNotConfigured => "Add your Google AI Studio API key first.".into(),
+            Self::AiModelUnavailable { model } => format!(
+                "Your API key works, but \"{model}\" isn't available to it. Choose another model under AI → Model."
+            ),
             Self::ActionDisabled => "That writing action is disabled in Settings.".into(),
             Self::SelectionExpired => "The original selection is no longer available.".into(),
             Self::NoResult => "There is no result to replace the selection with.".into(),
@@ -815,9 +829,7 @@ impl From<AppCoreError> for CommandError {
             | AppCoreError::Speech(SpeechError::NoSpeechDetected)
             | AppCoreError::Speech(SpeechError::RecognitionUnavailable)
             | AppCoreError::Speech(SpeechError::Backend) => true,
-            AppCoreError::Gemini(GeminiError::Api { status, .. }) => {
-                *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-            }
+            AppCoreError::Gemini(error) if error.is_rate_limited() => true,
             _ => false,
         };
         Self {

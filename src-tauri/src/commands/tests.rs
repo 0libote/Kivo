@@ -411,6 +411,66 @@ async fn rate_limited_primary_retries_once_on_the_backup_model() {
     assert_eq!(second["model"], "gemini-2.5-flash");
 }
 
+#[test]
+fn model_unavailable_error_names_the_model_and_keeps_key_guidance() {
+    let error = AppCoreError::AiModelUnavailable {
+        model: "gemini-3.8-flash".into(),
+    };
+    let command = CommandError::from(error);
+    // Distinct from invalid_api_key so Test connection can advise picking
+    // another model instead of re-entering the key.
+    assert_eq!(command.code, "model_unavailable");
+    assert!(command.message.contains("gemini-3.8-flash"));
+    assert!(command.message.contains("API key works"));
+}
+
+#[test]
+fn test_connection_flags_models_missing_from_list_models() {
+    let models = vec![
+        crate::ai::ListedAiModel {
+            id: "gemini-3.8-flash".into(),
+            label: "Gemini 3.8 Flash".into(),
+            description: String::new(),
+        },
+        crate::ai::ListedAiModel {
+            id: "gemini-2.5-flash".into(),
+            label: "Gemini 2.5 Flash".into(),
+            description: String::new(),
+        },
+    ];
+    // Both selected models available: no error.
+    assert_eq!(
+        find_unavailable_model(&models, "gemini-3.8-flash", Some("gemini-2.5-flash")),
+        None
+    );
+    // Retired primary: reported even with a healthy backup.
+    assert_eq!(
+        find_unavailable_model(&models, "gemini-1.5-flash", Some("gemini-2.5-flash")),
+        Some("gemini-1.5-flash".into())
+    );
+    // Retired backup: reported by id.
+    assert_eq!(
+        find_unavailable_model(&models, "gemini-3.8-flash", Some("gemini-1.5-flash")),
+        Some("gemini-1.5-flash".into())
+    );
+    // ListModels-style prefixed ids canonicalize before comparison.
+    assert_eq!(
+        find_unavailable_model(&models, "models/gemini-3.8-flash", None),
+        None
+    );
+}
+
+#[test]
+fn body_only_quota_errors_are_recoverable_rate_limits() {
+    let error = AppCoreError::Gemini(GeminiError::Api {
+        status: reqwest::StatusCode::BAD_REQUEST,
+        code: Some("rate_limited".into()),
+    });
+    let command = CommandError::from(error);
+    assert_eq!(command.code, "rate_limited");
+    assert!(command.recoverable);
+}
+
 #[tokio::test]
 async fn non_rate_limit_errors_never_spend_backup_quota() {
     let mut server =
