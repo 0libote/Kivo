@@ -16,11 +16,13 @@ import {
   type AppContext,
   type AppSettings,
   type MicrophoneDevice,
+  type PermissionKind,
+  type PermissionStatus,
   type SpeechLanguage,
 } from "../../types";
 import { writingAction } from "../writing-tools/actions";
 
-type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "about";
+type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "permissions" | "about";
 
 interface SettingsWindowProps {
   readonly context: AppContext;
@@ -35,6 +37,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = 
   { id: "writing", label: "Writing Tools", icon: "pencil" },
   { id: "general", label: "General", icon: "settings" },
   { id: "ai", label: "AI", icon: "connection" },
+  { id: "permissions", label: "Permissions", icon: "check" },
   { id: "about", label: "About", icon: "info" },
 ];
 
@@ -138,6 +141,14 @@ interface SectionContentProps {
 function SectionContent(props: SectionContentProps) {
   switch (props.section) {
     case "home": return null;
+    case "permissions":
+      return (
+        <PermissionsSection
+          context={props.context}
+          settings={props.settings}
+          setNotice={props.setNotice}
+        />
+      );
     case "general":
       return <GeneralSection settings={props.settings} save={props.save} />;
     case "dictation":
@@ -177,6 +188,145 @@ function SectionContent(props: SectionContentProps) {
           updateResult={props.updateResult}
         />
       );
+  }
+}
+
+function PermissionsSection({
+  context,
+  settings,
+  setNotice,
+}: {
+  readonly context: AppContext;
+  readonly settings: AppSettings;
+  readonly setNotice: (value: string | null) => void;
+}) {
+  const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
+  const [busy, setBusy] = useState<PermissionKind | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useNativeEvent<PermissionStatus[]>("permission-status-changed", setPermissions);
+
+  const refresh = useCallback(() => {
+    void nativeBridge
+      .getPermissions()
+      .then((next) => {
+        setPermissions(next);
+        setLoaded(true);
+      })
+      .catch(() => setNotice("Permission status isn’t available right now."));
+  }, [setNotice]);
+
+  useEffect(refresh, [refresh]);
+
+  async function request(kind: PermissionKind) {
+    setBusy(kind);
+    setNotice(null);
+    try {
+      // Windows has no in-app prompt: open the Settings page first (mirrors
+      // onboarding), then refresh. macOS shows the native prompt directly.
+      if (context.platform === "windows") await nativeBridge.openPermissionSettings(kind);
+      setPermissions(await nativeBridge.requestPermission(kind));
+    } catch (error) {
+      setNotice(error instanceof NativeError ? error.message : "Permission wasn’t granted. Try again.");
+      refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function openSettings(kind: PermissionKind) {
+    setBusy(kind);
+    setNotice(null);
+    try {
+      await nativeBridge.openPermissionSettings(kind);
+      setPermissions(await nativeBridge.getPermissions());
+    } catch {
+      setNotice("The system settings page couldn’t be opened.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const subtitle =
+    context.platform === "macos"
+      ? "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it."
+      : "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows.";
+  const order: PermissionKind[] = ["accessibility", "input-monitoring", "microphone", "speech-recognition"];
+  const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
+
+  return (
+    <SettingsContent title="Permissions" subtitle={subtitle}>
+      <SettingsGroup>
+        {order.map((kind) => {
+          const status = byKind.get(kind);
+          const state = status?.state ?? "not-determined";
+          if (state === "unavailable") {
+            return (
+              <SettingRow
+                key={kind}
+                label={permissionLabel(kind, settings.dictationShortcut)}
+                description={status?.explanation ?? "Not required on this system."}
+              >
+                <span className="permission-row__granted">Not required</span>
+              </SettingRow>
+            );
+          }
+          const granted = state === "granted";
+          const denied = state === "denied";
+          return (
+            <SettingRow
+              key={kind}
+              label={permissionLabel(kind, settings.dictationShortcut)}
+              description={status?.explanation ?? permissionBlurb(kind, context.platform)}
+            >
+              <span className="permission-row__control">
+                <StatusIndicator label={permissionLabel(kind, settings.dictationShortcut)} state={state} />
+                {granted ? (
+                  <span className="permission-row__granted"><Icon name="check" size={15} />Allowed</span>
+                ) : (
+                  <Button
+                    compact
+                    disabled={busy !== null || !loaded}
+                    onClick={() => void (denied ? openSettings(kind) : request(kind))}
+                  >
+                    {permissionActionLabel(busy === kind, denied)}
+                  </Button>
+                )}
+              </span>
+            </SettingRow>
+          );
+        })}
+      </SettingsGroup>
+      <div className="settings-group__footer settings-group__footer--split">
+        <Button compact disabled={busy !== null} onClick={refresh}>Refresh status</Button>
+      </div>
+    </SettingsContent>
+  );
+}
+
+function permissionActionLabel(waiting: boolean, denied: boolean): string {
+  if (waiting) return "Waiting…";
+  if (denied) return "Open Settings";
+  return "Allow";
+}
+
+function permissionLabel(kind: PermissionKind, dictationShortcut: string): string {
+  switch (kind) {
+    case "accessibility": return "Accessibility";
+    case "input-monitoring": return dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring";
+    case "microphone": return "Microphone";
+    case "speech-recognition": return "Speech Recognition";
+  }
+}
+
+function permissionBlurb(kind: PermissionKind, platform: AppContext["platform"]): string {
+  switch (kind) {
+    case "accessibility":
+      return platform === "macos"
+        ? "Read only the text you select and insert text where your cursor is."
+        : "Work with the selected text and cursor in your active app.";
+    case "input-monitoring": return "Detect the dictation hold shortcut.";
+    case "microphone": return "Listen only while dictation is active.";
+    case "speech-recognition": return "Transcribe speech using the operating system.";
   }
 }
 

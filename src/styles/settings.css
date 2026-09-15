@@ -29,6 +29,8 @@
 .settings-group__footer--split { justify-content: space-between; }
 .api-key-editor { width: 100%; display: flex; gap: 7px; }
 .api-key-editor input { flex: 1; min-width: 0; }
+.permission-row__control { display: flex; align-items: center; gap: 10px; }
+.permission-row__granted { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 12px; white-space: nowrap; }
 .ai-model-select { width: 100%; display: grid; gap: 6px; }
 .ai-model-select select { width: 100%; }
 .ai-model-select__description { color: var(--text-secondary); font-size: 12px; line-height: 1.35; }

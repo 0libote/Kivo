@@ -38,10 +38,11 @@ function customIdError(draft: string, excluded: string | null): string | null {
 
 /**
  * Model selector. Quick picks come from the native `list_ai_models` command
- * (bundled fallback while loading); any well-formed `gemini-*` id can also
- * be typed via "Custom model ID". Only blocked non-text families (TTS, live,
- * image, transcription, embedding, video, music, agents) are rejected, so
- * newest text models keep working without a Kivo update.
+ * (dynamic ListModels filtered by the blocklist only, bundled fallback while
+ * loading or offline); any well-formed `gemini-*` id can also be typed via
+ * "Custom model ID". Only blocked non-text families (TTS, live/audio,
+ * image, transcription, embedding, video, music, computer-use, agents) are
+ * rejected, so newest text models keep working without a Kivo update.
  */
 export function AiModelSelect({
   value,

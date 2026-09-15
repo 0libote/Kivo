@@ -45,7 +45,7 @@ describe("platform defaults parity", () => {
     expect(FALLBACK_AI_MODELS.length).toBeGreaterThan(0);
     expect(FALLBACK_AI_MODELS.some(model => model.id === DEFAULT_AI_MODEL)).toBe(true);
     for (const model of FALLBACK_AI_MODELS) {
-      expect(model.id).not.toMatch(/tts|live|image|banana|transcribe|embed/i);
+      expect(model.id).not.toMatch(/tts|live|audio|image|banana|transcribe|embed|omni|computer-use/i);
       expect(model.id).not.toMatch(/^veo|^lyria/);
       expect(model.id).not.toContain("deep-research");
       expect(model.id).not.toContain("robotics");
@@ -54,6 +54,9 @@ describe("platform defaults parity", () => {
       "gemini-2.5-flash-preview-tts",
       "gemini-2.5-flash-image",
       "gemini-2.5-flash-live",
+      "gemini-2.5-flash-native-audio-preview-12-2025",
+      "gemini-2.5-computer-use-preview-10-2025",
+      "gemini-omni-1.1-flash",
       "veo-3.1-preview",
       "lyria-3-pro-preview",
     ]) {
