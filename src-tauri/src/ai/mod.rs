@@ -1158,7 +1158,14 @@ mod tests {
             assert!(!is_usable_model(blocked), "{blocked} must not be offered");
         }
         // Malformed ids are rejected too.
-        for malformed in ["", "ab", "GEMINI-2.5-FLASH", "gemini", "has spaces", "invalid!!"] {
+        for malformed in [
+            "",
+            "ab",
+            "GEMINI-2.5-FLASH",
+            "gemini",
+            "has spaces",
+            "invalid!!",
+        ] {
             assert!(!is_usable_model(malformed), "{malformed} must be rejected");
         }
     }
