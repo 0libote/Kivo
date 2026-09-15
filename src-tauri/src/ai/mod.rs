@@ -460,49 +460,6 @@ impl GeminiClient {
         parse_interaction(interaction)
     }
 
-    /// Single-model availability probe: `GET /v1beta/models/{model}` validates
-    /// that the model id exists without running a full generation (no
-    /// thinking/output tokens, no quota spent). Auth failures surface with the
-    /// same body shape as generate (`INVALID_ARGUMENT` / `API_KEY_INVALID`
-    /// as HTTP 400), so the existing error mapping applies unchanged.
-    /// Works identically on macOS and Windows (pure HTTPS, no OS APIs).
-    /// Note: Test connection prefers [`GeminiClient::list_models`], which
-    /// validates the key and reports every usable model in one fetch.
-    pub async fn check_model(
-        &self,
-        api_key: &SecretString,
-        model: &str,
-    ) -> Result<(), GeminiError> {
-        let api_key =
-            HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
-        let model = Self::resolve_model(model);
-        let url = format!(
-            "{}/{}",
-            self.models_endpoint.trim_end_matches('/'),
-            model.trim_start_matches('/')
-        );
-        let response = self
-            .http
-            .get(&url)
-            .header("x-goog-api-key", api_key)
-            .send()
-            .await
-            .map_err(GeminiError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_api_error_code(&body));
-            return Err(GeminiError::Api {
-                status,
-                code: error_code,
-            });
-        }
-        Ok(())
-    }
-
     /// Dynamic model picker source: `GET /v1beta/models?pageSize=1000`
     /// (paginated via `nextPageToken`, up to 3 pages) filtered by the
     /// blocklist only. Returns curated fallback when the fetch fails or
@@ -1490,41 +1447,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn check_model_uses_header_and_accepts_200_without_generation() {
-        let fixture = GetFixture::new(vec![(200, r#"{"name":"models/gemini-3.8-flash"}"#)]);
-        let client = super::GeminiClient::with_endpoints(
-            "http://127.0.0.1:9/interactions".into(),
-            fixture.models_endpoint.clone(),
-        )
-        .unwrap();
-        client
-            .check_model(&test_secret(), "gemini-3.8-flash")
-            .await
-            .unwrap();
-        let (path, key) = fixture.next_request();
-        assert!(path.contains("/models/gemini-3.8-flash"), "path was {path}");
-        assert_eq!(key.as_deref(), Some("test-key"));
-    }
-
-    #[tokio::test]
-    async fn check_model_maps_missing_model_to_model_not_found() {
-        let body = r#"{"error":{"code":404,"status":"NOT_FOUND","message":"Model not found."}}"#;
-        let fixture = GetFixture::new(vec![(404, body)]);
-        let client = super::GeminiClient::with_endpoints(
-            "http://127.0.0.1:9/interactions".into(),
-            fixture.models_endpoint.clone(),
-        )
-        .unwrap();
-        let error = client
-            .check_model(&test_secret(), "gemini-3.8-flash")
-            .await
-            .unwrap_err();
-        assert!(error.is_not_found());
-        assert_eq!(error.code(), "model_not_found");
-    }
-
-    #[tokio::test]
-    async fn check_model_maps_invalid_key_to_auth_error() {
+    async fn list_models_maps_invalid_key_to_auth_error() {
         let body = r#"[{"error":{"code":400,"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}]"#;
         let fixture = GetFixture::new(vec![(400, body)]);
         let client = super::GeminiClient::with_endpoints(
@@ -1532,10 +1455,7 @@ mod tests {
             fixture.models_endpoint.clone(),
         )
         .unwrap();
-        let error = client
-            .check_model(&test_secret(), "gemini-3.8-flash")
-            .await
-            .unwrap_err();
+        let error = client.list_models(&test_secret()).await.unwrap_err();
         assert_eq!(error.code(), "invalid_api_key");
         assert_eq!(
             error.user_message(),
