@@ -532,7 +532,7 @@ function AiSection({
   return (
     <SettingsContent title="AI" subtitle="Kivo sends only the text needed for your request directly to Google Gemini.">
       <SettingsGroup header="Model">
-        <SettingRow label="Model" description="Newest text models work automatically — only speech, image, video, and agent models are hidden. Or type any gemini-* ID via Custom." stacked>
+        <SettingRow label="Model" description="Newest text models work automatically — only speech, image, video, and agent models are hidden. Or type any model ID via Custom." stacked>
           <AiModelSelect
             disabled={busy !== null}
             onChange={(aiModel) => {

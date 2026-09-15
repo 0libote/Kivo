@@ -29,7 +29,7 @@ pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
 pub const GEMINI_MODELS_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// Curated suggestions for the model picker. Validation itself is allow-all
-/// (see [`is_usable_model`]): any well-formed `gemini-*` id works with Kivo's
+/// (see [`is_usable_model`]): any well-formed model id works with Kivo's
 /// Interactions API usage (stateless text input, `store: false`, low thinking,
 /// plain-text output, plus `url_context` for webpages and video input for
 /// YouTube), so newest text models keep working without an update.
@@ -138,7 +138,7 @@ pub fn curated_listed_models() -> Vec<ListedAiModel> {
 
 /// Substrings that mark a model as unusable for Kivo's text Interactions API
 /// usage. Matched case-insensitively against the canonical id.
-/// Blocklist only (no allowlist of ids): any `gemini-*` id not containing
+/// Blocklist only (no allowlist of ids): any well-formed id not containing
 /// one of these is shown, so newest text models keep working without a Kivo
 /// update. Covers speech synthesis / live + realtime audio (`tts`, `-live`,
 /// `audio`), image generation (`image`, `banana`), transcription, embedding,
@@ -177,7 +177,7 @@ pub fn is_blocked_model(id: &str) -> bool {
         .any(|blocked| canonical.contains(blocked))
 }
 
-/// Allow-all validation: any well-formed `gemini-*` id works, so newest
+/// Allow-all validation: any well-formed model id works, so newest
 /// models keep working without a Kivo update. Only blocked non-text
 /// families are rejected.
 pub fn is_usable_model(id: &str) -> bool {
@@ -185,12 +185,14 @@ pub fn is_usable_model(id: &str) -> bool {
     if canonical.len() < 3 || canonical.len() > 128 {
         return false;
     }
-    if !canonical.starts_with("gemini-") {
+    // Require a separator so single words like "gemini" or "foobar" don't
+    // count as model ids; every real ListModels id contains one.
+    if !canonical.contains('-') {
         return false;
     }
     if !canonical
         .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.' || c == '_')
     {
         return false;
     }
@@ -595,7 +597,7 @@ struct ListModelsResponse {
 }
 
 /// Blocklist-only mapping: canonicalize `models/` prefix, keep any usable
-/// `gemini-*` id, drop blocked non-text families, deduplicate, and sort
+/// model id, drop blocked non-text families, deduplicate, and sort
 /// with the default model first for a stable picker order.
 fn filter_api_models(models: Vec<ApiModel>) -> Vec<ListedAiModel> {
     use std::collections::HashSet;
@@ -1112,21 +1114,26 @@ mod tests {
             normalize_model("gemini-2.5-flash-preview-tts"),
             DEFAULT_GEMINI_MODEL
         );
-        assert_eq!(normalize_model("not-a-model"), DEFAULT_GEMINI_MODEL);
+        assert_eq!(normalize_model("has spaces!"), DEFAULT_GEMINI_MODEL);
     }
 
     #[test]
     fn blocklist_allows_new_models_and_strips_models_prefix() {
-        // Newest text models keep working without a Kivo update.
+        // Newest text models keep working without a Kivo update,
+        // including non-`gemini-` families.
         assert!(is_usable_model("gemini-4.0-flash"));
         assert!(is_usable_model("gemini-3.9-pro"));
+        assert!(is_usable_model("gemma-3-27b-it"));
+        assert!(is_usable_model("learnlm-2.0-flash"));
         assert_eq!(normalize_model("gemini-4.0-flash"), "gemini-4.0-flash");
+        assert_eq!(normalize_model("gemma-3-27b-it"), "gemma-3-27b-it");
         // ListModels-style ids are canonicalized.
         assert_eq!(
             normalize_model("models/gemini-2.5-flash"),
             "gemini-2.5-flash"
         );
         assert!(is_usable_model("models/gemini-4.0-flash"));
+        assert!(is_usable_model("models/gemma-3-27b-it"));
         // Blocked non-text families stay rejected.
         for blocked in [
             "gemini-2.5-flash-preview-tts",
@@ -1151,7 +1158,7 @@ mod tests {
             assert!(!is_usable_model(blocked), "{blocked} must not be offered");
         }
         // Malformed ids are rejected too.
-        for malformed in ["", "not-a-model", "GEMINI-2.5-FLASH", "gemini"] {
+        for malformed in ["", "ab", "GEMINI-2.5-FLASH", "gemini", "has spaces", "invalid!!"] {
             assert!(!is_usable_model(malformed), "{malformed} must be rejected");
         }
     }
@@ -1177,7 +1184,7 @@ mod tests {
             None
         );
         assert_eq!(
-            normalize_backup_model(Some("not-a-model"), "gemini-3.8-flash"),
+            normalize_backup_model(Some("has spaces!"), "gemini-3.8-flash"),
             None
         );
     }
@@ -1311,7 +1318,8 @@ mod tests {
                 Some("Gemini 3.8 Flash"),
                 Some("Default."),
             ),
-            api_model("not-a-model", Some("Other"), None),
+            api_model("gemma-3-27b-it", Some("Gemma 3 27B"), None),
+            api_model("has spaces!", Some("Other"), None),
         ];
         let listed = filter_api_models(models);
         let ids: Vec<&str> = listed.iter().map(|model| model.id.as_str()).collect();
@@ -1320,13 +1328,14 @@ mod tests {
         assert_eq!(ids[0], "gemini-3.8-flash");
         assert!(ids.contains(&"gemini-2.5-flash"));
         assert!(ids.contains(&"gemini-4.0-flash"));
+        assert!(ids.contains(&"gemma-3-27b-it"));
         for blocked in [
             "gemini-2.5-flash-preview-tts",
             "gemini-2.5-flash-native-audio-preview-12-2025",
             "gemini-2.5-computer-use-preview-10-2025",
             "gemini-omni-1.1-flash",
             "gemini-embedding-001",
-            "not-a-model",
+            "has spaces!",
         ] {
             assert!(!ids.contains(&blocked), "{blocked} must be filtered");
         }

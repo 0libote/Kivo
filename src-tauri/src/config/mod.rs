@@ -653,7 +653,7 @@ mod tests {
         // of bricking AI requests.
         for model in [
             "",
-            "not-a-model",
+            "has spaces!",
             "gemini-2.5-flash-preview-tts",
             "gemini-2.5-flash-image",
         ] {
@@ -698,7 +698,7 @@ mod tests {
             Some("  "),
             Some("gemini-3.8-flash"),
             Some("gemini-2.5-flash-preview-tts"),
-            Some("not-a-model"),
+            Some("has spaces!"),
         ] {
             let mut settings = AppSettings::default();
             settings.ai.backup_model = backup.map(str::to_owned);

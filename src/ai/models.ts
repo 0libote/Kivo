@@ -8,7 +8,7 @@ import { DEFAULT_AI_MODEL } from "../types";
  * list is only used in the browser harness and while the native list is
  * loading, so the selector never appears empty.
  *
- * Validation is blocklist-only: any well-formed `gemini-*` id works so newest
+ * Validation is blocklist-only: any well-formed model id works so newest
  * models keep working without a Kivo update. Only blocked non-text families
  * are rejected — TTS / Live / realtime audio (`tts`, `-live`, `audio`),
  * image (`image`, `banana`), transcription, embedding, video (`veo-`,
@@ -67,8 +67,8 @@ export function isBlockedAiModelId(id: string): boolean {
 export function isUsableAiModelId(id: string): boolean {
   const canonical = canonicalAiModelId(id);
   if (canonical.length < 3 || canonical.length > 128) return false;
-  if (!canonical.startsWith("gemini-")) return false;
-  if (!/^[a-z0-9.\-]+$/.test(canonical)) return false;
+  if (!canonical.includes("-")) return false;
+  if (!/^[a-z0-9._-]+$/.test(canonical)) return false;
   return !isBlockedAiModelId(canonical);
 }
 

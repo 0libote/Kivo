@@ -77,7 +77,7 @@
 
       <h2 id="gemini-key">Adding your AI key</h2>
       <p>Dictation works with no key at all — you get the raw OS transcript. Writing actions (proofread, rewrite, summarize…) need a Google AI Studio key.</p>
-      <p><strong>To add it:</strong> create a key in <strong>Google AI Studio</strong>, open Kivo → <strong>Settings → AI</strong>, paste it, and press <strong>Save key</strong>. Pick a <strong>Model</strong> from the same screen — newest text models work automatically, and you can type any <code>gemini-*</code> ID via Custom — then use <strong>Test connection</strong> to confirm your key can use it. Optionally set a <strong>Backup model</strong>: if the primary hits its rate limit, Kivo retries once on the backup.</p>
+      <p><strong>To add it:</strong> create a key in <strong>Google AI Studio</strong>, open Kivo → <strong>Settings → AI</strong>, paste it, and press <strong>Save key</strong>. Pick a <strong>Model</strong> from the same screen — newest text models work automatically, and you can type any model ID via Custom — then use <strong>Test connection</strong> to confirm your key can use it. Optionally set a <strong>Backup model</strong>: if the primary hits its rate limit, Kivo retries once on the backup.</p>
       <div class="callout"><strong>Where’s my key stored?</strong> In macOS Keychain or Windows Credential Manager — managed entirely by the Rust process. It is never returned to the webview, never logged, and only leaves your machine inside the HTTPS request for the action you invoke.</div>
 
       <h2 id="dictation">Dictation</h2>
