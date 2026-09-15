@@ -9,8 +9,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction, dictation_cleanup_prompt,
-        writing_prompt,
+        GeminiClient, GeminiError, LinkSource, PromptError, WritingAction,
+        dictation_cleanup_prompt, writing_prompt,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,

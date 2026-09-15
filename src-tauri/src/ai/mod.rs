@@ -26,8 +26,7 @@ pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
 /// https://ai.google.dev/api/models). Authenticated the same way as
 /// generate (the `x-goog-api-key` header), but a small metadata GET instead
 /// of a full model generation, so it is fast and spends no quota.
-pub const GEMINI_MODELS_ENDPOINT: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models";
+pub const GEMINI_MODELS_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// Curated suggestions for the model picker. Validation itself is allow-all
 /// (see [`is_usable_model`]): any well-formed `gemini-*` id works with Kivo's
@@ -121,7 +120,10 @@ impl From<AiModelInfo> for ListedAiModel {
 /// (offline, invalid key). Keeps the selector usable and mirrors
 /// `FALLBACK_AI_MODELS` in `src/ai/models.ts`.
 pub fn curated_listed_models() -> Vec<ListedAiModel> {
-    supported_models().into_iter().map(ListedAiModel::from).collect()
+    supported_models()
+        .into_iter()
+        .map(ListedAiModel::from)
+        .collect()
 }
 
 /// Substrings that mark a model as unusable for Kivo's text Interactions API
@@ -1271,7 +1273,11 @@ mod tests {
     #[test]
     fn dynamic_list_filters_by_blocklist_only_and_sorts_default_first() {
         let models = vec![
-            api_model("models/gemini-2.5-flash", Some("Gemini 2.5 Flash"), Some("Fast.")),
+            api_model(
+                "models/gemini-2.5-flash",
+                Some("Gemini 2.5 Flash"),
+                Some("Fast."),
+            ),
             api_model(
                 "models/gemini-2.5-flash-preview-tts",
                 Some("Gemini 2.5 Flash TTS"),
@@ -1291,7 +1297,11 @@ mod tests {
             api_model("models/gemini-4.0-flash", None, None),
             api_model("models/gemini-4.0-flash", None, None),
             api_model("models/gemini-embedding-001", Some("Embedding"), None),
-            api_model("gemini-3.8-flash", Some("Gemini 3.8 Flash"), Some("Default.")),
+            api_model(
+                "gemini-3.8-flash",
+                Some("Gemini 3.8 Flash"),
+                Some("Default."),
+            ),
             api_model("not-a-model", Some("Other"), None),
         ];
         let listed = filter_api_models(models);
@@ -1330,11 +1340,7 @@ mod tests {
         let supported = supported_models();
         assert!(!curated.is_empty());
         assert_eq!(curated.len(), supported.len());
-        assert!(
-            curated
-                .iter()
-                .any(|model| model.id == DEFAULT_GEMINI_MODEL)
-        );
+        assert!(curated.iter().any(|model| model.id == DEFAULT_GEMINI_MODEL));
     }
 
     /// Minimal GET fixture: accepts `expected` connections, records the
@@ -1490,9 +1496,15 @@ mod tests {
         let (first_path, first_key) = fixture.next_request();
         let (second_path, _) = fixture.next_request();
         assert!(first_path.contains("/models"), "path was {first_path}");
-        assert!(first_path.contains("pageSize=1000"), "path was {first_path}");
+        assert!(
+            first_path.contains("pageSize=1000"),
+            "path was {first_path}"
+        );
         assert!(!first_path.contains("test-key"), "key leaked into URL");
         assert_eq!(first_key.as_deref(), Some("test-key"));
-        assert!(second_path.contains("pageToken=second"), "path was {second_path}");
+        assert!(
+            second_path.contains("pageToken=second"),
+            "path was {second_path}"
+        );
     }
 }
