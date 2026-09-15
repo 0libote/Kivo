@@ -24,8 +24,7 @@ export type WritingActionId =
   | "concise"
   | "summarize"
   | "key-points"
-  | "custom"
-  | "chat";
+  | "custom";
 
 export type WritingPopupAnchor = "cursor" | "selection" | "fixed";
 
@@ -91,14 +90,14 @@ export interface SelectionContext {
   applicationName: string;
   canReplace: boolean;
   bounds?: { x: number; y: number; width: number; height: number };
-  /** Captured highlight for the manual text box; empty for quick chat. */
+  /** Captured highlight for the manual text box; empty when nothing is selected. */
   initialText: string;
 }
 
 export interface WritingRequest {
   action: WritingActionId;
   instruction?: string;
-  /** Edited text-box content, or the quick-chat message. */
+  /** Edited text-box content, or the explicit summary text / URL. */
   text?: string;
   sourceKind?: "text" | "link";
 }

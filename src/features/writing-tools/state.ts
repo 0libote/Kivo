@@ -1,6 +1,6 @@
 import type { SelectionContext, SummarySource, WritingActionId } from "../../types";
 
-export type WritingMode = "closed" | "menu" | "chat" | "custom" | "summary" | "processing" | "result" | "error";
+export type WritingMode = "closed" | "menu" | "custom" | "summary" | "processing" | "result" | "error";
 
 export interface WritingToolsState {
   mode: WritingMode;
@@ -9,7 +9,7 @@ export interface WritingToolsState {
   selectedIndex: number;
   activeAction: WritingActionId | null;
   customInstruction: string;
-  /** Editable text-box content: captured highlight, or the chat message. */
+  /** Editable text-box content: the captured highlight. */
   sourceText: string;
   summaryKind: "text" | "link";
   summaryInput: string;
@@ -55,12 +55,29 @@ export const initialWritingToolsState: WritingToolsState = {
 };
 
 function openState(event: Extract<WritingToolsEvent, { type: "OPEN" }>): WritingToolsState {
+  // With nothing selected there is no menu to show: land directly on the
+  // summarize entry (text or link can be pasted) so writing assistance stays
+  // available. General Q&A is intentionally not offered.
+  if (!event.context.hasSelection && !event.enabledActions.includes("summarize")) {
+    return {
+      ...initialWritingToolsState,
+      mode: "error",
+      context: event.context,
+      enabledActions: event.enabledActions,
+      sourceText: event.context.initialText ?? "",
+      error: "Select some text first.",
+    };
+  }
   return {
     ...initialWritingToolsState,
-    mode: event.context.hasSelection ? "menu" : "chat",
+    mode: event.context.hasSelection ? "menu" : "summary",
     context: event.context,
     enabledActions: event.enabledActions,
     sourceText: event.context.initialText ?? "",
+    activeAction: event.context.hasSelection ? null : "summarize",
+    summaryKind: "text",
+    summaryInput: "",
+    usesSummaryInput: !event.context.hasSelection,
   };
 }
 
@@ -77,7 +94,7 @@ function selectState(state: WritingToolsState, index: number): WritingToolsState
 }
 
 function runState(state: WritingToolsState, action: WritingActionId): WritingToolsState {
-  if (!["menu", "custom", "chat", "summary", "error"].includes(state.mode)) return state;
+  if (!["menu", "custom", "summary", "error"].includes(state.mode)) return state;
   if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
   return { ...state, mode: "processing", activeAction: action, error: null, canRetry: false };
 }
@@ -87,9 +104,24 @@ function backState(state: WritingToolsState): WritingToolsState {
     return { ...state, mode: "summary", error: null, canRetry: false };
   }
   if (!["custom", "summary", "error", "result"].includes(state.mode)) return state;
+  // With no selection there is no menu to return to: land on the summarize
+  // entry, keeping any typed input so it can be adjusted and retried.
+  if (!state.context?.hasSelection) {
+    return {
+      ...state,
+      mode: "summary",
+      activeAction: "summarize",
+      usesSummaryInput: true,
+      resultSource: undefined,
+      resultCanReplace: false,
+      error: null,
+      canRetry: false,
+      resultText: "",
+    };
+  }
   return {
     ...state,
-    mode: state.context?.hasSelection ? "menu" : "chat",
+    mode: "menu",
     activeAction: null,
     usesSummaryInput: false,
     resultSource: undefined,
@@ -101,7 +133,7 @@ function backState(state: WritingToolsState): WritingToolsState {
 }
 
 function setSourceState(state: WritingToolsState, value: string): WritingToolsState {
-  if (state.mode !== "menu" && state.mode !== "chat") return state;
+  if (state.mode !== "menu") return state;
   return { ...state, sourceText: value };
 }
 
