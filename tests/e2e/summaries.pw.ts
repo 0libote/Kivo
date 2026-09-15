@@ -13,9 +13,9 @@ declare global {
 }
 
 const selection = { hasSelection: true, applicationName: "Editor", canReplace: true, initialText: "https://example.com/article" };
-const chat = { hasSelection: false, applicationName: "Quick chat", canReplace: false, initialText: "" };
+const empty = { hasSelection: false, applicationName: "Writing Tools", canReplace: false, initialText: "" };
 
-async function installHarness(page: Page, context = chat) {
+async function installHarness(page: Page, context = empty) {
   await page.goto("/?surface=writing-tools");
   await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
   await page.evaluate(async (context) => {
@@ -45,8 +45,7 @@ for (const platform of ["macos", "windows"] as const) {
       page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
       await page.addInitScript((theme) => localStorage.setItem("kivo-dev-settings", JSON.stringify({ theme })), theme);
       await installHarness(page);
-      await expect(page.getByLabel("Chat message")).toBeVisible();
-      await page.getByRole("button", { name: "Summarize text…", exact: true }).click();
+      await expect(page.getByLabel("Webpage text or video transcript")).toBeVisible();
       await expect(page.getByRole("button", { name: "Summarize", exact: true })).toBeDisabled();
       await page.getByLabel("Webpage text or video transcript").fill("A transcript describing the project and its next steps.");
       await page.getByRole("button", { name: "Summarize", exact: true }).click();
@@ -55,7 +54,8 @@ for (const platform of ["macos", "windows"] as const) {
       await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Replace", exact: true })).toHaveCount(0);
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "Summarize link…", exact: true }).click();
+      await page.evaluate((context) => window.summaryTest.open(context), empty);
+      await page.getByRole("button", { name: "Link", exact: true }).click();
       await page.getByLabel("Webpage or YouTube URL").fill("javascript:alert(1)");
       await expect(page.getByRole("button", { name: "Summarize", exact: true })).toBeDisabled();
       await page.getByLabel("Webpage or YouTube URL").fill("https://www.youtube.com/watch?v=example1234");
@@ -103,24 +103,23 @@ test("selected links prefill, cannot replace, and recover through retry or paste
 
 test("cancel and reopen discard late successes and failures without duplicate submissions", async ({ page }) => {
   await installHarness(page);
-  await page.getByRole("button", { name: "Summarize text…", exact: true }).click();
   await page.getByLabel("Webpage text or video transcript").fill("A transcript");
   await page.locator(".writing-summary").evaluate((form) => {
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
   });
   expect(await page.evaluate(() => window.summaryTest.requests.length)).toBe(1);
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.evaluate((context) => window.summaryTest.open(context), chat);
-  await page.getByLabel("Chat message").fill("New question");
-  await page.getByRole("button", { name: "Ask", exact: true }).click();
+  await page.evaluate((context) => window.summaryTest.open(context), empty);
   await page.evaluate(() => window.summaryTest.pending[0].resolve({ kind: "result", text: "Stale summary" }));
   await expect(page.getByText("Stale summary")).toHaveCount(0);
-  await expect(page.locator('.writing-popup[data-mode="processing"]')).toBeVisible();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
-  await page.evaluate((context) => window.summaryTest.open(context), chat);
+  await expect(page.getByLabel("Webpage text or video transcript")).toBeVisible();
+  await page.getByLabel("Webpage text or video transcript").fill("Another transcript");
+  await page.locator(".writing-summary").evaluate((form) => {
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  });
+  await page.evaluate((context) => window.summaryTest.open(context), empty);
   await page.evaluate(() => window.summaryTest.pending[1].reject(new Error("Stale error")));
-  await expect(page.getByLabel("Chat message")).toBeVisible();
+  await expect(page.getByLabel("Webpage text or video transcript")).toBeVisible();
   await expect(page.locator(".writing-error")).toHaveCount(0);
 });
 
@@ -133,7 +132,7 @@ test("disabling Summarize hides both new entry points", async ({ page }) => {
     const path = "/src/platform/native.ts";
     const { nativeBridge } = await import(path);
     nativeBridge.emit("writing-context", context);
-  }, chat);
-  await expect(page.getByLabel("Chat message")).toBeVisible();
+  }, empty);
+  await expect(page.getByText("Select some text first.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Summarize/ })).toHaveCount(0);
 });

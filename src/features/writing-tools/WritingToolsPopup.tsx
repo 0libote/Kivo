@@ -19,7 +19,6 @@ type PopupDispatch = Dispatch<WritingToolsEvent>;
 
 function getActiveDefinition(activeAction: WritingActionId | null): { label: string } | null {
   if (activeAction === null) return null;
-  if (activeAction === "chat") return { label: "Quick chat" };
   return writingAction(activeAction);
 }
 
@@ -31,7 +30,7 @@ const MENU_MOVEMENT: Readonly<Record<string, number>> = {
 };
 
 function isClosableMode(mode: WritingToolsState["mode"]): boolean {
-  return mode === "menu" || mode === "processing" || mode === "chat";
+  return mode === "menu" || mode === "processing";
 }
 
 function handleEscape(
@@ -43,18 +42,6 @@ function handleEscape(
     close();
   } else {
     dispatch({ type: "BACK" });
-  }
-}
-
-function handleChatKey(
-  event: KeyboardEvent,
-  runAction: RunAction,
-): void {
-  if (event.key !== "Enter" || event.shiftKey) return;
-  const target = event.target as HTMLElement | null;
-  if (target?.tagName === "TEXTAREA") {
-    event.preventDefault();
-    void runAction("chat");
   }
 }
 
@@ -87,22 +74,25 @@ function handleMenuKey(
 
 function useWritingHotkeys(options: {
   readonly mode: WritingToolsState["mode"];
+  readonly hasSelection: boolean;
   readonly enabledActions: WritingActionId[];
   readonly selectedIndex: number;
   readonly close: () => void;
   readonly runAction: RunAction;
   readonly dispatch: PopupDispatch;
 }): void {
-  const { mode, enabledActions, selectedIndex, close, runAction, dispatch } = options;
+  const { mode, hasSelection, enabledActions, selectedIndex, close, runAction, dispatch } = options;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        handleEscape(mode, close, dispatch);
-        return;
-      }
-      if (mode === "chat") {
-        handleChatKey(event, runAction);
+        // With no selection there is no menu to go back to, so Escape
+        // always closes instead of landing on a dead-end entry.
+        if (!hasSelection) {
+          close();
+        } else {
+          handleEscape(mode, close, dispatch);
+        }
         return;
       }
       if (mode !== "menu") return;
@@ -110,7 +100,7 @@ function useWritingHotkeys(options: {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [close, runAction, enabledActions, mode, selectedIndex, dispatch]);
+  }, [close, runAction, enabledActions, hasSelection, mode, selectedIndex, dispatch]);
 }
 
 export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps) {
@@ -214,6 +204,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 
   useWritingHotkeys({
     mode: state.mode,
+    hasSelection: state.context?.hasSelection ?? false,
     enabledActions: state.enabledActions,
     selectedIndex: state.selectedIndex,
     close,
@@ -266,10 +257,8 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
           summarizeEnabled={summarizeEnabled}
         />
       );
-    case "chat":
-      return <ChatView close={close} dispatch={dispatch} runAction={runAction} sourceText={state.sourceText} summarizeEnabled={summarizeEnabled} />;
     case "summary":
-      return <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} />;
+      return <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} hasSelection={state.context?.hasSelection ?? false} />;
     case "custom":
       return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
     case "processing":
@@ -355,53 +344,6 @@ function MenuView(props: MenuViewProps) {
       ) : null}
       <p className="writing-hint">↑↓ to choose · ↵ to run · Esc to close</p>
     </div>
-  );
-}
-
-interface ChatViewProps {
-  readonly close: () => void;
-  readonly dispatch: PopupDispatch;
-  readonly runAction: RunAction;
-  readonly sourceText: string;
-  readonly summarizeEnabled: boolean;
-}
-
-function ChatView({ close, dispatch, runAction, sourceText, summarizeEnabled }: ChatViewProps) {
-  const chatInputRef = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    chatInputRef.current?.focus();
-  }, []);
-  return (
-    <form
-      className="writing-chat"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void runAction("chat");
-      }}
-    >
-      <header className="writing-popup__header" data-tauri-drag-region>
-        <span>Quick chat</span>
-        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
-          <Icon name="close" size={14} />
-        </button>
-      </header>
-      <p className="writing-chat__hint">Nothing selected — ask anything.</p>
-      <textarea
-        aria-label="Chat message"
-        onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
-        placeholder="Ask anything…"
-        ref={chatInputRef}
-        rows={4}
-        spellCheck
-        value={sourceText}
-      />
-      <div className="writing-chat__footer">
-        {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText /> : null}
-        <Button compact disabled={!sourceText.trim()} tone="primary" type="submit">
-          Ask
-        </Button>
-      </div>
-    </form>
   );
 }
 
@@ -591,9 +533,12 @@ interface SummaryViewProps {
   readonly kind: "text" | "link";
   readonly input: string;
   readonly enabled: boolean;
+  /** False when the popup opened with nothing selected: there is no menu to
+   * go back to, so Back is hidden and a text/link toggle is shown instead. */
+  readonly hasSelection: boolean;
 }
 
-function SummaryView({ close, dispatch, runAction, kind, input, enabled }: SummaryViewProps) {
+function SummaryView({ close, dispatch, runAction, kind, input, enabled, hasSelection }: SummaryViewProps) {
   const summaryInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
   useEffect(() => {
     summaryInputRef.current?.focus();
@@ -604,6 +549,13 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled }: Summa
         <span>{kind === "link" ? "Summarize link" : "Summarize text"}</span>
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
       </header>
+      {!hasSelection ? (
+        <fieldset className="writing-summary__kind">
+          <legend>Source</legend>
+          <button aria-pressed={kind === "text"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })} type="button">Text</button>
+          <button aria-pressed={kind === "link"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "link" })} type="button">Link</button>
+        </fieldset>
+      ) : null}
       <div className="writing-summary__input">
         <label htmlFor="summary-input">{kind === "link" ? "Webpage or YouTube URL" : "Webpage text or video transcript"}</label>
         {kind === "link" ? (
@@ -614,7 +566,7 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled }: Summa
         {kind === "link" ? <p>Public pages and YouTube videos. The link is sent to Gemini to retrieve and summarize its content.</p> : null}
       </div>
       <footer className="writing-summary__footer">
-        <Button compact onClick={() => dispatch({ type: "BACK" })}>Back</Button>
+        {hasSelection ? <Button compact onClick={() => dispatch({ type: "BACK" })}>Back</Button> : <span />}
         <Button compact tone="primary" type="submit" disabled={!enabled || !input.trim() || (kind === "link" && !isWebUrl(input.trim()))}>Summarize</Button>
       </footer>
     </form>
@@ -624,7 +576,7 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled }: Summa
 function prepareWritingRequest(state: WritingToolsState, action: WritingActionId): WritingRequest | undefined {
   if (action === "custom" && !state.customInstruction.trim()) return undefined;
   const text = (state.usesSummaryInput ? state.summaryInput : state.sourceText).trim();
-  if ((action === "chat" || state.usesSummaryInput) && !text) return undefined;
+  if (state.usesSummaryInput && !text) return undefined;
   if (state.usesSummaryInput && state.summaryKind === "link" && !isWebUrl(text)) return undefined;
   const sourceKind = state.usesSummaryInput ? state.summaryKind : "text";
   return {

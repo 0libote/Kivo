@@ -397,7 +397,7 @@ impl AppCore {
                 context
             }
             Err(TextError::NoSelection | TextError::UnsupportedApplication) => {
-                WritingPopupContext::chat(cursor)
+                WritingPopupContext::without_selection(cursor)
             }
             Err(error) => return Err(error.into()),
         };
@@ -423,8 +423,9 @@ impl AppCore {
                 has_selection: true,
                 initial_text: selection.text().to_owned(),
             }),
-            // Chat mode (or a cleared context): still a valid popup state.
-            None => Ok(WritingPopupContext::chat(cursor)),
+            // No selection (or a cleared context): the popup opens the
+            // summarize entry so pasted text or a link can still be supplied.
+            None => Ok(WritingPopupContext::without_selection(cursor)),
         }
     }
 
@@ -435,12 +436,11 @@ impl AppCore {
         source_override: Option<String>,
         source_kind: WritingSourceKind,
     ) -> Result<WritingOutcome, AppCoreError> {
-        if action != WritingAction::Chat
-            && !self
-                .settings()?
-                .writing_tools
-                .enabled_actions
-                .contains(&action)
+        if !self
+            .settings()?
+            .writing_tools
+            .enabled_actions
+            .contains(&action)
         {
             return Err(AppCoreError::ActionDisabled);
         }
@@ -650,16 +650,16 @@ pub struct WritingPopupContext {
     pub cursor: Option<ScreenPoint>,
     pub has_selection: bool,
     /// Text shown in the manual text box: the captured highlight, or empty
-    /// for quick chat. Only sent to Kivo's own popup.
+    /// when nothing is selected. Only sent to Kivo's own popup.
     pub initial_text: String,
 }
 
 impl WritingPopupContext {
-    fn chat(cursor: Option<ScreenPoint>) -> Self {
+    fn without_selection(cursor: Option<ScreenPoint>) -> Self {
         Self {
             application: ActiveApplication {
-                identifier: "quick-chat".into(),
-                display_name: "Quick chat".into(),
+                identifier: "no-selection".into(),
+                display_name: "Writing Tools".into(),
             },
             anchor: None,
             cursor,
@@ -937,12 +937,6 @@ impl TryFrom<FrontendSettings> for AppSettings {
             .iter()
             .map(|action| parse_action(action))
             .collect::<Result<Vec<_>, _>>()?;
-        // "chat" is a mode, not a toggleable action; it is always available
-        // and never persisted in the enabled list.
-        let enabled_actions = enabled_actions
-            .into_iter()
-            .filter(|action| *action != WritingAction::Chat)
-            .collect();
         let popup_anchor = match settings.writing_popup_anchor.as_str() {
             "selection" => crate::config::PopupAnchor::Selection,
             "fixed" => crate::config::PopupAnchor::Fixed,
@@ -1111,7 +1105,7 @@ pub struct SelectionContext {
 pub struct WritingRequest {
     action: String,
     instruction: Option<String>,
-    /// Edited manual text-box content, quick-chat message, or explicit summary URL.
+    /// Edited manual text-box content, or the explicit summary text / URL.
     text: Option<String>,
     #[serde(default)]
     source_kind: WritingSourceKind,
@@ -1622,7 +1616,6 @@ fn parse_action(value: &str) -> Result<WritingAction, AppCoreError> {
         "custom" => Ok(WritingAction::Custom),
         "summarize" => Ok(WritingAction::Summarize),
         "key-points" => Ok(WritingAction::KeyPoints),
-        "chat" => Ok(WritingAction::Chat),
         _ => Err(AppCoreError::ActionDisabled),
     }
 }
@@ -1637,7 +1630,6 @@ fn action_id(action: WritingAction) -> &'static str {
         WritingAction::Custom => "custom",
         WritingAction::Summarize => "summarize",
         WritingAction::KeyPoints => "key-points",
-        WritingAction::Chat => "chat",
     }
 }
 

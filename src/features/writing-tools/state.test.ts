@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { initialWritingToolsState, writingToolsReducer } from "./state";
 
 const context = { hasSelection: true, applicationName: "TextEdit", canReplace: true, initialText: "Hello, how are you?" };
-const chatContext = { hasSelection: false, applicationName: "Quick chat", canReplace: false, initialText: "" };
+const emptyContext = { hasSelection: false, applicationName: "Writing Tools", canReplace: false, initialText: "" };
 const actions = ["proofread", "summarize", "custom"] as const;
 
 describe("writingToolsReducer", () => {
@@ -19,14 +19,19 @@ describe("writingToolsReducer", () => {
     expect(edited.sourceText).toBe("Edited text");
   });
 
-  it("opens quick chat when nothing is selected", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: chatContext, enabledActions: [...actions] });
-    expect(open).toMatchObject({ mode: "chat", sourceText: "" });
-    const processing = writingToolsReducer(open, { type: "RUN", action: "chat" });
+  it("opens the summarize entry when nothing is selected", () => {
+    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: [...actions] });
+    expect(open).toMatchObject({ mode: "summary", summaryKind: "text", usesSummaryInput: true, activeAction: "summarize" });
+    const processing = writingToolsReducer(open, { type: "RUN", action: "summarize" });
     expect(processing.mode).toBe("processing");
-    const result = writingToolsReducer(processing, { type: "RESULT", text: "An answer." });
-    expect(result).toMatchObject({ mode: "result", activeAction: "chat" });
-    expect(writingToolsReducer(result, { type: "BACK" })).toMatchObject({ mode: "chat" });
+    const result = writingToolsReducer(processing, { type: "RESULT", text: "A useful summary." });
+    expect(result).toMatchObject({ mode: "result", activeAction: "summarize" });
+    expect(writingToolsReducer(result, { type: "BACK" })).toMatchObject({ mode: "summary", usesSummaryInput: true });
+  });
+
+  it("reports selection errors when nothing is selected and Summarize is disabled", () => {
+    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: ["proofread"] });
+    expect(open).toMatchObject({ mode: "error", error: "Select some text first." });
   });
 
   it("dismisses after replacement", () => {
@@ -55,15 +60,16 @@ describe("writingToolsReducer", () => {
 
 describe("summary inputs", () => {
   function open(hasSelection = false) {
-    return writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: hasSelection ? context : chatContext, enabledActions: [...actions] });
+    return writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: hasSelection ? context : emptyContext, enabledActions: [...actions] });
   }
 
-  it("preserves quick chat text when entering and leaving pasted summaries", () => {
-    const chat = writingToolsReducer(open(), { type: "SET_SOURCE", value: "My draft question" });
-    const summary = writingToolsReducer(chat, { type: "OPEN_SUMMARY", kind: "text" });
+  it("keeps pasted summary input when retrying after a failure", () => {
+    const summary = writingToolsReducer(open(), { type: "OPEN_SUMMARY", kind: "text" });
     const edited = writingToolsReducer(summary, { type: "SET_SUMMARY_INPUT", value: "A long transcript" });
-    expect(edited).toMatchObject({ mode: "summary", summaryInput: "A long transcript", sourceText: "My draft question" });
-    expect(writingToolsReducer(edited, { type: "BACK" })).toMatchObject({ mode: "chat", sourceText: "My draft question", usesSummaryInput: false });
+    expect(edited).toMatchObject({ mode: "summary", summaryInput: "A long transcript" });
+    const running = writingToolsReducer(edited, { type: "RUN", action: "summarize" });
+    const failed = writingToolsReducer(running, { type: "FAIL", message: "Try again", canRetry: true });
+    expect(writingToolsReducer(failed, { type: "BACK" })).toMatchObject({ mode: "summary", summaryInput: "A long transcript", usesSummaryInput: true });
   });
 
   it("prefills links only when the selection is a URL", () => {

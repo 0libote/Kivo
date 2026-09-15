@@ -125,7 +125,7 @@
       <p>On release, the transcript goes through optional AI cleanup, then <code>text/</code> inserts it at the saved cursor. <kbd>esc</kbd> cancels; closing paths bump a generation counter so late engine callbacks are ignored.</p>
 
       <h2 id="text-pipeline">Selection &amp; replace pipeline</h2>
-      <p>Invoking Writing Tools captures a <code>SelectionContext</code> (app name, bounds, initial text, <code>canReplace</code>) and emits <code>writing-context</code>. The popup runs its reducer (<code>OPEN → RUN → RESULT / REPLACED / FAIL</code>), calls <code>runWritingAction</code>, and on <strong>Replace</strong> asks Rust to write back through the platform text service. Summarize / Key Points / Chat are <code>resultOnly</code> — the core refuses to treat them as replacements, including through the native command path.</p>
+      <p>Invoking Writing Tools captures a <code>SelectionContext</code> (app name, bounds, initial text, <code>canReplace</code>) and emits <code>writing-context</code>. The popup runs its reducer (<code>OPEN → RUN → RESULT / REPLACED / FAIL</code>), calls <code>runWritingAction</code>, and on <strong>Replace</strong> asks Rust to write back through the platform text service. Summarize / Key Points are <code>resultOnly</code> — the core refuses to treat them as replacements, including through the native command path.</p>
 
       <h2 id="ai-client">AI client</h2>
       <p>Curated in <code>src-tauri/src/ai/mod.rs</code> (<code>SUPPORTED_GEMINI_MODELS</code>, mirrored in <code>src/ai/models.ts</code>):</p>
