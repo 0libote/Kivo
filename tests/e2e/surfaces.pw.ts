@@ -37,6 +37,30 @@ test("settings navigation and controls work", async ({ page }) => {
   assertNoErrors();
 });
 
+test("about installs stable updates in-app with restart", async ({ page }) => {
+  const assertNoErrors = failOnConsoleErrors(page);
+  await page.setViewportSize({ width: 820, height: 600 });
+  await page.goto("/?surface=settings&harness=1");
+  await page.getByRole("button", { name: "About", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "About" })).toBeVisible();
+  await page.evaluate(async () => {
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = await import(path);
+    nativeBridge.checkForUpdates = async () => ({
+      currentVersion: "0.1.0",
+      availableVersion: "0.2.0",
+      available: true,
+      downloadUrl: "https://github.com/0libote/Kivo/releases",
+      channel: "stable",
+    });
+  });
+  await page.getByRole("button", { name: "Check now", exact: true }).click();
+  await page.getByRole("button", { name: "Download and Install", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Restart now", exact: true })).toBeVisible();
+  await expect(page.locator(".settings-notice").getByText("Update installed. Restart Kivo to finish.", { exact: true })).toBeVisible();
+  assertNoErrors();
+});
+
 test("onboarding completes the concise four-screen flow", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 640, height: 560 });
