@@ -662,26 +662,63 @@ function AboutSection({
   readonly setUpdateResult: (value: UpdateResult) => void;
   readonly updateResult: UpdateResult | null;
 }) {
+  const [installed, setInstalled] = useState(false);
+  const stableAvailable = updateResult?.available === true && updateResult.channel !== "beta";
   return (
     <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
       <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
       <SettingsGroup>
-        <SettingRow label="Software updates" description={updateDescription(updateResult)}>
-          <Button
-            compact
-            disabled={busy !== null}
-            onClick={() => {
-              setBusy("updates");
-              setNotice(null);
-              void nativeBridge.checkForUpdates()
-                .then(setUpdateResult)
-                .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Kivo couldn’t check for updates right now."))
-                .finally(() => setBusy(null));
-            }}
-          >{busy === "updates" ? "Checking…" : "Check now"}</Button>
+        <SettingRow label="Software updates" description={installed ? "Update installed. Restart Kivo to finish." : updateDescription(updateResult)}>
+          {installed ? (
+            <Button
+              compact
+              disabled={busy !== null}
+              onClick={() => {
+                setBusy("restart");
+                void nativeBridge.restartApp()
+                  .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
+                  .finally(() => setBusy(null));
+              }}
+              tone="primary"
+            >{busy === "restart" ? "Restarting…" : "Restart now"}</Button>
+          ) : (
+            <Button
+              compact
+              disabled={busy !== null}
+              onClick={() => {
+                setBusy("updates");
+                setNotice(null);
+                setInstalled(false);
+                void nativeBridge.checkForUpdates()
+                  .then(setUpdateResult)
+                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Kivo couldn’t check for updates right now."))
+                  .finally(() => setBusy(null));
+              }}
+            >{busy === "updates" ? "Checking…" : "Check now"}</Button>
+          )}
         </SettingRow>
+        {stableAvailable && !installed ? (
+          <SettingRow label="Install update" description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}>
+            <Button
+              compact
+              disabled={busy !== null}
+              onClick={() => {
+                setBusy("install");
+                setNotice(null);
+                void nativeBridge.installUpdate()
+                  .then(() => {
+                    setInstalled(true);
+                    setNotice("Update installed. Restart Kivo to finish.");
+                  })
+                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead."))
+                  .finally(() => setBusy(null));
+              }}
+              tone="primary"
+            >{busy === "install" ? "Installing…" : "Download and Install"}</Button>
+          </SettingRow>
+        ) : null}
       </SettingsGroup>
-      {updateResult?.available ? (
+      {updateResult?.available && !installed ? (
         <button className="text-link" onClick={() => void nativeBridge.openExternal(updateResult.downloadUrl ?? "https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">{updateResult.channel === "beta" ? "Download the latest beta build from GitHub" : "Download the latest release from GitHub"}</button>
       ) : null}
       <div className="about-links" aria-label="Project links">

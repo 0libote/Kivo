@@ -111,6 +111,8 @@ pub fn run() {
             commands::complete_onboarding,
             commands::set_paused,
             commands::check_for_updates,
+            crate::shell::install_update,
+            crate::shell::restart_app,
             commands::open_external,
         ])
         .run(tauri::generate_context!())

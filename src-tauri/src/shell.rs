@@ -1502,6 +1502,63 @@ fn update_check_error() -> CommandError {
     }
 }
 
+/// Install the pending stable update in-app via the Tauri updater plugin
+/// (signed artifacts from `latest.json`). Only offered for the stable
+/// channel: beta builds are ad-hoc signed and local builds carry no trusted
+/// updater key, so those keep the manual GitHub download. Windows takes the
+/// same path once its release job publishes updater artifacts; until then
+/// the plugin reports no installable update and callers fall back to the
+/// download link. Identical Rust on both desktops; platform differences
+/// (installer exit on Windows vs. relaunch on macOS) are handled by the
+/// plugin and the explicit `restart_app` step below.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|_| {
+        update_install_error(
+            "update_install_unavailable",
+            "This build can’t install updates itself. Use the download link instead.",
+        )
+    })?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|_| {
+            update_install_error(
+                "update_install_unavailable",
+                "No installable update was found. Use the download link instead.",
+            )
+        })?
+        .ok_or_else(|| {
+            update_install_error("update_not_available", "Kivo is already up to date.")
+        })?;
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|_| {
+            update_install_error(
+                "update_install_failed",
+                "The update couldn’t be installed. Use the download link instead.",
+            )
+        })?;
+    Ok(())
+}
+
+/// Relaunch after an in-app install. The Windows installer exits the app
+/// itself; on macOS the user finishes the update with this restart.
+#[tauri::command]
+pub fn restart_app(app: AppHandle) {
+    app.restart();
+}
+
+fn update_install_error(code: &str, message: &str) -> CommandError {
+    CommandError {
+        code: code.into(),
+        message: message.into(),
+        recoverable: code != "update_not_available",
+    }
+}
+
 fn stable_version_from_tag(tag: &str) -> Option<String> {
     tag.strip_prefix("app-v").map(str::to_owned)
 }

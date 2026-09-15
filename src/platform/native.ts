@@ -74,6 +74,8 @@ export interface NativeBridge {
   completeOnboarding(): Promise<void>;
   setPaused(paused: boolean): Promise<void>;
   checkForUpdates(): Promise<UpdateResult>;
+  installUpdate(): Promise<void>;
+  restartApp(): Promise<void>;
   openExternal(url: string): Promise<void>;
   on<K extends keyof NativeEventMap>(event: K, handler: (payload: NativeEventMap[K]) => void): Promise<UnlistenFn>;
 }
@@ -158,6 +160,8 @@ class TauriBridge implements NativeBridge {
   completeOnboarding = () => call<void>("complete_onboarding");
   setPaused = (paused: boolean) => call<void>("set_paused", { paused });
   checkForUpdates = () => call<UpdateResult>("check_for_updates");
+  installUpdate = () => call<void>("install_update");
+  restartApp = () => call<void>("restart_app");
   openExternal = (url: string) => call<void>("open_external", { url });
 
   async on<K extends keyof NativeEventMap>(
@@ -354,6 +358,12 @@ class MockBridge implements NativeBridge {
   async checkForUpdates() {
     await delay(450);
     return { currentVersion: "0.1.0-dev", available: false };
+  }
+  async installUpdate() {
+    await delay(800);
+  }
+  async restartApp() {
+    // Intentional no-op: browser harness keeps running for development.
   }
   async openExternal(url: string) {
     window.open(url, "_blank", "noopener,noreferrer");
