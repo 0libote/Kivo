@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   FALLBACK_AI_MODELS,
   canonicalAiModelId,
@@ -6,6 +6,7 @@ import {
   isUsableAiModelId,
   normalizeAiModel,
 } from "../../ai/models";
+import { Button } from "../../components/Button";
 import { nativeBridge } from "../../platform/native";
 import type { AiModelInfo } from "../../types";
 
@@ -27,11 +28,11 @@ interface AiModelSelectProps {
 }
 
 function customIdError(draft: string, excluded: string | null): string | null {
-  if (draft.trim() === "") return "Enter a model ID like gemini-2.5-flash.";
+  if (draft.trim() === "") return "Enter a model ID (e.g. gemini-2.5-flash).";
   if (isBlockedAiModelId(draft)) {
     return "That model can't be used for text requests (speech, image, video, or agent models aren't supported).";
   }
-  if (!isUsableAiModelId(draft)) return "Enter a model ID like gemini-2.5-flash.";
+  if (!isUsableAiModelId(draft)) return "Enter a model ID (e.g. gemini-2.5-flash).";
   if (canonicalAiModelId(draft) === excluded) return "Backup must differ from the primary model.";
   return null;
 }
@@ -39,7 +40,7 @@ function customIdError(draft: string, excluded: string | null): string | null {
 /**
  * Model selector. Quick picks come from the native `list_ai_models` command
  * (dynamic ListModels filtered by the blocklist only, bundled fallback while
- * loading or offline); any well-formed `gemini-*` id can also be typed via
+ * loading or offline); any well-formed model id can also be typed via
  * "Custom model ID". Only blocked non-text families (TTS, live/audio,
  * image, transcription, embedding, video, music, computer-use, agents) are
  * rejected, so newest text models keep working without a Kivo update.
@@ -56,21 +57,33 @@ export function AiModelSelect({
 }: AiModelSelectProps) {
   const [models, setModels] = useState<AiModelInfo[]>(FALLBACK_AI_MODELS);
   const [draft, setDraft] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  const refreshModels = useCallback(async (silent: boolean) => {
+    if (!silent) {
+      setRefreshing(true);
+      setRefreshError(null);
+    }
+    try {
+      const next = await nativeBridge.listAiModels();
+      if (next.length > 0) {
+        setModels(next);
+        setRefreshError(null);
+      } else if (!silent) {
+        setRefreshError("No models came back. Showing the saved list.");
+      }
+    } catch {
+      // Keep the bundled fallback so the selector never appears empty.
+      if (!silent) setRefreshError("Couldn't refresh models. Showing the saved list.");
+    } finally {
+      if (!silent) setRefreshing(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    void nativeBridge
-      .listAiModels()
-      .then(next => {
-        if (active && next.length > 0) setModels(next);
-      })
-      .catch(() => {
-        // Keep the bundled fallback so the selector never appears empty.
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
+    void refreshModels(true);
+  }, [refreshModels]);
 
   const normalized = value == null ? null : normalizeAiModel(value);
   const excluded = excludeId == null ? null : canonicalAiModelId(excludeId);
@@ -100,40 +113,55 @@ export function AiModelSelect({
 
   return (
     <div className="ai-model-select">
-      <select
-        aria-label={ariaLabel}
-        disabled={disabled}
-        id={id}
-        onChange={event => {
-          const next = event.target.value;
-          if (next === NONE_VALUE) {
-            setDraft(null);
-            onChange(null);
-          } else if (next === CUSTOM_VALUE) {
-            setDraft(showingCustom && normalized != null ? normalized : "");
-          } else {
-            setDraft(null);
-            onChange(next);
-          }
-        }}
-        value={selectValue}
-      >
-        {allowNone ? <option value={NONE_VALUE}>{noneLabel}</option> : null}
-        {models.map(model => (
-          <option
-            disabled={excluded != null && model.id === excluded}
-            key={model.id}
-            value={model.id}
-          >
-            {model.label}{excluded != null && model.id === excluded ? " (primary)" : ""}
-          </option>
-        ))}
-        {showingCustom && normalized != null ? (
-          <option value={CUSTOM_VALUE}>Custom: {normalized}</option>
-        ) : (
-          <option value={CUSTOM_VALUE}>Custom model ID…</option>
-        )}
-      </select>
+      <div className="ai-model-select__row">
+        <select
+          aria-label={ariaLabel}
+          disabled={disabled || refreshing}
+          id={id}
+          onChange={event => {
+            const next = event.target.value;
+            if (next === NONE_VALUE) {
+              setDraft(null);
+              onChange(null);
+            } else if (next === CUSTOM_VALUE) {
+              setDraft(showingCustom && normalized != null ? normalized : "");
+            } else {
+              setDraft(null);
+              onChange(next);
+            }
+          }}
+          value={selectValue}
+        >
+          {allowNone ? <option value={NONE_VALUE}>{noneLabel}</option> : null}
+          {models.map(model => (
+            <option
+              disabled={excluded != null && model.id === excluded}
+              key={model.id}
+              value={model.id}
+            >
+              {model.label}{excluded != null && model.id === excluded ? " (primary)" : ""}
+            </option>
+          ))}
+          {showingCustom && normalized != null ? (
+            <option value={CUSTOM_VALUE}>Custom: {normalized}</option>
+          ) : (
+            <option value={CUSTOM_VALUE}>Custom model ID…</option>
+          )}
+        </select>
+        <Button
+          aria-label={`Refresh ${ariaLabel} list`}
+          compact
+          disabled={disabled || refreshing}
+          icon="refresh"
+          onClick={() => void refreshModels(false)}
+          title="Refresh model list from the API"
+        >
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </Button>
+      </div>
+      {refreshError ? (
+        <span className="ai-model-select__error" role="status">{refreshError}</span>
+      ) : null}
       {selected ? (
         <span className="ai-model-select__description">{selected.description}</span>
       ) : null}

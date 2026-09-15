@@ -13,6 +13,7 @@ export type IconName =
   | "microphone"
   | "pencil"
   | "proofread"
+  | "refresh"
   | "rewrite"
   | "settings"
   | "spark"
@@ -36,6 +37,7 @@ const paths: Record<IconName, React.ReactNode> = {
   microphone: <><rect x="8" y="3" width="8" height="12" rx="4" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8.5 21h7" /></>,
   pencil: <><path d="m4 20 4.5-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z" /><path d="m14 7 3 3" /></>,
   proofread: <><path d="M4 5h10M4 10h8M4 15h5" /><path d="m13 17 2.5 2.5L21 13" /></>,
+  refresh: <><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M3 21v-5h5" /></>,
   rewrite: <><path d="M17 3l4 4-4 4" /><path d="M3 11V9a2 2 0 0 1 2-2h16M7 21l-4-4 4-4" /><path d="M21 13v2a2 2 0 0 1-2 2H3" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M19 13.5v-3l-2-.7-.7-1.6.9-1.9-2.1-2.1-1.9.9-1.7-.7L10.8 2h-3l-.7 2.4-1.6.7-2-.9-2 2.1.9 1.9-.7 1.6-2 .7v3l2 .7.7 1.6-.9 1.9 2.1 2.1 1.9-.9 1.6.7.7 2.3h3l.7-2.3 1.7-.7 1.9.9 2.1-2.1-.9-1.9.7-1.6 2-.7Z" transform="translate(2) scale(.84)" /></>,
   spark: <><path d="m12 2 1.2 4.1L17 8l-3.8 1.9L12 14l-1.2-4.1L7 8l3.8-1.9L12 2Z" /><path d="m18.5 14 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z" /></>,
