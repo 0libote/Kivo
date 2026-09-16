@@ -389,7 +389,7 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
     // Hash (not length) of the surrounding text: a same-length edit in the
     // same control must invalidate the snapshot, or replacement could land
     // on changed text.
-    fn text_identity(text: &[u16]) -> i32 {
+    fn text_identity(text: &str) -> i32 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
@@ -444,13 +444,13 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
                         identity.push(
                             before
                                 .GetText(-1)
-                                .map(|v| text_identity(v.as_wide()))
+                                .map(|v| text_identity(&v.to_string()))
                                 .unwrap_or(-1),
                         );
                         identity.push(
                             selected
                                 .GetText(-1)
-                                .map(|v| text_identity(v.as_wide()))
+                                .map(|v| text_identity(&v.to_string()))
                                 .unwrap_or(-1),
                         );
                     }
