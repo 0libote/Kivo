@@ -123,13 +123,113 @@ function customIdError(draft: string, excluded: string | null): string | null {
   return null;
 }
 
+function resolveSelectValue(normalized: string | null, inList: boolean): string {
+  if (normalized == null) return NONE_VALUE;
+  if (inList) return normalized;
+  return CUSTOM_VALUE;
+}
+
+function findSelectedModel(models: AiModelInfo[], normalized: string | null): AiModelInfo | null {
+  if (normalized == null) return null;
+  return models.find(model => model.id === normalized) ?? null;
+}
+
+function customOptionText(showingCustom: boolean, normalized: string | null): string {
+  if (showingCustom && normalized != null) return `Custom: ${normalized}`;
+  return "Custom model ID…";
+}
+
+/** Case-insensitive id/label filter; the current selection is always kept. */
+function filterVisibleModels(
+  models: AiModelInfo[],
+  query: string,
+  selectedId: string | null,
+): AiModelInfo[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return models;
+  const filtered = models.filter(
+    model => model.id.toLowerCase().includes(q) || model.label.toLowerCase().includes(q),
+  );
+  if (selectedId != null && !filtered.some(model => model.id === selectedId)) {
+    const current = models.find(model => model.id === selectedId);
+    if (current) return [current, ...filtered];
+  }
+  return filtered;
+}
+
+function applySelectChoice(
+  next: string,
+  selected: { showingCustom: boolean; normalized: string | null },
+  emit: (modelId: string | null) => void,
+  editDraft: (draft: string | null) => void,
+) {
+  if (next === NONE_VALUE) {
+    editDraft(null);
+    emit(null);
+  } else if (next === CUSTOM_VALUE) {
+    editDraft(selected.showingCustom && selected.normalized != null ? selected.normalized : "");
+  } else {
+    editDraft(null);
+    emit(next);
+  }
+}
+
+function CustomModelEditor({
+  draft,
+  excluded,
+  disabled,
+  onDraftChange,
+  onCommit,
+  onCancel,
+}: {
+  readonly draft: string;
+  readonly excluded: string | null;
+  readonly disabled?: boolean;
+  readonly onDraftChange: (value: string) => void;
+  readonly onCommit: (canonicalId: string) => void;
+  readonly onCancel: () => void;
+}) {
+  const error = customIdError(draft, excluded);
+  return (
+    <div className="ai-model-select__custom">
+      <input
+        aria-label="Custom model ID"
+        autoCapitalize="none"
+        autoComplete="off"
+        autoFocus
+        disabled={disabled}
+        onBlur={() => {
+          if (error == null) onCommit(canonicalAiModelId(draft));
+        }}
+        onChange={event => onDraftChange(event.target.value)}
+        onKeyDown={event => {
+          if (event.key === "Enter" && error == null) {
+            event.currentTarget.blur();
+          }
+          if (event.key === "Escape") onCancel();
+        }}
+        placeholder="gemini-2.5-flash"
+        spellCheck={false}
+        value={draft}
+      />
+      {error ? (
+        <span className="ai-model-select__error" role="alert">{error}</span>
+      ) : (
+        <span className="ai-model-select__hint">Press Enter to use this model.</span>
+      )}
+    </div>
+  );
+}
+
 /**
- * Model selector. Quick picks come from the native `list_ai_models` command
+ * Model selector. Quick picks come from the shared `list_ai_models` cache
  * (dynamic ListModels filtered by the blocklist only, bundled fallback while
- * loading or offline); any well-formed model id can also be typed via
- * "Custom model ID". Only blocked non-text families (TTS, live/audio,
- * image, transcription, embedding, video, music, computer-use, agents) are
- * rejected, so newest text models keep working without a Kivo update.
+ * loading or offline — one fetch for all instances, Refresh updates every
+ * selector at once). The search box filters by id or label; any well-formed
+ * model id can also be typed via "Custom model ID". Only blocked non-text
+ * families (TTS, live/audio, image, transcription, embedding, video, music,
+ * computer-use, agents) are rejected, so newest text models keep working
+ * without a Kivo update.
  */
 export function AiModelSelect({
   value,
@@ -149,42 +249,16 @@ export function AiModelSelect({
   const excluded = excludeId == null ? null : canonicalAiModelId(excludeId);
   const inList = normalized != null && models.some(model => model.id === normalized);
   const showingCustom = normalized != null && !inList;
+  const selectValue = resolveSelectValue(normalized, inList);
 
   // Search filters by id or label; the current selection is always kept
   // visible so filtering never blanks out the chosen value.
-  const visibleModels = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (q === "") return models;
-    const filtered = models.filter(
-      model => model.id.toLowerCase().includes(q) || model.label.toLowerCase().includes(q),
-    );
-    if (normalized != null && !filtered.some(model => model.id === normalized)) {
-      const current = models.find(model => model.id === normalized);
-      if (current) return [current, ...filtered];
-    }
-    return filtered;
-  }, [models, query, normalized]);
+  const visibleModels = useMemo(
+    () => filterVisibleModels(models, query, normalized),
+    [models, query, normalized],
+  );
 
-  let selectValue = CUSTOM_VALUE;
-  if (normalized == null) {
-    selectValue = NONE_VALUE;
-  } else if (inList) {
-    selectValue = normalized;
-  }
-
-  const selected = normalized == null
-    ? null
-    : (models.find(model => model.id === normalized) ?? null);
-
-  function commitCustom(raw: string) {
-    const canonical = canonicalAiModelId(raw);
-    if (isUsableAiModelId(canonical) && canonical !== excluded) {
-      setDraft(null);
-      onChange(canonical);
-    }
-  }
-
-  const draftError = draft == null ? null : customIdError(draft, excluded);
+  const selected = findSelectedModel(models, normalized);
 
   return (
     <div className="ai-model-select">
@@ -204,18 +278,12 @@ export function AiModelSelect({
           aria-label={ariaLabel}
           disabled={disabled || refreshing}
           id={id}
-          onChange={event => {
-            const next = event.target.value;
-            if (next === NONE_VALUE) {
-              setDraft(null);
-              onChange(null);
-            } else if (next === CUSTOM_VALUE) {
-              setDraft(showingCustom && normalized != null ? normalized : "");
-            } else {
-              setDraft(null);
-              onChange(next);
-            }
-          }}
+          onChange={event => applySelectChoice(
+            event.target.value,
+            { showingCustom, normalized },
+            onChange,
+            setDraft,
+          )}
           value={selectValue}
         >
           {allowNone ? <option value={NONE_VALUE}>{noneLabel}</option> : null}
@@ -231,11 +299,7 @@ export function AiModelSelect({
           {visibleModels.length === 0 ? (
             <option disabled value="__no-match">No matching models</option>
           ) : null}
-          {showingCustom && normalized != null ? (
-            <option value={CUSTOM_VALUE}>Custom: {normalized}</option>
-          ) : (
-            <option value={CUSTOM_VALUE}>Custom model ID…</option>
-          )}
+          <option value={CUSTOM_VALUE}>{customOptionText(showingCustom, normalized)}</option>
         </select>
         <Button
           aria-label={`Refresh ${ariaLabel} list`}
@@ -249,39 +313,23 @@ export function AiModelSelect({
         </Button>
       </div>
       {refreshError ? (
-        <span className="ai-model-select__error" role="status">{refreshError}</span>
+        <output className="ai-model-select__error">{refreshError}</output>
       ) : null}
       {selected ? (
         <span className="ai-model-select__description">{selected.description}</span>
       ) : null}
       {draft != null ? (
-        <div className="ai-model-select__custom">
-          <input
-            aria-label="Custom model ID"
-            autoCapitalize="none"
-            autoComplete="off"
-            autoFocus
-            disabled={disabled}
-            onBlur={() => {
-              if (draftError == null) commitCustom(draft);
-            }}
-            onChange={event => setDraft(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === "Enter" && draftError == null) {
-                event.currentTarget.blur();
-              }
-              if (event.key === "Escape") setDraft(null);
-            }}
-            placeholder="gemini-2.5-flash"
-            spellCheck={false}
-            value={draft}
-          />
-          {draftError ? (
-            <span className="ai-model-select__error" role="alert">{draftError}</span>
-          ) : (
-            <span className="ai-model-select__hint">Press Enter to use this model.</span>
-          )}
-        </div>
+        <CustomModelEditor
+          disabled={disabled}
+          draft={draft}
+          excluded={excluded}
+          onCancel={() => setDraft(null)}
+          onCommit={canonical => {
+            setDraft(null);
+            onChange(canonical);
+          }}
+          onDraftChange={setDraft}
+        />
       ) : null}
     </div>
   );
