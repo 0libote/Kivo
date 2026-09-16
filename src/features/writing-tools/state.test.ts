@@ -34,6 +34,13 @@ describe("writingToolsReducer", () => {
     expect(open).toMatchObject({ mode: "error", error: "Select some text first." });
   });
 
+  it("stays on the error when Back has nowhere to go without a selection", () => {
+    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: ["proofread"] });
+    // Summarize is disabled, so Back must not land on a dead-end summary
+    // entry (the error view offers Close instead).
+    expect(writingToolsReducer(open, { type: "BACK" })).toMatchObject({ mode: "error" });
+  });
+
   it("dismisses after replacement", () => {
     const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: [...actions] });
     const processing = writingToolsReducer(open, { type: "RUN", action: "proofread" });

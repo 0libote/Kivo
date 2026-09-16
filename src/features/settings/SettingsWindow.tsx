@@ -687,6 +687,10 @@ function AboutSection({
   readonly updateResult: UpdateResult | null;
 }) {
   const [installed, setInstalled] = useState(false);
+  // Unsigned builds (beta, local) have no trusted updater key, so in-app
+  // install always fails: remember the definitive failure and stop offering
+  // the button, leaving the manual download link as the path.
+  const [installUnsupported, setInstallUnsupported] = useState(false);
   const stableAvailable = updateResult?.available === true && updateResult.channel !== "beta";
   return (
     <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
@@ -721,7 +725,7 @@ function AboutSection({
             >{busy === "updates" ? "Checking…" : "Check now"}</Button>
           )}
         </SettingRow>
-        {stableAvailable && !installed ? (
+        {stableAvailable && !installed && !installUnsupported ? (
           <SettingRow label="Install update" description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}>
             <Button
               compact
@@ -734,7 +738,13 @@ function AboutSection({
                     setInstalled(true);
                     setNotice("Update installed. Restart Kivo to finish.");
                   })
-                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead."))
+                  .catch((error: unknown) => {
+                    const code = error instanceof NativeError ? error.code : "";
+                    // No installable update on this build (unsigned/beta):
+                    // drop the button instead of looping on the same error.
+                    if (code === "update_install_unavailable" || code === "update_not_available") setInstallUnsupported(true);
+                    setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead.");
+                  })
                   .finally(() => setBusy(null));
               }}
               tone="primary"
@@ -789,8 +799,8 @@ function connectionLabel(status: ApiKeyStatus) {
 /** Map a failed Test connection to a terminal indicator state so the UI
  * never sticks at "testing". Mirrors the native CommandError codes
  * (see GeminiError::code in src-tauri/src/ai/mod.rs and AppCoreError::code
- * in src-tauri/src/commands/mod.rs). */
-function testFailureConnection(code: string): ApiKeyStatus["connection"] {
+ * in src-tauri/src/commands/mod.rs). Exported for unit tests. */
+export function testFailureConnection(code: string): ApiKeyStatus["connection"] {
   if (code === "invalid_api_key" || code === "credential" || code === "ai_not_configured") return "invalid";
   if (code === "model_unavailable" || code === "model_not_found") return "model";
   if (code === "rate_limited") return "rate-limited";

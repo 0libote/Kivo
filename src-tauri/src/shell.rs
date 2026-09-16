@@ -1720,10 +1720,21 @@ fn window_error(operation: &'static str) -> PlatformError {
 #[cfg(test)]
 mod tests {
     use super::{
-        PressKind, PressOutcome, beta_is_newer, is_native_dictation_shortcut_for, press_kind,
-        press_outcome, stable_version_from_tag, version_is_newer,
+        PressKind, PressOutcome, beta_is_newer, is_native_dictation_shortcut_for,
+        normalize_accelerator, press_kind, press_outcome, stable_version_from_tag,
+        version_is_newer,
     };
     use crate::config::HostPlatform;
+
+    #[test]
+    fn accelerator_normalization_maps_whole_modifier_tokens_only() {
+        assert_eq!(normalize_accelerator("Ctrl+Space"), "Control+Space");
+        assert_eq!(normalize_accelerator("Ctrl+Meta"), "Control+Super");
+        assert_eq!(normalize_accelerator("Fn"), "Fn");
+        // Substring content must survive: only full `+`-separated tokens map.
+        assert_eq!(normalize_accelerator("Ctrlled+F1"), "Ctrlled+F1");
+        assert_eq!(normalize_accelerator("MetaFoo"), "MetaFoo");
+    }
 
     #[test]
     fn native_dictation_shortcuts_are_os_exclusive_on_both_hosts() {

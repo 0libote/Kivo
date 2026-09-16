@@ -386,16 +386,6 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
     use ::windows::Win32::System::Ole::{
         SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
     };
-    // Hash (not length) of the surrounding text: a same-length edit in the
-    // same control must invalidate the snapshot, or replacement could land
-    // on changed text.
-    fn text_identity(text: &str) -> i32 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        text.hash(&mut hasher);
-        hasher.finish() as i32
-    }
     let read = || -> ::windows::core::Result<(Vec<i32>, u32)> {
         unsafe {
             let _apartment = AutomationApartment::new();
@@ -438,9 +428,9 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
                         )
                         .is_ok()
                     {
-                        // Hash the text, not its length: a same-length edit
-                        // in the same control must invalidate the snapshot,
-                        // or replacement could land on changed text.
+                        // Hash (not length) the text: a same-length edit in
+                        // the same control must invalidate the snapshot, or
+                        // replacement could land on changed text.
                         identity.push(
                             before
                                 .GetText(-1)
@@ -893,6 +883,28 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
+/// Identity hash of surrounding text for selection snapshots. Lengths alone
+/// would let a same-length edit in the same control compare equal.
+fn text_identity(text: &str) -> i32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish() as i32
+}
+
 fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformError {
     PlatformError::new(PlatformErrorKind::Os, operation, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_identity;
+
+    #[test]
+    fn text_identity_distinguishes_same_length_edits() {
+        assert_eq!(text_identity("hello"), text_identity("hello"));
+        assert_ne!(text_identity("hello"), text_identity("hallo"));
+        assert_ne!(text_identity(""), text_identity(" "));
+    }
 }
