@@ -68,10 +68,14 @@ describe("platform defaults parity", () => {
 
   it("allows newest text models and custom IDs, blocking only non-text families", () => {
     expect(isUsableAiModelId("gemini-4.0-flash")).toBe(true);
+    expect(isUsableAiModelId("gemma-3-27b-it")).toBe(true);
+    expect(isUsableAiModelId("learnlm-2.0-flash")).toBe(true);
     expect(normalizeAiModel("gemini-4.0-flash")).toBe("gemini-4.0-flash");
     expect(normalizeAiModel("models/gemini-2.5-flash")).toBe("gemini-2.5-flash");
+    expect(normalizeAiModel("models/gemma-3-27b-it")).toBe("gemma-3-27b-it");
     expect(isUsableAiModelId("gemini-2.5-flash-preview-tts")).toBe(false);
-    expect(isUsableAiModelId("not-a-model")).toBe(false);
+    expect(isUsableAiModelId("has spaces!")).toBe(false);
+    expect(isUsableAiModelId("gemini")).toBe(false);
     expect(normalizeBackupAiModel("gemini-2.5-flash", "gemini-3.8-flash")).toBe("gemini-2.5-flash");
     expect(normalizeBackupAiModel(null, "gemini-3.8-flash")).toBeNull();
     expect(normalizeBackupAiModel("", "gemini-3.8-flash")).toBeNull();

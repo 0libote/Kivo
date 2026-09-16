@@ -956,7 +956,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
         };
         // Unknown / empty model ids fall back to the default so old settings
         // files and forward-compat payloads never break AI requests. Custom
-        // `gemini-*` ids are allowed (see is_usable_model); only blocked
+        // model ids are allowed (see is_usable_model); only blocked
         // non-text families normalize away.
         let ai_model = crate::ai::normalize_model(&settings.ai_model);
         let ai_backup_model =

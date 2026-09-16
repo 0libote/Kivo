@@ -2,17 +2,29 @@ name: CI & Build
 
 # Unified pipeline: CI checks -> code/security review -> unsigned beta build.
 #
-# - pull_request: runs CI + review only (build jobs are skipped), except the
-#   approval-gated `windows-bundle-pr` / `macos-bundle-pr` jobs: a maintainer
-#   adds the `test-windows-build` / `test-macos-build` label as the approval
-#   (labels need write access, so the label IS the approval, even for owner
-#   commits) to get a real installer for that PR.
+# - pull_request (opened/synchronize/reopened): runs CI + review, then builds
+#   Windows + macOS preview bundles for every push and publishes them to a
+#   rolling per-PR pre-release (`pr-<number>`) with a sticky PR comment
+#   linking direct downloads for live testing. No labels, no manual approval:
+#   pushing to the PR is the approval (same-repo PRs only, see below).
+# - pull_request (closed): deletes the per-PR pre-release/tag so previews do
+#   not accumulate.
 # - push to main / workflow_dispatch: runs CI, then review, then the rolling
 #   unsigned beta (continuous pre-release) only if everything ahead passes.
 # Takes longer end-to-end, but a red check anywhere stops the build.
 #
 # The tag-based `Release` workflow remains the separate signed path for
 # stable `app-v*` releases.
+#
+# Fork safety: preview *builds* use no secrets and run on forks (artifacts
+# only, in the Actions tab). The `publish-pr` / cleanup jobs need
+# `contents:write` + `pull-requests:write`, which fork PRs do not get on the
+# `pull_request` event, so they skip on forks (same-repo check on
+# `head.repo.full_name`). Same-repo PR authors already have write access,
+# so the write token adds no privilege there.
+# The publish job checks out the *base* SHA (trusted) and only handles
+# build outputs as opaque files, never executing PR code with the token
+# that can write releases/comments.
 #
 # Speed shape (deliberate):
 # - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
@@ -36,7 +48,7 @@ name: CI & Build
 #   beta builds cannot starve (a workflow-level group starved them before).
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened, closed]
   push:
     branches: [main]
   workflow_dispatch:
@@ -478,17 +490,16 @@ jobs:
             --title "Kivo continuous (beta)" \
             --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
 
-  windows-bundle-pr:
-    name: Windows bundle build (approval-gated)
-    # Approval model: PRs do NOT build the Windows installer by default.
-    # A maintainer approves a build by adding the `test-windows-build`
-    # label — applying labels requires write access, so the label IS the
-    # approval, even for owner commits. Removing the label cancels queued
-    # runs. The unsigned .exe is kept as a short-lived run artifact for
-    # manual smoke-testing only, never attached to a release. No secrets
-    # are used, so this is also safe on forks.
+  windows-pr:
+    name: Windows PR preview
+    # Auto-builds on every PR push (opened/synchronize/reopened): pushing is
+    # the approval, no labels. Waits for the compile gates so broken code
+    # does not burn Windows minutes. Unsigned NSIS installer, same
+    # fast-release tuning as windows-beta. No secrets are used, so this is
+    # safe on forks (forks get the run artifact; direct release downloads
+    # are same-repo only, see `publish-pr`).
     needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-windows-build')
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: windows-latest
     timeout-minutes: 45
     concurrency:
@@ -503,6 +514,9 @@ jobs:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
+      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so testers
+      # can tell same-version previews apart by commit.
+      KIVO_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -515,25 +529,25 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
-      - name: Build unsigned NSIS installer (approval-gated PR check)
+      - name: Build unsigned NSIS installer (PR preview)
         run: bun tauri build --bundles nsis
-      - name: Upload installer for manual smoke-testing
+      - name: Upload installer for the preview publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kivo-windows-nsis-pr
-          retention-days: 7
+          # Handoff consumed minutes later by `publish-pr`; humans download
+          # from the per-PR release linked in the sticky PR comment.
+          retention-days: 1
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
 
-  macos-bundle-pr:
-    name: macOS bundle build (approval-gated)
-    # Approval model mirrors `windows-bundle-pr`: PRs do NOT build the macOS
-    # bundle by default (macOS runners are the most expensive minutes). A
-    # maintainer approves with the `test-macos-build` label. Without this
-    # job, macOS-only bundle breakage (icons, entitlements, Swift bridge,
-    # dmg config) merges and fails the beta on main instead of the PR.
-    # No secrets are used, so this is also safe on forks.
+  macos-pr:
+    name: macOS PR preview
+    # Auto-build mirror of `windows-pr` above (see its approval note).
+    # Without this job, macOS-only bundle breakage (icons, entitlements,
+    # Swift bridge, dmg config) merges and fails the beta on main instead
+    # of the PR. No secrets are used, so this is also safe on forks.
     needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'test-macos-build')
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: macos-latest
     timeout-minutes: 45
     concurrency:
@@ -548,6 +562,9 @@ jobs:
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
       CARGO_PROFILE_RELEASE_STRIP: "false"
+      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so testers
+      # can tell same-version previews apart by commit.
+      KIVO_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -562,15 +579,203 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
-      - name: Build ad-hoc signed app bundle (approval-gated PR check)
+      - name: Build ad-hoc signed app bundle (PR preview)
         run: bun tauri build --target aarch64-apple-darwin
-      - name: Upload bundle for manual smoke-testing
+      - name: Upload bundle for the preview publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kivo-macos-bundle-pr
-          retention-days: 7
+          # Handoff consumed minutes later by `publish-pr`; humans download
+          # from the per-PR release linked in the sticky PR comment.
+          retention-days: 1
           # NOTE: explicit `--target` redirects cargo output to
           # target/<triple>/release, not target/release.
           path: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+
+  publish-pr:
+    name: Publish PR preview downloads
+    # Collects the platform bundles built above into a rolling per-PR
+    # pre-release (`pr-<number>`) and posts/updates one sticky PR comment
+    # with direct download links for live testing. `always()` plus the
+    # per-result guards mean one red platform does not block the other's
+    # preview. Runs with a write token but never executes PR code: the
+    # checkout is pinned to the trusted base SHA and the artifacts are
+    # handled as opaque files. Same-repo PRs only — fork PRs keep the run
+    # artifacts (their GITHUB_TOKEN is read-only on `pull_request`).
+    needs: [windows-pr, macos-pr]
+    if: always() && github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && (needs.windows-pr.result == 'success' || needs.macos-pr.result == 'success')
+    concurrency:
+      group: pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Trusted base code, NOT the PR head: this job runs with a token
+          # that can write releases and PR comments.
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Download Windows installer
+        if: needs.windows-pr.result == 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: kivo-windows-nsis-pr
+          path: preview/windows
+      - name: Download macOS bundle
+        if: needs.macos-pr.result == 'success'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: kivo-macos-bundle-pr
+          path: preview/macos
+      - id: publish
+        name: Publish assets to the per-PR pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          TAG="pr-${PR_NUMBER}"
+          SHORT="$(printf '%s' "$HEAD_SHA" | cut -c1-7)"
+          VERSION="$(node -p "require('./package.json').version")"
+          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          EXE="$(find preview/windows -name '*-setup.exe' 2>/dev/null | head -n 1 || true)"
+          DMG="$(find preview/macos -maxdepth 3 -name '*.dmg' 2>/dev/null | head -n 1 || true)"
+          APPDIR="$(find preview/macos -maxdepth 3 -name '*.app' 2>/dev/null | head -n 1 || true)"
+          if [ -z "$EXE" ] && [ -z "$DMG" ] && [ -z "$APPDIR" ]; then
+            echo "No preview assets found; nothing to publish."
+            exit 1
+          fi
+          TARBALL=""
+          if [ -n "$APPDIR" ]; then
+            TARBALL="preview/Kivo_${VERSION}_pr${PR_NUMBER}_aarch64.app.tar.gz"
+            tar -czf "$TARBALL" -C "$(dirname "$APPDIR")" "$(basename "$APPDIR")"
+          fi
+          MANIFEST="preview/kivo-pr-${PR_NUMBER}.json"
+          PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" VERSION="$VERSION" BUILT_AT="$BUILT_AT" RUN_ID="$RUN_ID" MANIFEST="$MANIFEST" node <<'NODE_EOF'
+          const fs = require('node:fs');
+          fs.writeFileSync(process.env.MANIFEST, JSON.stringify({
+            pr: Number(process.env.PR_NUMBER),
+            sha: process.env.HEAD_SHA,
+            version: process.env.VERSION,
+            builtAt: process.env.BUILT_AT,
+            runId: Number(process.env.RUN_ID),
+          }, null, 2) + '\n');
+          NODE_EOF
+          gh release delete "$TAG" --yes --cleanup-tag > /dev/null 2>&1 || true
+          gh release create "$TAG" \
+            --prerelease \
+            --title "Kivo PR #${PR_NUMBER} preview" \
+            --target "$HEAD_SHA" \
+            --notes "Ephemeral live-testing preview for PR #${PR_NUMBER} at ${HEAD_SHA}. Rebuilt on every push; deleted when the PR closes. Workflow run: ${RUN_URL}"
+          ASSETS=()
+          if [ -n "$EXE" ]; then ASSETS+=("$EXE"); fi
+          if [ -n "$DMG" ]; then ASSETS+=("$DMG"); fi
+          if [ -n "$TARBALL" ]; then ASSETS+=("$TARBALL"); fi
+          ASSETS+=("$MANIFEST")
+          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+          if [ -n "$EXE" ]; then echo "exe_name=$(basename "$EXE")" >> "$GITHUB_OUTPUT"; else echo "exe_name=" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$DMG" ]; then echo "dmg_name=$(basename "$DMG")" >> "$GITHUB_OUTPUT"; else echo "dmg_name=" >> "$GITHUB_OUTPUT"; fi
+          if [ -n "$TARBALL" ]; then echo "tarball_name=$(basename "$TARBALL")" >> "$GITHUB_OUTPUT"; else echo "tarball_name=" >> "$GITHUB_OUTPUT"; fi
+          echo "manifest_name=$(basename "$MANIFEST")" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+      - name: Post or update the sticky preview comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          EXE_NAME: ${{ steps.publish.outputs.exe_name }}
+          DMG_NAME: ${{ steps.publish.outputs.dmg_name }}
+          TARBALL_NAME: ${{ steps.publish.outputs.tarball_name }}
+          MANIFEST_NAME: ${{ steps.publish.outputs.manifest_name }}
+          VERSION: ${{ steps.publish.outputs.version }}
+          SHORT_SHA: ${{ steps.publish.outputs.short_sha }}
+          BUILT_AT: ${{ steps.publish.outputs.built_at }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          TAG="pr-${PR_NUMBER}"
+          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+          REPO="$REPO" TAG="$TAG" PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" SHORT_SHA="$SHORT_SHA" RUN_URL="$RUN_URL" VERSION="$VERSION" BUILT_AT="$BUILT_AT" EXE_NAME="$EXE_NAME" DMG_NAME="$DMG_NAME" TARBALL_NAME="$TARBALL_NAME" MANIFEST_NAME="$MANIFEST_NAME" node <<'NODE_EOF'
+          const fs = require('node:fs');
+          const e = process.env;
+          const dl = (name) => `https://github.com/${e.REPO}/releases/download/${e.TAG}/${encodeURIComponent(name)}`;
+          const lines = [];
+          lines.push('<!-- kivo-pr-preview -->');
+          lines.push(`## PR preview builds (#${e.PR_NUMBER} @ \`${e.SHORT_SHA}\`)`);
+          lines.push('');
+          lines.push('Live-testing downloads built from this PR. Rebuilt on every push; deleted when the PR closes.');
+          lines.push('');
+          if (e.EXE_NAME) lines.push(`- Windows: [${e.EXE_NAME}](${dl(e.EXE_NAME)})`);
+          else lines.push('- Windows: build failed — see the workflow run logs.');
+          if (e.DMG_NAME) lines.push(`- macOS (Apple Silicon, dmg): [${e.DMG_NAME}](${dl(e.DMG_NAME)})`);
+          else lines.push('- macOS (dmg): build failed — see the workflow run logs.');
+          if (e.TARBALL_NAME) lines.push(`- macOS (app tarball): [${e.TARBALL_NAME}](${dl(e.TARBALL_NAME)})`);
+          lines.push('');
+          lines.push(`Commit: \`${e.HEAD_SHA}\` · version ${e.VERSION} · built ${e.BUILT_AT} · [workflow run](${e.RUN_URL})`);
+          lines.push('');
+          lines.push('Unsigned test builds, not releases: Windows shows a SmartScreen warning (More info -> Run anyway). macOS is ad-hoc signed: after dragging Kivo.app to /Applications, run `xattr -dr com.apple.quarantine /Applications/Kivo.app` once and approve in System Settings > Privacy & Security on first launch.');
+          lines.push('');
+          lines.push(`Manifest: [${e.MANIFEST_NAME}](${dl(e.MANIFEST_NAME)})`);
+          fs.writeFileSync('preview/comment.md', lines.join('\n') + '\n');
+          NODE_EOF
+          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
+          if [ -n "$EXISTING" ]; then
+            node -e "const fs=require('node:fs');fs.writeFileSync('preview/payload.json',JSON.stringify({body:fs.readFileSync('preview/comment.md','utf8')}));"
+            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input preview/payload.json > /dev/null
+            echo "Updated preview comment ${EXISTING}."
+          else
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file preview/comment.md
+            echo "Posted new preview comment."
+          fi
+
+  cleanup-pr-preview:
+    name: Cleanup PR preview release
+    # Deletes the rolling `pr-<number>` pre-release/tag when the PR closes
+    # (merged or not) so previews do not accumulate. Same-repo only,
+    # mirroring `publish-pr` (forks never created one).
+    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Delete the ephemeral preview release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="pr-${{ github.event.pull_request.number }}"
+          gh release delete "$TAG" --yes --cleanup-tag > /dev/null 2>&1 || true
+          echo "Deleted preview release ${TAG} (if it existed)."
+      - name: Retire the sticky preview comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
+          if [ -n "$EXISTING" ]; then
+            printf '<!-- kivo-pr-preview -->\n## PR preview builds (retired)\n\nThis PR is closed, so its ephemeral preview downloads were deleted.\n' > /tmp/retired.md
+            node -e "const fs=require('node:fs');fs.writeFileSync('/tmp/payload.json',JSON.stringify({body:fs.readFileSync('/tmp/retired.md','utf8')}));"
+            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input /tmp/payload.json > /dev/null
+            echo "Retired preview comment ${EXISTING}."
+          else
+            echo "No preview comment to retire."
+          fi
