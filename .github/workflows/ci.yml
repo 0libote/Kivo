@@ -8,7 +8,8 @@ name: CI & Build
 #   linking direct downloads for live testing. No labels, no manual approval:
 #   pushing to the PR is the approval (same-repo PRs only, see below).
 # - pull_request (closed): deletes the per-PR pre-release/tag so previews do
-#   not accumulate.
+#   not accumulate. Only `cleanup-pr-preview` runs on `closed`; every other
+#   job skips, so merging never re-runs the suite a second time.
 # - push to main / workflow_dispatch: runs CI, then review, then the rolling
 #   unsigned beta (continuous pre-release) only if everything ahead passes.
 # Takes longer end-to-end, but a red check anywhere stops the build.
@@ -58,6 +59,9 @@ permissions:
 
 jobs:
   frontend:
+    # `closed` PR events only run `cleanup-pr-preview` (below); without this
+    # guard every merge would re-run the whole suite a second time.
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -76,6 +80,7 @@ jobs:
 
   frontend-windows:
     name: Frontend checks (Windows)
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # JavaScript is portable, but paths, line endings, and toolchain behavior
     # still differ on Windows. Typecheck + unit tests only; lint and the web
     # build stay on the ubuntu `frontend` job so they are not paid for twice.
@@ -99,6 +104,7 @@ jobs:
 
   packaging:
     name: Packaging + platform parity gates
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Fast static checks (seconds, no compile): packaging metadata agreement
     # plus macOS/Windows branch parity (shortcut defaults, native-shortcut
     # strings, permission requirements, harness matrix). The real bundle
@@ -120,6 +126,7 @@ jobs:
 
   rust-static:
     name: Rust static (fmt, lockfile)
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Cheap ubuntu job for everything that needs no compilation: rustfmt
     # parses every file including the `#[cfg(target_os)]` sources that only
     # compile on the other desktop, and `cargo metadata --locked` fails fast
@@ -147,6 +154,7 @@ jobs:
       - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
 
   native:
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
     # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
     # lockfile checks live in `rust-static`, and no bun install is needed
@@ -181,6 +189,7 @@ jobs:
   # in the `audit` job, enforced for both desktop targets.
   e2e:
     name: UI tests (Playwright)
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Ubuntu + Chromium only (cheap). Both platform branches are still
     # covered: the browser harness derives its platform from
     # navigator.userAgent, and the suite spoofs Windows and macOS agents
@@ -216,6 +225,7 @@ jobs:
 
   codeql:
     name: Code review (CodeQL)
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -234,6 +244,7 @@ jobs:
 
   audit:
     name: Dependency audit (bun + cargo)
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -267,8 +278,10 @@ jobs:
 
   dep-review:
     name: Review PR dependency changes
-    # Deliberately no job-level `if`: this job must complete (never skip)
-    # on every event. When it skipped off-PR, downstream
+    if: github.event_name != 'pull_request' || github.event.action != 'closed'
+    # Deliberately almost no job-level `if`: this job must complete (never
+    # skip) on every event except `closed` (where only cleanup runs and
+    # nothing reads this job). When it skipped off-PR, downstream
     # `needs.security-gate.outputs.*` comparisons evaluated false at
     # schedule time even after the gate succeeded with correct outputs
     # (verified empirically), starving the beta jobs. The action itself
@@ -294,7 +307,7 @@ jobs:
   security-gate:
     name: Code review / security gate
     needs: [codeql, audit, e2e, dep-review, packaging]
-    if: always()
+    if: always() && (github.event_name != 'pull_request' || github.event.action != 'closed')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -620,20 +633,40 @@ jobs:
           # Trusted base code, NOT the PR head: this job runs with a token
           # that can write releases and PR comments.
           ref: ${{ github.event.pull_request.base.sha }}
+      - id: gate
+        name: Skip if the PR is already closed or merged
+        # Closes the merge race: a sync run's slow builders can finish AFTER
+        # the PR merged and `cleanup-pr-preview` deleted the preview. Without
+        # this, publish would recreate the `pr-<number>` release after
+        # cleanup (observed with pr-14 on 2026-09-16). Later steps run only
+        # while the PR is OPEN.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          STATE="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
+          echo "PR #${PR_NUMBER} state: ${STATE}"
+          if [ "$STATE" = "OPEN" ]; then
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Download Windows installer
-        if: needs.windows-pr.result == 'success'
+        if: needs.windows-pr.result == 'success' && steps.gate.outputs.should_publish == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: kivo-windows-nsis-pr
           path: preview/windows
       - name: Download macOS bundle
-        if: needs.macos-pr.result == 'success'
+        if: needs.macos-pr.result == 'success' && steps.gate.outputs.should_publish == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: kivo-macos-bundle-pr
           path: preview/macos
       - id: publish
         name: Publish assets to the per-PR pre-release
+        if: steps.gate.outputs.should_publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -690,6 +723,7 @@ jobs:
           echo "short_sha=${SHORT}" >> "$GITHUB_OUTPUT"
           echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
       - name: Post or update the sticky preview comment
+        if: steps.gate.outputs.should_publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -758,11 +792,34 @@ jobs:
       - name: Delete the ephemeral preview release and tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          TAG="pr-${{ github.event.pull_request.number }}"
-          gh release delete "$TAG" --yes --cleanup-tag > /dev/null 2>&1 || true
-          echo "Deleted preview release ${TAG} (if it existed)."
+          REPO="${GITHUB_REPOSITORY}"
+          TAG="pr-${PR_NUMBER}"
+          if ! gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            echo "No preview release ${TAG}; nothing to delete."
+            exit 0
+          fi
+          # No `|| true` masking here by design: on 2026-09-16 the delete
+          # failed silently and the pr-14 preview survived the merge. Retry,
+          # verify, and fail loudly instead of reporting false success.
+          for attempt in 1 2 3; do
+            if gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag; then
+              break
+            fi
+            echo "Attempt ${attempt} to delete ${TAG} failed; retrying..."
+            sleep 10
+          done
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            echo "Release ${TAG} still exists after delete attempts."
+            exit 1
+          fi
+          if git ls-remote --tags "https://github.com/${REPO}.git" "refs/tags/${TAG}" | grep -q .; then
+            echo "Tag ${TAG} survived --cleanup-tag; deleting the ref directly."
+            gh api "repos/${REPO}/git/refs/tags/${TAG}" -X DELETE
+          fi
+          echo "Preview release ${TAG} deleted."
       - name: Retire the sticky preview comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
