@@ -373,7 +373,7 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
     use ::windows::Win32::System::Ole::{
         SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
     };
-    let read = || -> ::windows::core::Result<Vec<i32>> {
+    let read = || -> ::windows::core::Result<(Vec<i32>, u32)> {
         unsafe {
             let _apartment = AutomationApartment::new();
             let automation: IUIAutomation =

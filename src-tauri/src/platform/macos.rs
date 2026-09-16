@@ -150,12 +150,8 @@ impl PlatformImpl {
         let current = if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback {
             capture_selected_text_fallback()?
         } else {
-            match copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")
-                .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))
-            {
-                Ok(value) => value,
-                Err(error) => return Err(error),
-            }
+            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")
+                .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))?
         };
         if current != snapshot.text {
             return Err(PlatformError::new(
