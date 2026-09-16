@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { FALLBACK_AI_MODELS } from "../ai/models";
 import {
   type AiModelInfo,
   type ApiKeyStatus,
@@ -255,7 +256,9 @@ class MockBridge implements NativeBridge {
   }
 
   async listAiModels(): Promise<AiModelInfo[]> {
-    const { FALLBACK_AI_MODELS } = await import("../ai/models");
+    // Static import (not dynamic) so Vite keeps a single chunk — this module
+    // is also statically imported by AiModelSelect, and a dynamic import here
+    // produced an INEFFECTIVE_DYNAMIC_IMPORT warning without any benefit.
     return structuredClone(FALLBACK_AI_MODELS);
   }
 

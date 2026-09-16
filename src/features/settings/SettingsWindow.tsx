@@ -33,9 +33,9 @@ interface SettingsWindowProps {
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
   { id: "home", label: "Home", icon: "home" },
+  { id: "general", label: "General", icon: "settings" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
-  { id: "general", label: "General", icon: "settings" },
   { id: "ai", label: "AI", icon: "connection" },
   { id: "permissions", label: "Permissions", icon: "check" },
   { id: "about", label: "About", icon: "info" },

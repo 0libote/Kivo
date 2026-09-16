@@ -186,13 +186,16 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
         .lock()
         .expect("tray state") = Some(pause.clone());
     let menu = MenuBuilder::new(app)
-        .text("settings", "Settings…")
-        .text("writing-tools", "Writing Tools")
+        // Primary actions first, then configuration, then lifecycle — the
+        // standard tray convention so Dictation/Writing Tools are always at
+        // the top where a background utility needs them.
         .text("dictation", "Start Dictation")
+        .text("writing-tools", "Writing Tools")
         .separator()
-        .item(&pause)
+        .text("settings", "Settings…")
         .text("about", "About Kivo")
         .separator()
+        .item(&pause)
         .quit()
         .build()?;
     let mut tray = TrayIconBuilder::with_id("kivo")
@@ -287,12 +290,17 @@ fn style_window(app: &AppHandle, label: &str, kind: OverlayKind) {
     let Some(window) = app.get_webview_window(label) else {
         return;
     };
+    // On unsupported hosts there is no native styling to apply; reference the
+    // window so the binding stays used on every target (avoids Linux-only
+    // unused-variable warnings without cfg-rename churn).
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = &window;
     #[cfg(target_os = "macos")]
     let handle = window.ns_window().ok().map(|handle| handle as usize);
     #[cfg(target_os = "windows")]
     let handle = window.hwnd().ok().map(|handle| handle.0 as usize);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let handle = None;
+    let handle: Option<usize> = None;
     if let (Some(handle), Some(platform)) = (handle, app.try_state::<Arc<PlatformServices>>()) {
         let _ = platform.style_window(handle, kind);
     }
@@ -1056,6 +1064,13 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
             );
         }
     }
+
+    // Unsupported hosts have no feedback sound; keep the argument used so the
+    // early return above is never the final statement (silences
+    // clippy::needless_return on targets where both blocks above are compiled
+    // out).
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let _ = moment;
 }
 
 pub(crate) fn position_writing_surface(
@@ -1232,7 +1247,15 @@ pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(),
         _ => "ms-settings:speech",
     };
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let url = "";
+    {
+        let _ = permission;
+        Err(PlatformError::new(
+            PlatformErrorKind::Unsupported,
+            "open_permission_settings",
+            "System settings pages are only available on macOS and Windows.",
+        ))
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     open_url(url)
 }
 

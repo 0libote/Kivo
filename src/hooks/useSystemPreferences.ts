@@ -33,8 +33,15 @@ export function useSystemPreferences(platform: Platform) {
       setSettings(persisted);
       return persisted;
     } catch (error) {
-      const persisted = await nativeBridge.getSettings();
-      setSettings(persisted);
+      // Refresh from the native side so a failed write never leaves the UI
+      // showing state that was not persisted. A failed refresh must not mask
+      // the original error, so it is intentionally swallowed here.
+      try {
+        const persisted = await nativeBridge.getSettings();
+        setSettings(persisted);
+      } catch {
+        // Keep the optimistic state; the caller still sees the real failure.
+      }
       throw error;
     }
   }

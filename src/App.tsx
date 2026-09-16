@@ -10,7 +10,7 @@ import { nativeBridge, initialAppContext } from "./platform/native";
 import type { AppContext } from "./types";
 
 export function App() {
-  // ponytail: render the window-label surface immediately; context hydrates async.
+  // Render the window-label surface immediately; context hydrates async.
   const [context, setContext] = useState<AppContext>(() => initialAppContext());
   useNativeEvent<boolean>("pause-changed", paused => setContext(current => ({ ...current, paused })));
   const platform = context.platform;
