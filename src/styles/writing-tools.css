@@ -61,6 +61,7 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }
 .writing-summary__input input:focus, .writing-summary__input textarea:focus { outline: none; border-color: var(--accent); }
 .writing-summary__input p { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
+.writing-summary__error { color: var(--danger); }
 .writing-summary__footer { display: flex; justify-content: space-between; padding: 0 12px 12px; }
 .writing-result { display: flex; flex-direction: column; max-height: calc(var(--writing-max-height, 460px) - 4px); }
 .writing-result__header, .writing-result__footer, .writing-result__source { flex-shrink: 0; }

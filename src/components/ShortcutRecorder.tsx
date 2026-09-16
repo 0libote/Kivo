@@ -84,6 +84,12 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
           setInvalid(false);
           buttonRef.current?.focus();
         }}
+        // Leaving the button disarms the recorder so a later keystroke
+        // elsewhere is never swallowed by a forgotten armed state.
+        onBlur={() => {
+          setRecording(false);
+          setInvalid(false);
+        }}
         ref={buttonRef}
         type="button"
       >

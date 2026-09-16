@@ -391,6 +391,7 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
         onChange={(event) => dispatch({ type: "SET_CUSTOM", value: event.target.value })}
         placeholder="Describe your change"
         ref={customInputRef}
+        required
         spellCheck
         value={customInstruction}
       />
@@ -577,11 +578,12 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled, hasSele
       <div className="writing-summary__input">
         <label htmlFor="summary-input">{kind === "link" ? "Webpage or YouTube URL" : "Webpage text or video transcript"}</label>
         {kind === "link" ? (
-          <input id="summary-input" type="url" autoComplete="off" spellCheck={false} placeholder="https://…" ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
+          <input id="summary-input" type="url" autoComplete="off" spellCheck={false} placeholder="https://…" required ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
         ) : (
           <textarea id="summary-input" rows={5} placeholder="Paste text to summarize…" ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
         )}
         {kind === "link" ? <p>Public pages and YouTube videos. The link is sent to Gemini to retrieve and summarize its content.</p> : null}
+        {kind === "link" && input.trim() !== "" && !isWebUrl(input.trim()) ? <p className="writing-summary__error" role="alert">Enter a public webpage or YouTube URL starting with http(s)://.</p> : null}
       </div>
       <footer className="writing-summary__footer">
         {hasSelection ? <Button compact onClick={() => dispatch({ type: "BACK" })}>Back</Button> : <span />}
