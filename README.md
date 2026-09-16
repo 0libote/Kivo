@@ -106,6 +106,12 @@ Kivo asks only in onboarding or when a feature is invoked:
 - Microphone records only while dictation is active.
 - Speech Recognition sends audio only to the operating-system speech engine. Microphone audio is never sent to Gemini.
 
+On Windows there is no in-app consent prompt: the microphone row reads
+granted (capture problems surface when dictation starts, pointing back at
+the microphone privacy settings), and Speech Recognition reflects the
+installed desktop speech languages — an empty engine list shows guidance
+to install one instead of an Allow button that could never resolve.
+
 ## Packaging and signing
 
 ### macOS

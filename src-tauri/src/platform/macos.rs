@@ -241,14 +241,14 @@ impl PlatformImpl {
                 // already been answered.
                 static INPUT_MONITORING_PROMPTED: std::sync::atomic::AtomicBool =
                     std::sync::atomic::AtomicBool::new(false);
-                if !CGRequestListenEventAccess() {
-                    if INPUT_MONITORING_PROMPTED.swap(true, std::sync::atomic::Ordering::AcqRel) {
-                        return Err(PlatformError::new(
-                            PlatformErrorKind::PermissionDenied,
-                            "request_permission",
-                            "Input Monitoring access was not granted.",
-                        ));
-                    }
+                if !CGRequestListenEventAccess()
+                    && INPUT_MONITORING_PROMPTED.swap(true, std::sync::atomic::Ordering::AcqRel)
+                {
+                    return Err(PlatformError::new(
+                        PlatformErrorKind::PermissionDenied,
+                        "request_permission",
+                        "Input Monitoring access was not granted.",
+                    ));
                 }
             },
             PermissionKind::Microphone => unsafe {

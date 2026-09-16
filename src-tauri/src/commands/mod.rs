@@ -370,7 +370,18 @@ impl AppCore {
             generation
         };
         let cursor = self.text.cursor_position();
-        let captured = self.text.capture_selection().await;
+        // Native capture normally resolves in milliseconds, but a hung
+        // AX/UIA query must not hang the shortcut forever: time out so the
+        // popup can show a failure instead of never opening.
+        let captured = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.text.capture_selection(),
+        )
+        .await
+        {
+            Ok(captured) => captured,
+            Err(_) => Err(crate::text::TextError::Backend),
+        };
         let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
         self.check_writing_generation(generation)?;
         *self
