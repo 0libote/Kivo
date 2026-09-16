@@ -3,13 +3,14 @@ name: CI & Build
 # Unified pipeline: CI checks -> code/security review -> unsigned beta build.
 #
 # - pull_request (opened/synchronize/reopened): runs CI + review, then builds
-#   Windows + macOS preview bundles for every push and publishes them to a
-#   rolling per-PR pre-release (`pr-<number>`) with a sticky PR comment
-#   linking direct downloads for live testing. No labels, no manual approval:
-#   pushing to the PR is the approval (same-repo PRs only, see below).
-# - pull_request (closed): deletes the per-PR pre-release/tag so previews do
-#   not accumulate. Only `cleanup-pr-preview` runs on `closed`; every other
-#   job skips, so merging never re-runs the suite a second time.
+#   Windows + macOS preview bundles for every push and posts/updates one
+#   sticky PR comment linking the run's artifacts (14-day retention) for
+#   live testing. No labels, no manual approval: pushing to the PR is the
+#   approval (same-repo PRs only, see below). Deliberately no per-PR
+#   releases are created — just the comment with download links.
+# - pull_request (closed): retires the sticky preview comment (artifacts
+#   expire on their own). Only `cleanup-pr-preview` runs on `closed`; every
+#   other job skips, so merging never re-runs the suite a second time.
 # - push to main / workflow_dispatch: runs CI, then review, then the rolling
 #   unsigned beta (continuous pre-release) only if everything ahead passes.
 # Takes longer end-to-end, but a red check anywhere stops the build.
@@ -17,15 +18,15 @@ name: CI & Build
 # The tag-based `Release` workflow remains the separate signed path for
 # stable `app-v*` releases.
 #
-# Fork safety: preview *builds* use no secrets and run on forks (artifacts
-# only, in the Actions tab). The `publish-pr` / cleanup jobs need
-# `contents:write` + `pull-requests:write`, which fork PRs do not get on the
-# `pull_request` event, so they skip on forks (same-repo check on
-# `head.repo.full_name`). Same-repo PR authors already have write access,
-# so the write token adds no privilege there.
-# The publish job checks out the *base* SHA (trusted) and only handles
-# build outputs as opaque files, never executing PR code with the token
-# that can write releases/comments.
+# Fork safety: preview *builds* use no secrets and run on forks (Artifacts
+# tab only). The `publish-pr` / cleanup jobs need `pull-requests:write`
+# (`publish-pr` also needs `actions:read` to resolve artifact IDs), which
+# fork PRs do not get on the `pull_request` event, so they skip on forks
+# (same-repo check on `head.repo.full_name`). Same-repo PR authors already
+# have write access, so the comment token adds no privilege there.
+# The publish job checks out the *base* SHA (trusted) and only reads
+# artifact names/IDs via the API, never executing PR code with the token
+# that can comment.
 #
 # Speed shape (deliberate):
 # - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
@@ -509,10 +510,12 @@ jobs:
     # the approval, no labels. Waits for the compile gates so broken code
     # does not burn Windows minutes. Unsigned NSIS installer, same
     # fast-release tuning as windows-beta. No secrets are used, so this is
-    # safe on forks (forks get the run artifact; direct release downloads
-    # are same-repo only, see `publish-pr`).
+    # safe on forks (forks get the run artifacts page; the sticky comment
+    # with direct links is same-repo only, see `publish-pr`).
     needs: [frontend, frontend-windows, native, rust-static, packaging]
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    outputs:
+      exe_name: ${{ steps.names.outputs.exe_name }}
     runs-on: windows-latest
     timeout-minutes: 45
     concurrency:
@@ -544,13 +547,20 @@ jobs:
       - run: bun run check:platform-parity
       - name: Build unsigned NSIS installer (PR preview)
         run: bun tauri build --bundles nsis
-      - name: Upload installer for the preview publish job
+      - name: Record installer filename
+        id: names
+        shell: bash
+        run: |
+          exe="$(find src-tauri/target/release/bundle/nsis -maxdepth 1 -name '*-setup.exe' | head -n 1)"
+          test -n "$exe"
+          echo "exe_name=$(basename "$exe")" >> "$GITHUB_OUTPUT"
+      - name: Upload installer for live testing
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: kivo-windows-nsis-pr
-          # Handoff consumed minutes later by `publish-pr`; humans download
-          # from the per-PR release linked in the sticky PR comment.
-          retention-days: 1
+          name: kivo-pr-windows-nsis
+          # Human download path via the sticky PR comment links; GitHub
+          # deletes the files automatically when this expires.
+          retention-days: 14
           path: src-tauri/target/release/bundle/nsis/*-setup.exe
 
   macos-pr:
@@ -561,6 +571,9 @@ jobs:
     # of the PR. No secrets are used, so this is also safe on forks.
     needs: [frontend, frontend-windows, native, rust-static, packaging]
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    outputs:
+      dmg_name: ${{ steps.names.outputs.dmg_name }}
+      app_name: ${{ steps.names.outputs.app_name }}
     runs-on: macos-latest
     timeout-minutes: 45
     concurrency:
@@ -594,29 +607,46 @@ jobs:
       - run: bun run check:platform-parity
       - name: Build ad-hoc signed app bundle (PR preview)
         run: bun tauri build --target aarch64-apple-darwin
-      - name: Upload bundle for the preview publish job
+      - name: Record bundle filenames
+        id: names
+        shell: bash
+        run: |
+          dmg="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)"
+          app="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
+          test -n "$dmg" && test -n "$app"
+          {
+            echo "dmg_name=$(basename "$dmg")"
+            echo "app_name=$(basename "$app")"
+          } >> "$GITHUB_OUTPUT"
+      - name: Upload dmg for live testing
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: kivo-macos-bundle-pr
-          # Handoff consumed minutes later by `publish-pr`; humans download
-          # from the per-PR release linked in the sticky PR comment.
-          retention-days: 1
+          name: kivo-pr-macos-dmg
+          # Human download path via the sticky PR comment links; GitHub
+          # deletes the files automatically when this expires.
+          retention-days: 14
           # NOTE: explicit `--target` redirects cargo output to
           # target/<triple>/release, not target/release.
-          path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+      - name: Upload app bundle for live testing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-pr-macos-app
+          retention-days: 14
+          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
 
   publish-pr:
-    name: Publish PR preview downloads
-    # Collects the platform bundles built above into a rolling per-PR
-    # pre-release (`pr-<number>`) and posts/updates one sticky PR comment
-    # with direct download links for live testing. `always()` plus the
-    # per-result guards mean one red platform does not block the other's
-    # preview. Runs with a write token but never executes PR code: the
-    # checkout is pinned to the trusted base SHA and the artifacts are
-    # handled as opaque files. Same-repo PRs only — fork PRs keep the run
-    # artifacts (their GITHUB_TOKEN is read-only on `pull_request`).
+    name: Post PR preview download links
+    # Posts/updates one sticky PR comment with download links for the
+    # platform bundles built above. Links point at this run's artifacts —
+    # deliberately no per-PR release is created. Artifact downloads need a
+    # GitHub login with repo access and expire with the artifacts (14 days).
+    # `always()` plus the per-result guards mean one red platform does not
+    # block the other's links. Runs with a token that can comment but never
+    # executes PR code: the checkout is pinned to the trusted base SHA and
+    # only artifact names/IDs are read via the API, never their contents.
+    # Same-repo PRs only — fork PRs keep the run's Artifacts tab (their
+    # GITHUB_TOKEN is read-only on `pull_request`).
     needs: [windows-pr, macos-pr]
     if: always() && github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && (needs.windows-pr.result == 'success' || needs.macos-pr.result == 'success')
     concurrency:
@@ -625,160 +655,89 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: write
+      contents: read
       pull-requests: write
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Trusted base code, NOT the PR head: this job runs with a token
-          # that can write releases and PR comments.
+          # that can write PR comments.
           ref: ${{ github.event.pull_request.base.sha }}
-      - id: gate
-        name: Skip if the PR is already closed or merged
-        # Closes the merge race: a sync run's slow builders can finish AFTER
-        # the PR merged and `cleanup-pr-preview` deleted the preview. Without
-        # this, publish would recreate the `pr-<number>` release after
-        # cleanup (observed with pr-14 on 2026-09-16). Later steps run only
-        # while the PR is OPEN.
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          STATE="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq .state)"
-          echo "PR #${PR_NUMBER} state: ${STATE}"
-          if [ "$STATE" = "OPEN" ]; then
-            echo "should_publish=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "should_publish=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Download Windows installer
-        if: needs.windows-pr.result == 'success' && steps.gate.outputs.should_publish == 'true'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: kivo-windows-nsis-pr
-          path: preview/windows
-      - name: Download macOS bundle
-        if: needs.macos-pr.result == 'success' && steps.gate.outputs.should_publish == 'true'
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
-        with:
-          name: kivo-macos-bundle-pr
-          path: preview/macos
-      - id: publish
-        name: Publish assets to the per-PR pre-release
-        if: steps.gate.outputs.should_publish == 'true'
+      - name: Post or update the sticky preview comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           RUN_ID: ${{ github.run_id }}
+          EXE_NAME: ${{ needs.windows-pr.outputs.exe_name }}
+          DMG_NAME: ${{ needs.macos-pr.outputs.dmg_name }}
+          APP_NAME: ${{ needs.macos-pr.outputs.app_name }}
+          WINDOWS_OK: ${{ needs.windows-pr.result == 'success' }}
+          MACOS_OK: ${{ needs.macos-pr.result == 'success' }}
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY}"
-          TAG="pr-${PR_NUMBER}"
           SHORT="$(printf '%s' "$HEAD_SHA" | cut -c1-7)"
+          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
           VERSION="$(node -p "require('./package.json').version")"
           BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
-          EXE="$(find preview/windows -name '*-setup.exe' 2>/dev/null | head -n 1 || true)"
-          DMG="$(find preview/macos -maxdepth 3 -name '*.dmg' 2>/dev/null | head -n 1 || true)"
-          APPDIR="$(find preview/macos -maxdepth 3 -name '*.app' 2>/dev/null | head -n 1 || true)"
-          if [ -z "$EXE" ] && [ -z "$DMG" ] && [ -z "$APPDIR" ]; then
-            echo "No preview assets found; nothing to publish."
-            exit 1
-          fi
-          TARBALL=""
-          if [ -n "$APPDIR" ]; then
-            TARBALL="preview/Kivo_${VERSION}_pr${PR_NUMBER}_aarch64.app.tar.gz"
-            tar -czf "$TARBALL" -C "$(dirname "$APPDIR")" "$(basename "$APPDIR")"
-          fi
-          MANIFEST="preview/kivo-pr-${PR_NUMBER}.json"
-          PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" VERSION="$VERSION" BUILT_AT="$BUILT_AT" RUN_ID="$RUN_ID" MANIFEST="$MANIFEST" node <<'NODE_EOF'
-          const fs = require('node:fs');
-          fs.writeFileSync(process.env.MANIFEST, JSON.stringify({
-            pr: Number(process.env.PR_NUMBER),
-            sha: process.env.HEAD_SHA,
-            version: process.env.VERSION,
-            builtAt: process.env.BUILT_AT,
-            runId: Number(process.env.RUN_ID),
-          }, null, 2) + '\n');
-          NODE_EOF
-          gh release delete "$TAG" --yes --cleanup-tag > /dev/null 2>&1 || true
-          gh release create "$TAG" \
-            --prerelease \
-            --title "Kivo PR #${PR_NUMBER} preview" \
-            --target "$HEAD_SHA" \
-            --notes "Ephemeral live-testing preview for PR #${PR_NUMBER} at ${HEAD_SHA}. Rebuilt on every push; deleted when the PR closes. Workflow run: ${RUN_URL}"
-          ASSETS=()
-          if [ -n "$EXE" ]; then ASSETS+=("$EXE"); fi
-          if [ -n "$DMG" ]; then ASSETS+=("$DMG"); fi
-          if [ -n "$TARBALL" ]; then ASSETS+=("$TARBALL"); fi
-          ASSETS+=("$MANIFEST")
-          gh release upload "$TAG" "${ASSETS[@]}" --clobber
-          if [ -n "$EXE" ]; then echo "exe_name=$(basename "$EXE")" >> "$GITHUB_OUTPUT"; else echo "exe_name=" >> "$GITHUB_OUTPUT"; fi
-          if [ -n "$DMG" ]; then echo "dmg_name=$(basename "$DMG")" >> "$GITHUB_OUTPUT"; else echo "dmg_name=" >> "$GITHUB_OUTPUT"; fi
-          if [ -n "$TARBALL" ]; then echo "tarball_name=$(basename "$TARBALL")" >> "$GITHUB_OUTPUT"; else echo "tarball_name=" >> "$GITHUB_OUTPUT"; fi
-          echo "manifest_name=$(basename "$MANIFEST")" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${SHORT}" >> "$GITHUB_OUTPUT"
-          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
-      - name: Post or update the sticky preview comment
-        if: steps.gate.outputs.should_publish == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_ID: ${{ github.run_id }}
-          EXE_NAME: ${{ steps.publish.outputs.exe_name }}
-          DMG_NAME: ${{ steps.publish.outputs.dmg_name }}
-          TARBALL_NAME: ${{ steps.publish.outputs.tarball_name }}
-          MANIFEST_NAME: ${{ steps.publish.outputs.manifest_name }}
-          VERSION: ${{ steps.publish.outputs.version }}
-          SHORT_SHA: ${{ steps.publish.outputs.short_sha }}
-          BUILT_AT: ${{ steps.publish.outputs.built_at }}
-        run: |
-          set -euo pipefail
-          REPO="${GITHUB_REPOSITORY}"
-          TAG="pr-${PR_NUMBER}"
-          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
-          REPO="$REPO" TAG="$TAG" PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" SHORT_SHA="$SHORT_SHA" RUN_URL="$RUN_URL" VERSION="$VERSION" BUILT_AT="$BUILT_AT" EXE_NAME="$EXE_NAME" DMG_NAME="$DMG_NAME" TARBALL_NAME="$TARBALL_NAME" MANIFEST_NAME="$MANIFEST_NAME" node <<'NODE_EOF'
+          # Download links point at this run's artifacts (one zip per
+          # artifact). They need a GitHub login and die with the artifacts.
+          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --paginate > artifacts.json
+          REPO="$REPO" RUN_ID="$RUN_ID" PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" SHORT_SHA="$SHORT" RUN_URL="$RUN_URL" VERSION="$VERSION" BUILT_AT="$BUILT_AT" EXE_NAME="$EXE_NAME" DMG_NAME="$DMG_NAME" APP_NAME="$APP_NAME" WINDOWS_OK="$WINDOWS_OK" MACOS_OK="$MACOS_OK" node <<'NODE_EOF'
           const fs = require('node:fs');
           const e = process.env;
-          const dl = (name) => `https://github.com/${e.REPO}/releases/download/${e.TAG}/${encodeURIComponent(name)}`;
+          const all = JSON.parse(fs.readFileSync('artifacts.json', 'utf8')).artifacts || [];
+          const live = new Map(all.filter((a) => !a.expired).map((a) => [a.name, a]));
+          const link = (artifact, file) => {
+            const a = live.get(artifact);
+            if (!a) return null;
+            const mb = (a.size_in_bytes / 1048576).toFixed(1);
+            return `[${file}](https://github.com/${e.REPO}/actions/runs/${e.RUN_ID}/artifacts/${a.id}) (${mb} MB)`;
+          };
           const lines = [];
           lines.push('<!-- kivo-pr-preview -->');
           lines.push(`## PR preview builds (#${e.PR_NUMBER} @ \`${e.SHORT_SHA}\`)`);
           lines.push('');
-          lines.push('Live-testing downloads built from this PR. Rebuilt on every push; deleted when the PR closes.');
+          lines.push('Live-testing downloads from this PR. Rebuilt on every push; links need a GitHub login and expire with the artifacts (14 days).');
           lines.push('');
-          if (e.EXE_NAME) lines.push(`- Windows: [${e.EXE_NAME}](${dl(e.EXE_NAME)})`);
-          else lines.push('- Windows: build failed — see the workflow run logs.');
-          if (e.DMG_NAME) lines.push(`- macOS (Apple Silicon, dmg): [${e.DMG_NAME}](${dl(e.DMG_NAME)})`);
-          else lines.push('- macOS (dmg): build failed — see the workflow run logs.');
-          if (e.TARBALL_NAME) lines.push(`- macOS (app tarball): [${e.TARBALL_NAME}](${dl(e.TARBALL_NAME)})`);
+          if (e.WINDOWS_OK === 'true') {
+            const l = e.EXE_NAME ? link('kivo-pr-windows-nsis', e.EXE_NAME) : null;
+            lines.push(l ? `- Windows: ${l}` : '- Windows: no download for this push — see the workflow run.');
+          } else {
+            lines.push('- Windows: no build for this push — see the workflow run logs.');
+          }
+          if (e.MACOS_OK === 'true') {
+            const d = e.DMG_NAME ? link('kivo-pr-macos-dmg', e.DMG_NAME) : null;
+            const app = e.APP_NAME ? link('kivo-pr-macos-app', e.APP_NAME) : null;
+            lines.push(d ? `- macOS (Apple Silicon, dmg): ${d}` : '- macOS (dmg): no download for this push — see the workflow run.');
+            lines.push(app ? `- macOS (Apple Silicon, app): ${app}` : '- macOS (app): no download for this push — see the workflow run.');
+          } else {
+            lines.push('- macOS: no build for this push — see the workflow run logs.');
+          }
           lines.push('');
           lines.push(`Commit: \`${e.HEAD_SHA}\` · version ${e.VERSION} · built ${e.BUILT_AT} · [workflow run](${e.RUN_URL})`);
           lines.push('');
-          lines.push('Unsigned test builds, not releases: Windows shows a SmartScreen warning (More info -> Run anyway). macOS is ad-hoc signed: after dragging Kivo.app to /Applications, run `xattr -dr com.apple.quarantine /Applications/Kivo.app` once and approve in System Settings > Privacy & Security on first launch.');
-          lines.push('');
-          lines.push(`Manifest: [${e.MANIFEST_NAME}](${dl(e.MANIFEST_NAME)})`);
-          fs.writeFileSync('preview/comment.md', lines.join('\n') + '\n');
+          lines.push('Unsigned test builds, not releases: Windows shows a SmartScreen warning (More info -> Run anyway). macOS is ad-hoc signed: unzip, then run `xattr -dr com.apple.quarantine Kivo.app` once (or move it to /Applications first and run against /Applications/Kivo.app) and approve in System Settings > Privacy & Security on first launch.');
+          fs.writeFileSync('comment.md', lines.join('\n') + '\n');
           NODE_EOF
           EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
           if [ -n "$EXISTING" ]; then
-            node -e "const fs=require('node:fs');fs.writeFileSync('preview/payload.json',JSON.stringify({body:fs.readFileSync('preview/comment.md','utf8')}));"
-            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input preview/payload.json > /dev/null
+            node -e "const fs=require('node:fs');fs.writeFileSync('payload.json',JSON.stringify({body:fs.readFileSync('comment.md','utf8')}));"
+            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input payload.json > /dev/null
             echo "Updated preview comment ${EXISTING}."
           else
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file preview/comment.md
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file comment.md
             echo "Posted new preview comment."
           fi
 
   cleanup-pr-preview:
-    name: Cleanup PR preview release
-    # Deletes the rolling `pr-<number>` pre-release/tag when the PR closes
-    # (merged or not) so previews do not accumulate. Same-repo only,
-    # mirroring `publish-pr` (forks never created one).
+    name: Retire PR preview comment
+    # Preview downloads are run artifacts: they expire on their own (14-day
+    # retention), so closing a PR only needs to retire the sticky comment
+    # whose links would otherwise 404. Same-repo only, mirroring
+    # `publish-pr` (forks never got a comment).
     if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     concurrency:
       group: pr-preview-${{ github.event.pull_request.number }}
@@ -786,40 +745,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
       pull-requests: write
     steps:
-      - name: Delete the ephemeral preview release and tag
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          REPO="${GITHUB_REPOSITORY}"
-          TAG="pr-${PR_NUMBER}"
-          if ! gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
-            echo "No preview release ${TAG}; nothing to delete."
-            exit 0
-          fi
-          # No `|| true` masking here by design: on 2026-09-16 the delete
-          # failed silently and the pr-14 preview survived the merge. Retry,
-          # verify, and fail loudly instead of reporting false success.
-          for attempt in 1 2 3; do
-            if gh release delete "$TAG" --repo "$REPO" --yes --cleanup-tag; then
-              break
-            fi
-            echo "Attempt ${attempt} to delete ${TAG} failed; retrying..."
-            sleep 10
-          done
-          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
-            echo "Release ${TAG} still exists after delete attempts."
-            exit 1
-          fi
-          if git ls-remote --tags "https://github.com/${REPO}.git" "refs/tags/${TAG}" | grep -q .; then
-            echo "Tag ${TAG} survived --cleanup-tag; deleting the ref directly."
-            gh api "repos/${REPO}/git/refs/tags/${TAG}" -X DELETE
-          fi
-          echo "Preview release ${TAG} deleted."
       - name: Retire the sticky preview comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -829,7 +756,7 @@ jobs:
           REPO="${GITHUB_REPOSITORY}"
           EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
           if [ -n "$EXISTING" ]; then
-            printf '<!-- kivo-pr-preview -->\n## PR preview builds (retired)\n\nThis PR is closed, so its ephemeral preview downloads were deleted.\n' > /tmp/retired.md
+            printf '<!-- kivo-pr-preview -->\n## PR preview builds (retired)\n\nThis PR is closed, so these preview links are retired (artifacts expire automatically).\n' > /tmp/retired.md
             node -e "const fs=require('node:fs');fs.writeFileSync('/tmp/payload.json',JSON.stringify({body:fs.readFileSync('/tmp/retired.md','utf8')}));"
             gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input /tmp/payload.json > /dev/null
             echo "Retired preview comment ${EXISTING}."
