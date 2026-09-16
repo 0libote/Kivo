@@ -608,9 +608,7 @@ fn capture_selected_text_fallback(window: HWND) -> PlatformResult<String> {
     // treat only a change as a fresh copy — a real copy always bumps the
     // sequence, even when the bytes are identical.
     let before_sequence = unsafe { GetClipboardSequenceNumber() };
-    if let Err(error) = send_control_shortcut(VK_C, "get_selected_text") {
-        return Err(error);
-    }
+    send_control_shortcut(VK_C, "get_selected_text")?;
     let mut captured_sequence = before_sequence;
     for _ in 0..150 {
         captured_sequence = unsafe { GetClipboardSequenceNumber() };
