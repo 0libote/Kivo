@@ -29,8 +29,8 @@ pub struct ActiveApplication {
     pub display_name: String,
 }
 
-// Reserved for the isolated application-specific strategy; the adapters use
-// Accessibility/UI Automation first and fall back to simulated Copy/Paste.
+// Native access is preferred; guarded clipboard transactions cover editors
+// that do not expose a usable AX/UIA text range.
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -49,6 +49,7 @@ pub struct CapturedSelection {
     text: String,
     pub application: ActiveApplication,
     pub anchor: Option<ScreenRect>,
+    #[allow(dead_code)]
     pub strategy: TextAccessStrategy,
 }
 
@@ -78,10 +79,6 @@ impl CapturedSelection {
 
     pub fn text(&self) -> &str {
         &self.text
-    }
-
-    pub fn strategy(&self) -> TextAccessStrategy {
-        self.strategy
     }
 }
 

@@ -54,9 +54,23 @@ impl PlatformImpl {
     pub(super) fn get_selected_text(&self) -> PlatformResult<SelectionSnapshot> {
         ensure_accessibility("get_selected_text")?;
         let (application, element) = focused_ax_elements("get_selected_text")?;
-        let text_value =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "get_selected_text")?;
-        let text = cf_string_to_string(text_value.as_ptr(), "get_selected_text")?;
+        let native_text =
+            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "get_selected_text")
+                .and_then(|value| cf_string_to_string(value.as_ptr(), "get_selected_text"));
+        let (text, strategy) = match native_text {
+            Ok(text) if !text.trim().is_empty() => {
+                (text, crate::text::TextAccessStrategy::Accessibility)
+            }
+            Ok(_) => (
+                capture_selected_text_fallback()?,
+                crate::text::TextAccessStrategy::ClipboardFallback,
+            ),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => (
+                capture_selected_text_fallback()?,
+                crate::text::TextAccessStrategy::ClipboardFallback,
+            ),
+            Err(error) => return Err(error),
+        };
         if text.is_empty() {
             return Err(PlatformError::new(
                 PlatformErrorKind::NotFound,
@@ -69,7 +83,7 @@ impl PlatformImpl {
         let bounds = selection_bounds(element.as_ptr()).into_iter().collect();
 
         let range =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedTextRange", "get_selected_text")?;
+            copy_ax_attribute(element.as_ptr(), "AXSelectedTextRange", "get_selected_text").ok();
         let token = NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed);
         *self
             .selection
@@ -80,7 +94,7 @@ impl PlatformImpl {
             text,
             bounds,
             owner,
-            strategy: crate::text::TextAccessStrategy::Accessibility,
+            strategy,
             native_token: token,
         })
     }
@@ -133,9 +147,16 @@ impl PlatformImpl {
             ));
         }
 
-        let current =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")?;
-        let current = cf_string_to_string(current.as_ptr(), "replace_selected_text")?;
+        let current = if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback {
+            capture_selected_text_fallback()?
+        } else {
+            match copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")
+                .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))
+            {
+                Ok(value) => value,
+                Err(error) => return Err(error),
+            }
+        };
         if current != snapshot.text {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
@@ -144,12 +165,18 @@ impl PlatformImpl {
             ));
         }
 
-        set_ax_string_attribute(
+        match set_ax_string_attribute(
             element.as_ptr(),
             "AXSelectedText",
             replacement,
             "replace_selected_text",
-        )
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => {
+                paste_text_fallback(replacement, "replace_selected_text")
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) fn capture_insertion_target(
@@ -161,7 +188,8 @@ impl PlatformImpl {
             element.as_ptr(),
             "AXSelectedTextRange",
             "capture_insertion_target",
-        )?;
+        )
+        .ok();
         Ok(Box::new(MacTextTarget { element, range }))
     }
 
@@ -894,7 +922,7 @@ impl Drop for MacSpeechSession {
 
 struct MacTextTarget {
     element: CfOwned,
-    range: CfOwned,
+    range: Option<CfOwned>,
 }
 
 // AXUIElement references are retained remote accessibility objects, not AppKit
@@ -906,16 +934,17 @@ impl MacTextTarget {
         let Ok((_, current)) = focused_ax_elements("validate_text_target") else {
             return false;
         };
-        let Ok(range) = copy_ax_attribute(
-            current.as_ptr(),
-            "AXSelectedTextRange",
-            "validate_text_target",
-        ) else {
+        if unsafe { !CFEqual(current.as_ptr(), self.element.as_ptr()) } {
             return false;
-        };
-        unsafe {
-            CFEqual(current.as_ptr(), self.element.as_ptr())
-                && CFEqual(range.as_ptr(), self.range.as_ptr())
+        }
+        match &self.range {
+            Some(expected) => copy_ax_attribute(
+                current.as_ptr(),
+                "AXSelectedTextRange",
+                "validate_text_target",
+            )
+            .is_ok_and(|range| unsafe { CFEqual(range.as_ptr(), expected.as_ptr()) }),
+            None => true,
         }
     }
 }
@@ -924,13 +953,55 @@ impl crate::text::InsertionTarget for MacTextTarget {
         if !self.is_current() {
             return Err(crate::text::TextError::SelectionExpired);
         }
-        set_ax_string_attribute(
+        match set_ax_string_attribute(
             self.element.as_ptr(),
             "AXSelectedText",
             text,
             "insert_text_at_cursor",
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => {
+                paste_text_fallback(text, "insert_text_at_cursor")
+                    .map_err(|_| crate::text::TextError::InsertionFailed)
+            }
+            Err(_) => Err(crate::text::TextError::InsertionFailed),
+        }
+    }
+}
+
+fn capture_selected_text_fallback() -> PlatformResult<String> {
+    let pointer = unsafe { kivo_capture_selected_text() };
+    if pointer.is_null() {
+        return Err(PlatformError::new(
+            PlatformErrorKind::NotFound,
+            "get_selected_text",
+            "Select some text first.",
+        ));
+    }
+    let text = unsafe {
+        std::ffi::CStr::from_ptr(pointer)
+            .to_string_lossy()
+            .into_owned()
+    };
+    unsafe { kivo_free_text(pointer) };
+    Ok(text)
+}
+
+fn paste_text_fallback(text: &str, operation: &'static str) -> PlatformResult<()> {
+    let text = CString::new(text).map_err(|_| {
+        PlatformError::new(
+            PlatformErrorKind::InvalidState,
+            operation,
+            "Text contains a null character.",
         )
-        .map_err(|_| crate::text::TextError::InsertionFailed)
+    })?;
+    if unsafe { kivo_paste_text(text.as_ptr()) } {
+        Ok(())
+    } else {
+        Err(os_error(
+            operation,
+            "macOS could not paste into the focused application.",
+        ))
     }
 }
 
@@ -1276,6 +1347,9 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" {
+    fn kivo_capture_selected_text() -> *mut c_char;
+    fn kivo_paste_text(text: *const c_char) -> bool;
+    fn kivo_free_text(text: *mut c_char);
     fn kivo_microphone_authorization_status() -> i32;
     fn kivo_speech_authorization_status() -> i32;
     fn kivo_request_microphone_authorization();
