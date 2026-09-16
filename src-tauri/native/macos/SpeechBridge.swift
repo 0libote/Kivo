@@ -134,6 +134,9 @@ private final class SpeechSession: @unchecked Sendable {
             return nil
         }
 
+        // The adapter always requires on-device transcription; a nil return
+        // surfaces the generic start error on the Rust side. There is no
+        // error channel here (the session that would emit it never starts).
         guard requireOnDevice else { return nil }
         let locale = localeIdentifier.map(Locale.init(identifier:)) ?? .current
         let transcriber = DictationTranscriber(locale: locale, preset: .progressiveShortDictation)
@@ -355,6 +358,10 @@ public func kivoSpeechStart(
     _ context: UnsafeMutableRawPointer?
 ) -> UnsafeMutableRawPointer? {
     guard let callback else { return nil }
+    // SpeechAnalyzer/DictationTranscriber need macOS 26. The bundle declares a
+    // 26.0 floor, but a copied .app can bypass the installer check — fail
+    // with the generic start error instead of trapping on missing symbols.
+    guard #available(macOS 26, *) else { return nil }
     let localeIdentifier = locale.map { String(cString: $0) }
     guard let session = SpeechSession(
         localeIdentifier: localeIdentifier,

@@ -21,7 +21,7 @@ test("settings shows the Windows dictation language and shortcut defaults", asyn
   await page.goto("/?surface=settings&harness=1");
   await page.getByRole("button", { name: "Dictation", exact: true }).click();
   await expect(
-    page.getByText("Only installed languages can start dictation."),
+    page.getByText("Only installed desktop speech languages can start dictation"),
   ).toBeVisible();
   // Ctrl+Meta renders with the Win label, never a bare Meta.
   await expect(page.getByText("Win", { exact: true }).first()).toBeVisible();

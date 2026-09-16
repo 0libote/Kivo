@@ -168,7 +168,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     requestGeneration.current += 1;
     requestInFlight.current = false;
     dispatch({ type: "CLOSE" });
-    void nativeBridge.closeSurface("writing-tools");
+    // Hiding the native window is best-effort after local state already
+    // closed; a failure must surface instead of leaving the spinner view.
+    void nativeBridge.closeSurface("writing-tools").catch((error: unknown) => {
+      dispatch({ type: "FAIL", message: messageForError(error) });
+    });
   }, []);
 
   const runAction = useCallback(async (actionId: WritingActionId) => {
@@ -192,7 +196,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         dispatch({ type: "RESULT", text: response.text, source: response.source, canReplace: response.canReplace });
       } else {
         dispatch({ type: "REPLACED" });
-        void nativeBridge.closeSurface("writing-tools");
+        // Close is best-effort: if hiding fails, show the error instead of a
+        // stuck spinner.
+        void nativeBridge.closeSurface("writing-tools").catch((error: unknown) => {
+          dispatch(failureForError(error));
+        });
       }
     } catch (error) {
       if (generation !== requestGeneration.current) return;
@@ -262,12 +270,13 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
     case "custom":
       return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
     case "processing":
-      return <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} />;
+      return <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} hint={state.usesSummaryInput && state.summaryKind === "link" ? "Links can take up to a minute. Closing cancels the request." : undefined} />;
     case "result":
       return (
         <ResultView
           close={close}
           canReplace={state.resultCanReplace}
+          dispatch={dispatch}
           source={state.resultSource}
           label={activeDefinition?.label}
           resultText={state.resultText}
@@ -280,7 +289,9 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
           canRetry={state.canRetry}
           close={close}
           dispatch={dispatch}
-          hasContext={state.context !== null}
+          // Back only leads somewhere when a selection exists (menu) or the
+          // summarize entry is available; otherwise offer Close.
+          hasContext={state.context !== null && (state.context.hasSelection || summarizeEnabled)}
           showTextFallback={state.usesSummaryInput && state.summaryKind === "link"}
           message={state.error ?? ""}
           runAction={runAction}
@@ -398,11 +409,12 @@ function OpeningView() {
   );
 }
 
-function ProcessingView({ close, label }: { readonly close: () => void; readonly label: string | undefined }) {
+function ProcessingView({ close, label, hint }: { readonly close: () => void; readonly label: string | undefined; readonly hint?: string }) {
   return (
     <div aria-live="polite" className="writing-processing">
       <Spinner label={`Running ${label ?? "writing action"}`} />
       <span>{label ?? "Working"}</span>
+      {hint ? <span className="writing-processing__hint">{hint}</span> : null}
       <button aria-label="Cancel" className="icon-button" onClick={close} type="button">
         <Icon name="close" size={14} />
       </button>
@@ -413,13 +425,15 @@ function ProcessingView({ close, label }: { readonly close: () => void; readonly
 interface ResultViewProps {
   readonly close: () => void;
   readonly canReplace: boolean;
+  readonly dispatch: PopupDispatch;
   readonly label: string | undefined;
   readonly resultText: string;
   readonly source: SummarySource | undefined;
 }
 
-function ResultView({ close, canReplace, label, resultText, source }: ResultViewProps) {
+function ResultView({ close, canReplace, dispatch, label, resultText, source }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   return (
     <div className="writing-result">
       <header className="writing-result__header" data-tauri-drag-region>
@@ -437,18 +451,20 @@ function ResultView({ close, canReplace, label, resultText, source }: ResultView
           <span title={source.url}>{source.url}</span>
         </div>
       ) : null}
-      <div className="writing-result__body">
+      <div className="writing-result__body" aria-live="polite">
         <SafeMarkdown>{resultText}</SafeMarkdown>
       </div>
+      {copyError ? <p className="writing-result__error" role="alert">{copyError}</p> : null}
       <footer className="writing-result__footer">
         <Button
           compact
           icon={copied ? "check" : "copy"}
           onClick={() => {
+            setCopyError(null);
             void nativeBridge.copyText(resultText).then(() => {
               setCopied(true);
               window.setTimeout(() => setCopied(false), 1000);
-            });
+            }).catch(() => setCopyError("The result could not be copied. Select the text and copy it manually."));
           }}
         >
           {copied ? "Copied" : "Copy"}
@@ -457,7 +473,9 @@ function ResultView({ close, canReplace, label, resultText, source }: ResultView
           <Button
             compact
             onClick={() => {
-              void nativeBridge.replaceWritingResult(resultText).then(close);
+              void nativeBridge.replaceWritingResult(resultText).then(close).catch((error: unknown) => {
+                dispatch(failureForError(error));
+              });
             }}
             tone="primary"
           >

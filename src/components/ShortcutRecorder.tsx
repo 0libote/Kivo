@@ -93,7 +93,7 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
           formatShortcut(value, platform).map((key, index) => <kbd key={`${key}-${index}`}>{key}</kbd>)
         )}
       </button>
-      {invalid ? <span className="shortcut-recorder__error">Include a key with your modifiers.</span> : null}
+      {invalid ? <span className="shortcut-recorder__error" role="alert">Include a key with your modifiers.</span> : null}
     </div>
   );
 }

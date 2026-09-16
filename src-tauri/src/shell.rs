@@ -117,7 +117,11 @@ impl SettingsRuntime for ShellSettingsRuntime {
         updated: &AppSettings,
     ) -> Result<(), SettingsRuntimeError> {
         if let Err(error) = apply_settings(&self.0, &FrontendSettings::from(updated.clone())) {
-            let _ = apply_settings(&self.0, &FrontendSettings::from(previous.clone()));
+            // Best-effort restore of the previous runtime state. This path
+            // must never re-apply `updated`: a failing restore returns the
+            // original error and the runtime heals on next launch (the
+            // settings file is untouched on this path).
+            restore_settings(&self.0, &FrontendSettings::from(previous.clone()));
             return Err(error);
         }
         Ok(())
@@ -181,10 +185,11 @@ pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
 
 pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let pause = tauri::menu::MenuItem::with_id(app, "pause", "Pause Kivo", true, None::<&str>)?;
-    *app.state::<ShellState>()
-        .pause_item
-        .lock()
-        .expect("tray state") = Some(pause.clone());
+    // A poisoned mutex must degrade (pause label stops updating) rather than
+    // panic the whole process at startup.
+    if let Ok(mut slot) = app.state::<ShellState>().pause_item.lock() {
+        *slot = Some(pause.clone());
+    }
     let menu = MenuBuilder::new(app)
         // Primary actions first, then configuration, then lifecycle — the
         // standard tray convention so Dictation/Writing Tools are always at
@@ -318,14 +323,28 @@ pub(crate) fn register_shortcuts(
     writing.and(dictation)
 }
 
+/// Map portable modifier names to global-shortcut accelerators token-wise.
+/// A substring replace would mangle keys containing those substrings
+/// (e.g. a hypothetical `Ctrlled` key), failing with a misleading
+/// "already in use" conflict.
+fn normalize_accelerator(accelerator: &str) -> String {
+    accelerator
+        .split('+')
+        .map(|token| match token {
+            "Ctrl" => "Control",
+            "Meta" => "Super",
+            _ => token,
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
 fn register_dictation_shortcut(
     app: &AppHandle,
     shell: &ShellState,
     accelerator: &str,
 ) -> Result<(), PlatformError> {
-    let normalized = accelerator
-        .replace("Ctrl", "Control")
-        .replace("Meta", "Super");
+    let normalized = normalize_accelerator(accelerator);
     let mut current = shell.dictation_shortcut.lock().map_err(|_| {
         PlatformError::new(
             PlatformErrorKind::InvalidState,
@@ -552,7 +571,7 @@ fn register_writing_shortcut(
     shell: &ShellState,
     shortcut: &str,
 ) -> Result<(), PlatformError> {
-    let normalized = shortcut.replace("Ctrl", "Control").replace("Meta", "Super");
+    let normalized = normalize_accelerator(shortcut);
     let mut current = shell.writing_shortcut.lock().map_err(|_| {
         PlatformError::new(
             PlatformErrorKind::InvalidState,
@@ -590,18 +609,9 @@ pub(crate) fn apply_settings(
     app: &AppHandle,
     settings: &FrontendSettings,
 ) -> Result<(), SettingsRuntimeError> {
-    let autolaunch = app.autolaunch();
-    let autolaunch_enabled = autolaunch
-        .is_enabled()
-        .map_err(|_| SettingsRuntimeError::AutostartUnavailable)?;
-    if settings.launch_at_login != autolaunch_enabled {
-        if settings.launch_at_login {
-            autolaunch.enable()
-        } else {
-            autolaunch.disable()
-        }
-        .map_err(|_| SettingsRuntimeError::AutostartUnavailable)?;
-    }
+    // Shortcuts first: they are the most likely step to fail (conflicts),
+    // and failing before the autostart toggle keeps the one irreversible
+    // side effect untouched on the error path.
     // Independent like `register_shortcuts`: one conflicting shortcut must
     // not block the other from (re-)registering.
     let writing =
@@ -616,6 +626,18 @@ pub(crate) fn apply_settings(
         && error.kind != PlatformErrorKind::PermissionDenied
     {
         return Err(SettingsRuntimeError::ShortcutUnavailable);
+    }
+    let autolaunch = app.autolaunch();
+    let autolaunch_enabled = autolaunch
+        .is_enabled()
+        .map_err(|_| SettingsRuntimeError::AutostartUnavailable)?;
+    if settings.launch_at_login != autolaunch_enabled {
+        if settings.launch_at_login {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        }
+        .map_err(|_| SettingsRuntimeError::AutostartUnavailable)?;
     }
     if app
         .state::<AppCore>()
@@ -632,6 +654,39 @@ pub(crate) fn apply_settings(
     }
     apply_theme(app, &settings.theme);
     Ok(())
+}
+
+/// Best-effort counterpart to [`apply_settings`] for the rollback path: runs
+/// every step, ignores individual failures, and never restores forward, so a
+/// failing rollback cannot reintroduce the rejected settings.
+pub(crate) fn restore_settings(app: &AppHandle, settings: &FrontendSettings) {
+    let shell = app.state::<ShellState>();
+    let _ = register_writing_shortcut(app, &shell, &settings.writing_shortcut);
+    let _ = register_dictation_shortcut(app, &shell, &settings.dictation_shortcut);
+    let autolaunch = app.autolaunch();
+    if let Ok(enabled) = autolaunch.is_enabled()
+        && enabled != settings.launch_at_login
+    {
+        let _ = if settings.launch_at_login {
+            autolaunch.enable()
+        } else {
+            autolaunch.disable()
+        };
+    }
+    if app
+        .state::<AppCore>()
+        .dictation_phase()
+        .ok()
+        .is_some_and(|phase| matches!(phase, DictationPhase::Hidden | DictationPhase::Success))
+    {
+        if settings.show_idle_flow_bar {
+            emit_dictation(app, "idle", None, false);
+            let _ = show_surface(app, "flow-bar", false);
+        } else {
+            hide_surface(app, "flow-bar");
+        }
+    }
+    apply_theme(app, &settings.theme);
 }
 
 pub(crate) fn apply_theme(app: &AppHandle, theme: &str) {
@@ -1335,6 +1390,7 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
             .get_webview_window("settings")
             .ok_or_else(clipboard_error)?;
         let hwnd = window.hwnd().map_err(|_| clipboard_error())?;
+        let owner = Some(HWND(hwnd.0));
         let text: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
         unsafe {
             let memory =
@@ -1346,9 +1402,21 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
             }
             std::ptr::copy_nonoverlapping(text.as_ptr(), locked, text.len());
             let _ = GlobalUnlock(memory);
-            if OpenClipboard(Some(HWND(hwnd.0))).is_err() {
+            // The clipboard is often held briefly by another app (clipboard
+            // managers, RDP, Office). Retry instead of failing immediately.
+            // Fall back to no owner window so a missing settings HWND can
+            // never break copying on its own.
+            let mut opened = false;
+            for _ in 0..5 {
+                if OpenClipboard(owner).is_ok() {
+                    opened = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            if !opened && OpenClipboard(None).is_err() {
                 let _ = GlobalFree(Some(memory));
-                return Err(clipboard_error());
+                return Err(clipboard_busy_error());
             }
             let result = EmptyClipboard().and_then(|_| {
                 SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0)))
@@ -1364,7 +1432,9 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
     #[cfg(target_os = "macos")]
     {
         let _ = app;
-        let mut child = Command::new("pbcopy")
+        // Absolute path: GUI-launched apps inherit a sparse PATH where a bare
+        // `pbcopy` lookup can fail.
+        let mut child = Command::new("/usr/bin/pbcopy")
             .stdin(Stdio::piped())
             .spawn()
             .map_err(|_| clipboard_error())?;
@@ -1391,6 +1461,15 @@ fn clipboard_error() -> PlatformError {
         PlatformErrorKind::Os,
         "copy_text",
         "The result could not be copied.",
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_busy_error() -> PlatformError {
+    PlatformError::new(
+        PlatformErrorKind::Os,
+        "copy_text",
+        "The clipboard is busy. Try copying again.",
     )
 }
 
@@ -1438,12 +1517,13 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
             .await
             .map_err(|_| update_check_error())?;
         let available_version = stable_version_from_tag(&release.tag_name);
-        let available = available_version
-            .as_deref()
-            .is_some_and(|version| version_is_newer(version, &current_version));
+        // A mistagged stable release (tag not starting with `app-v`) must not
+        // read as "up to date": surface it as a check failure instead.
+        let available_version = available_version.ok_or_else(update_check_error)?;
+        let available = version_is_newer(&available_version, &current_version);
         return Ok(UpdateResult {
             current_version,
-            available_version,
+            available_version: Some(available_version),
             available,
             download_url: Some(
                 release

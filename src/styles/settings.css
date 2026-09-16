@@ -94,6 +94,7 @@
 .dictation-recovery > p { max-height: 150px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .recovery-actions { display: flex; gap: 8px; }
 .section-feedback { color: var(--text-secondary); font-size: 12px; }
+.setting-empty { color: var(--text-secondary); font-size: 12.5px; }
 @media (max-width: 680px) {
   .settings-window, :root[data-platform="windows"] .settings-window { grid-template-columns: 145px minmax(0, 1fr); }
   .settings-main { padding: 28px 22px; }

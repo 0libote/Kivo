@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AppSettings, Platform } from "../types";
 import { defaultSettings } from "../types";
 import { useNativeEvent } from "./useNativeEvent";
@@ -10,17 +10,20 @@ export function useSystemPreferences(platform: Platform) {
   const [error, setError] = useState<string | null>(null);
   useNativeEvent<AppSettings>("settings-changed", setSettings);
 
-  useEffect(() => {
-    let active = true;
-    void nativeBridge
+  const load = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    return nativeBridge
       .getSettings()
-      .then((next) => active && setSettings(next))
-      .catch(() => active && setError("Settings could not be loaded. Restart Kivo to try again."))
-      .finally(() => active && setLoading(false));
-    return () => {
-      active = false;
-    };
+      .then((next) => setSettings(next))
+      .catch(() => setError("Settings could not be loaded. Restart Kivo to try again."))
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    // load() records failures in state and never rejects.
+    void load();
+  }, [load]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = settings.theme;
@@ -46,5 +49,5 @@ export function useSystemPreferences(platform: Platform) {
     }
   }
 
-  return { settings, loading, error, update };
+  return { settings, loading, error, update, retry: load };
 }
