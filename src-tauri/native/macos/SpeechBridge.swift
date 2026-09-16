@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 import Foundation
 import Speech
 
@@ -8,6 +9,94 @@ public typealias KivoSpeechCallback = @convention(c) (
     UnsafePointer<CChar>?,
     Float
 ) -> Void
+
+private struct PasteboardEntry {
+    let values: [(NSPasteboard.PasteboardType, Data)]
+}
+
+private func snapshotPasteboard(_ pasteboard: NSPasteboard) -> [PasteboardEntry] {
+    (pasteboard.pasteboardItems ?? []).map { item in
+        PasteboardEntry(values: item.types.compactMap { type in
+            item.data(forType: type).map { (type, $0) }
+        })
+    }
+}
+
+private func restorePasteboard(
+    _ snapshot: [PasteboardEntry],
+    pasteboard: NSPasteboard,
+    ifChangeCountIs expected: Int
+) {
+    guard pasteboard.changeCount == expected else { return }
+    pasteboard.clearContents()
+    let items = snapshot.map { entry in
+        let item = NSPasteboardItem()
+        for (type, data) in entry.values { item.setData(data, forType: type) }
+        return item
+    }
+    if !items.isEmpty { pasteboard.writeObjects(items) }
+}
+
+private func postShortcut(keyCode: CGKeyCode, flags: CGEventFlags) -> Bool {
+    guard let source = CGEventSource(stateID: .hidSystemState),
+          let down = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: true),
+          let up = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: false) else {
+        return false
+    }
+    down.flags = flags
+    up.flags = flags
+    down.post(tap: .cgSessionEventTap)
+    up.post(tap: .cgSessionEventTap)
+    return true
+}
+
+@_cdecl("kivo_capture_selected_text")
+public func kivoCaptureSelectedText() -> UnsafeMutablePointer<CChar>? {
+    let pasteboard = NSPasteboard.general
+    let snapshot = snapshotPasteboard(pasteboard)
+    pasteboard.clearContents()
+    let clearedChangeCount = pasteboard.changeCount
+    guard postShortcut(keyCode: 0x08, flags: .maskCommand) else {
+        restorePasteboard(snapshot, pasteboard: pasteboard, ifChangeCountIs: clearedChangeCount)
+        return nil
+    }
+
+    let deadline = Date().addingTimeInterval(1.5)
+    var text: String?
+    while Date() < deadline {
+        if pasteboard.changeCount != clearedChangeCount {
+            text = pasteboard.string(forType: .string)
+            break
+        }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+    }
+    let capturedChangeCount = pasteboard.changeCount
+    restorePasteboard(snapshot, pasteboard: pasteboard, ifChangeCountIs: capturedChangeCount)
+    guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+    return strdup(text)
+}
+
+@_cdecl("kivo_paste_text")
+public func kivoPasteText(_ text: UnsafePointer<CChar>?) -> Bool {
+    guard let text, let value = String(validatingUTF8: text), !value.isEmpty else { return false }
+    let pasteboard = NSPasteboard.general
+    let snapshot = snapshotPasteboard(pasteboard)
+    pasteboard.clearContents()
+    guard pasteboard.setString(value, forType: .string) else { return false }
+    let writtenChangeCount = pasteboard.changeCount
+    guard postShortcut(keyCode: 0x09, flags: .maskCommand) else {
+        restorePasteboard(snapshot, pasteboard: pasteboard, ifChangeCountIs: writtenChangeCount)
+        return false
+    }
+    Thread.sleep(forTimeInterval: 0.35)
+    restorePasteboard(snapshot, pasteboard: pasteboard, ifChangeCountIs: writtenChangeCount)
+    return true
+}
+
+@_cdecl("kivo_free_text")
+public func kivoFreeText(_ text: UnsafeMutablePointer<CChar>?) {
+    free(text)
+}
 
 @available(macOS 26.0, *)
 private final class SpeechSession: @unchecked Sendable {
