@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     GeminiClient, GeminiError, GenerationConfig, InteractionResponse, LinkSourceKind,
-    parse_api_error_code, parse_interaction,
+    parse_api_error_code, parse_api_error_detail, parse_interaction,
 };
 use crate::security::SecretString;
 
@@ -131,12 +131,14 @@ impl GeminiClient {
             .map_err(GeminiError::Transport)?;
         let status = response.status();
         if !status.is_success() {
-            let code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_api_error_code(&body));
-            return Err(GeminiError::Api { status, code });
+            let body = response.json::<serde_json::Value>().await.ok();
+            let code = body.as_ref().and_then(|body| parse_api_error_code(body));
+            let detail = body.as_ref().and_then(|body| parse_api_error_detail(body));
+            return Err(GeminiError::Api {
+                status,
+                code,
+                detail,
+            });
         }
         let interaction = response
             .json::<LinkSummaryResponse>()
@@ -177,7 +179,8 @@ struct LinkSummaryRequest<'a> {
     input: Vec<LinkInput<'a>>,
     system_instruction: &'static str,
     store: bool,
-    generation_config: GenerationConfig<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation_config: Option<GenerationConfig<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<LinkTool>,
 }
@@ -206,10 +209,9 @@ impl<'a> LinkSummaryRequest<'a> {
             input,
             system_instruction: SUMMARY_SYSTEM,
             store: false,
-            generation_config: GenerationConfig {
-                thinking_level: "low",
-                max_output_tokens: 4_096,
-            },
+            generation_config: super::thinking_level_for(&model).map(|thinking_level| GenerationConfig {
+                thinking_level,
+            }),
             tools,
         }
     }
@@ -357,7 +359,6 @@ mod tests {
                     .unwrap();
             assert_eq!(request["store"], false);
             assert_eq!(request["generation_config"]["thinking_level"], "low");
-            assert_eq!(request["generation_config"]["max_output_tokens"], 4096);
             assert!(
                 request["system_instruction"]
                     .as_str()

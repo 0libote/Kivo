@@ -116,11 +116,11 @@ interface AiModelSelectProps {
 }
 
 function customIdError(draft: string, excluded: string | null): string | null {
-  if (draft.trim() === "") return "Enter a model ID (e.g. gemini-2.5-flash).";
+  if (draft.trim() === "") return "Enter a model ID (e.g. gemini-3.6-flash).";
   if (isBlockedAiModelId(draft)) {
     return "That model can't be used for text requests (speech, image, video, or agent models aren't supported).";
   }
-  if (!isUsableAiModelId(draft)) return "Enter a model ID (e.g. gemini-2.5-flash).";
+  if (!isUsableAiModelId(draft)) return "Enter a model ID (e.g. gemini-3.6-flash).";
   if (canonicalAiModelId(draft) === excluded) return "Backup must differ from the primary model.";
   return null;
 }
@@ -210,7 +210,7 @@ function CustomModelEditor({
           }
           if (event.key === "Escape") onCancel();
         }}
-        placeholder="gemini-2.5-flash"
+        placeholder="gemini-3.6-flash"
         spellCheck={false}
         value={draft}
       />
