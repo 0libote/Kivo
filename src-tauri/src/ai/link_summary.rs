@@ -140,7 +140,6 @@ impl GeminiClient {
             .http
             .post(&self.endpoint)
             .header("x-goog-api-key", api_key)
-            .timeout(Duration::from_secs(90))
             .json(&request)
             .send()
             .await

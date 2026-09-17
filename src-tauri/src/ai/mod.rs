@@ -375,7 +375,9 @@ impl GeminiClient {
     pub fn new() -> Result<Self, GeminiError> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20))
+            // ponytail: 90s, not 20s — slow models (Gemma took 50s live for
+            // 3 words) must not surface as "check your connection".
+            .timeout(Duration::from_secs(90))
             .build()
             .map_err(GeminiError::Transport)?;
         Ok(Self {
