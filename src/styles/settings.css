@@ -31,25 +31,24 @@
 .api-key-editor input { flex: 1; min-width: 0; }
 .permission-row__control { display: flex; align-items: center; gap: 10px; }
 .permission-row__granted { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 12px; white-space: nowrap; }
-.ai-model-select { width: 100%; display: grid; gap: 6px; }
-.ai-model-select__search { width: 100%; }
-.ai-model-select__row { display: flex; gap: 7px; align-items: center; }
-.ai-model-select__row select { flex: 1; min-width: 0; }
-.ai-model-select__row .button { flex: 0 0 auto; white-space: nowrap; }
-.ai-model-select__description { color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
-.ai-model-select__cost { display: inline-block; margin-left: 6px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ai-model-queue { width: 100%; display: grid; gap: 8px; }
+.ai-model-queue__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ai-model-queue__row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-strong); }
+.ai-model-queue__position { flex: 0 0 auto; width: 26px; height: 26px; margin-top: 2px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-muted); color: var(--text-secondary); font-size: 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.ai-model-queue__position[data-first="true"] { background: var(--accent); color: var(--accent-text); }
+.ai-model-queue__pick { flex: 1; min-width: 0; display: grid; gap: 5px; align-content: start; }
+.ai-model-queue__select-row { display: flex; align-items: center; gap: 6px; }
+.ai-model-queue__select-row select { flex: 1; min-width: 0; }
+.ai-model-queue__actions { flex: 0 0 auto; display: flex; gap: 4px; }
+.ai-model-queue__actions .button { padding: 0 7px; }
+.ai-model-queue__actions .button--danger { border-color: var(--border-strong); }
+.ai-model-queue__blurb { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.ai-model-queue__cost { margin: 0; color: var(--text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ai-model-queue__footer { display: flex; gap: 7px; }
 .settings-note { margin: 2px 0 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
 .settings-note code { font-size: 11px; }
 .ai-model-select__custom { display: grid; gap: 4px; }
 .ai-model-select__custom input { width: 100%; }
-.ai-model-queue { width: 100%; display: grid; gap: 8px; }
-.ai-model-queue__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
-.ai-model-queue__row { display: flex; align-items: start; gap: 8px; }
-.ai-model-queue__position { flex: 0 0 auto; width: 20px; height: 30px; display: grid; place-items: center; color: var(--text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
-.ai-model-queue__pick { flex: 1; min-width: 0; display: grid; gap: 4px; }
-.ai-model-queue__pick select { width: 100%; }
-.ai-model-queue__actions { flex: 0 0 auto; display: flex; gap: 4px; }
-.ai-model-queue__footer { display: flex; gap: 7px; }
 .ai-model-select__hint { color: var(--text-tertiary); font-size: 11px; }
 .ai-model-select__error { color: var(--danger); font-size: 11px; line-height: 1.35; }
 .text-link { padding: 0; border: 0; background: transparent; color: var(--accent); }

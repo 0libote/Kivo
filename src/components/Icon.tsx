@@ -6,6 +6,8 @@ export type IconName =
   | "info"
   | "connection"
   | "check"
+  | "chevron-down"
+  | "chevron-up"
   | "close"
   | "copy"
   | "error"
@@ -30,6 +32,8 @@ const paths: Record<IconName, React.ReactNode> = {
   connection: <><path d="M8 3v5M16 3v5M6 8h12v3a6 6 0 0 1-12 0ZM12 17v4" /></>,
   audio: <path d="M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4" />,
   check: <path d="m5 12 4 4L19 6" />,
+  "chevron-down": <path d="m6 10 6 6 6-6" />,
+  "chevron-up": <path d="m6 14 6-6 6 6" />,
   close: <path d="m6 6 12 12M18 6 6 18" />,
   copy: <><rect x="8" y="8" width="11" height="11" rx="2" /><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" /></>,
   error: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6M12 17h.01" /></>,

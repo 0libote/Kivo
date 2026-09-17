@@ -27,10 +27,11 @@ function customOptionText(id: string): string {
 }
 
 /**
- * Ordered failover queue editor. Each row picks one model (cost shown inline
- * so price and priority can be weighed together); rows can be added (up to
- * MAX_AI_MODELS), removed, and reordered. Requests try the queue top to
- * bottom until one succeeds.
+ * Ordered failover queue editor. Each row is a small card: a priority badge
+ * (the first row is the main model, the rest are fallbacks), the model
+ * picker, and reorder/remove controls. The picker's blurb and cost render
+ * underneath so options can be told apart and compared at a glance.
+ * Requests try the queue top to bottom until one succeeds.
  */
 export function ModelQueueEditor({
   provider,
@@ -74,41 +75,82 @@ export function ModelQueueEditor({
           const selected: AiModelInfo | null = byId.get(id) ?? null;
           const inList = selected != null;
           const others = new Set(queue.filter((_, other) => other !== index));
+          const priority = index === 0 ? "first choice" : `fallback ${index}`;
           return (
             <li className="ai-model-queue__row" key={`${index}:${id}`}>
-              <span aria-hidden className="ai-model-queue__position">{index + 1}</span>
+              <span aria-hidden className="ai-model-queue__position" data-first={index === 0}>{index + 1}</span>
               <div className="ai-model-queue__pick">
-                <select
-                  aria-label={`Model ${index + 1} of ${queue.length}`}
-                  disabled={disabled || refreshing}
-                  onChange={event => {
-                    const next = event.target.value;
-                    if (next === AI_CUSTOM_VALUE) {
-                      setCustomRow(index);
-                      setDraft(inList ? "" : id);
-                    } else {
-                      const updated = [...queue];
-                      updated[index] = next;
-                      commit(updated);
-                    }
-                  }}
-                  value={inList ? id : AI_CUSTOM_VALUE}
-                >
-                  {models.map(model => (
-                    <option
-                      disabled={others.has(model.id)}
-                      key={model.id}
-                      value={model.id}
-                    >
-                      {optionLabel(model, others.has(model.id))}
+                <div className="ai-model-queue__select-row">
+                  <select
+                    aria-label={`Model ${index + 1} of ${queue.length} (${priority})`}
+                    disabled={disabled || refreshing}
+                    onChange={event => {
+                      const next = event.target.value;
+                      if (next === AI_CUSTOM_VALUE) {
+                        setCustomRow(index);
+                        setDraft(inList ? "" : id);
+                      } else {
+                        const updated = [...queue];
+                        updated[index] = next;
+                        commit(updated);
+                      }
+                    }}
+                    value={inList ? id : AI_CUSTOM_VALUE}
+                  >
+                    {models.map(model => (
+                      <option
+                        disabled={others.has(model.id)}
+                        key={model.id}
+                        value={model.id}
+                      >
+                        {optionLabel(model, others.has(model.id))}
+                      </option>
+                    ))}
+                    <option value={AI_CUSTOM_VALUE}>
+                      {inList ? "Custom model ID…" : customOptionText(id)}
                     </option>
-                  ))}
-                  <option value={AI_CUSTOM_VALUE}>
-                    {inList ? "Custom model ID…" : customOptionText(id)}
-                  </option>
-                </select>
+                  </select>
+                  <div className="ai-model-queue__actions">
+                    <Button
+                      aria-label={`Move ${selected?.label ?? id} up (now ${priority})`}
+                      compact
+                      disabled={disabled || refreshing || index === 0}
+                      icon="chevron-up"
+                      onClick={() => {
+                        const updated = [...queue];
+                        [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
+                        commit(updated);
+                      }}
+                      title="Move up"
+                    />
+                    <Button
+                      aria-label={`Move ${selected?.label ?? id} down (now ${priority})`}
+                      compact
+                      disabled={disabled || refreshing || index === queue.length - 1}
+                      icon="chevron-down"
+                      onClick={() => {
+                        const updated = [...queue];
+                        [updated[index], updated[index + 1]] = [updated[index + 1], updated[index]];
+                        commit(updated);
+                      }}
+                      title="Move down"
+                    />
+                    <Button
+                      aria-label={`Remove ${selected?.label ?? id} (${priority})`}
+                      compact
+                      disabled={disabled || refreshing || queue.length <= 1}
+                      icon="close"
+                      onClick={() => commit(queue.filter((_, other) => other !== index))}
+                      title="Remove"
+                      tone="danger"
+                    />
+                  </div>
+                </div>
+                {selected?.description ? (
+                  <p className="ai-model-queue__blurb">{selected.description}</p>
+                ) : null}
                 {selected?.cost ? (
-                  <span className="ai-model-select__cost">{selected.cost}</span>
+                  <p className="ai-model-queue__cost">{selected.cost}</p>
                 ) : null}
                 {customRow === index ? (
                   <CustomModelEditor
@@ -130,35 +172,6 @@ export function ModelQueueEditor({
                     onDraftChange={setDraft}
                   />
                 ) : null}
-              </div>
-              <div className="ai-model-queue__actions">
-                <Button
-                  aria-label={`Move ${selected?.label ?? id} up`}
-                  compact
-                  disabled={disabled || refreshing || index === 0}
-                  onClick={() => {
-                    const updated = [...queue];
-                    [updated[index - 1], updated[index]] = [updated[index], updated[index - 1]];
-                    commit(updated);
-                  }}
-                >↑</Button>
-                <Button
-                  aria-label={`Move ${selected?.label ?? id} down`}
-                  compact
-                  disabled={disabled || refreshing || index === queue.length - 1}
-                  onClick={() => {
-                    const updated = [...queue];
-                    [updated[index], updated[index + 1]] = [updated[index + 1], updated[index]];
-                    commit(updated);
-                  }}
-                >↓</Button>
-                <Button
-                  aria-label={`Remove ${selected?.label ?? id}`}
-                  compact
-                  disabled={disabled || refreshing || queue.length <= 1}
-                  onClick={() => commit(queue.filter((_, other) => other !== index))}
-                  tone="danger"
-                >×</Button>
               </div>
             </li>
           );

@@ -121,12 +121,11 @@ function customIdError(provider: AiProviderId, draft: string): string | null {
 
 export const AI_CUSTOM_VALUE = CUSTOM_VALUE;
 
-/** Option text with the cost appended when known (`Label · $0.15 in …`). */
+/** Option text (`Label`, plus ` (in queue)` when taken by another row).
+ * Cost and description render under the picker instead, so options stay
+ * short and comparable. */
 export function optionLabel(model: AiModelInfo, inQueue: boolean): string {
-  let text = model.label;
-  if (model.cost) text += ` · ${model.cost}`;
-  if (inQueue) text += " (in queue)";
-  return text;
+  return inQueue ? `${model.label} (in queue)` : model.label;
 }
 
 export function CustomModelEditor({

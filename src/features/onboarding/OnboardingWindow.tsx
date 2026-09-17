@@ -310,7 +310,7 @@ function ApiKeyStep(props: ApiKeyStepProps) {
           }}
           value={settings.aiModels}
         />
-        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}. Each option shows its cost when known.</p>
+        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds — the first row is your main model{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}.</p>
       </div>
       <div className="shortcut-demo">
         <ShortcutSummary label="Dictate" platform={platform} shortcut={settings.dictationShortcut} />

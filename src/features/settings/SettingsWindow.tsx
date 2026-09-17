@@ -626,7 +626,7 @@ function AiSection({
   return (
     <SettingsContent title="AI" subtitle={aiSubtitle(info)}>
       <SettingsGroup header="Provider">
-        <SettingRow label="Provider" description="Gemini calls Google directly. Zen is OpenCode pay-as-you-go credits. Go is the $10/month OpenCode subscription. Custom talks to any OpenAI-compatible endpoint." stacked>
+        <SettingRow label="Provider" description={providerBlurb(info)} stacked>
           <select
             aria-label="AI provider"
             disabled={busy !== null}
@@ -672,7 +672,7 @@ function AiSection({
         ) : null}
       </SettingsGroup>
       <SettingsGroup header="Models in order">
-        <SettingRow label="Models" description="Tried top to bottom until one succeeds — a failure moves to the next. Key or balance problems stop immediately. Each option shows its cost when known, or type any model ID via Custom." stacked>
+        <SettingRow label="Models" description="Tried top to bottom until one succeeds — the first row is your main model, the rest are fallbacks. Key or balance problems stop immediately. Pick Custom model ID in a row to type any ID." stacked>
           <ModelQueueEditor
             disabled={busy !== null}
             provider={provider}
@@ -781,6 +781,19 @@ function AiSection({
       )}
     </SettingsContent>
   );
+}
+
+function providerBlurb(info: AiProviderInfo): string {
+  switch (info.id as AiProviderId) {
+    case "zen":
+      return "Pay-as-you-go credits from OpenCode. Works with any model below; each row shows its price.";
+    case "go":
+      return "Included in the $10/month OpenCode Go subscription. Usage counts against your plan allowance.";
+    case "custom":
+      return "Any OpenAI-compatible endpoint — Ollama or LM Studio on your machine, or a hosted provider.";
+    default:
+      return "Calls Google directly. The only provider that supports summarize-link.";
+  }
 }
 
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [

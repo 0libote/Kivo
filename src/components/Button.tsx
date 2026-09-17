@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { Icon, type IconName } from "./Icon";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  readonly children: ReactNode;
+  readonly children?: ReactNode;
   readonly icon?: IconName;
   readonly tone?: "default" | "primary" | "danger";
   readonly compact?: boolean;
@@ -16,7 +16,7 @@ export function Button({ children, icon, tone = "default", compact = false, clas
       {...props}
     >
       {icon ? <Icon name={icon} size={compact ? 14 : 16} /> : null}
-      <span>{children}</span>
+      {children == null ? null : <span>{children}</span>}
     </button>
   );
 }
