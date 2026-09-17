@@ -85,7 +85,7 @@ impl AiProvider {
             default_model: self.default_model().to_owned(),
             default_base_url: self.default_base_url().map(str::to_owned),
             supports_link_summary: matches!(self, Self::Gemini),
-            test_uses_quota: !matches!(self, Self::Gemini),
+            test_uses_quota: true,
         }
     }
 
@@ -192,8 +192,7 @@ pub struct ProviderInfo {
     pub default_base_url: Option<String>,
     /// Only Gemini can retrieve link content (URL context / video input).
     pub supports_link_summary: bool,
-    /// Gemini's Test connection is a free metadata check; every other
-    /// provider validates the key with a one-token completion.
+    /// Connection tests send a small generation request to validate model access.
     pub test_uses_quota: bool,
 }
 
@@ -933,6 +932,7 @@ pub enum OpencodeError {
         code: Option<String>,
     },
     EmptyResponse,
+    Incomplete,
 }
 
 impl OpencodeError {
@@ -977,19 +977,16 @@ impl OpencodeError {
     fn is_auth_code(code: Option<&str>) -> bool {
         matches!(
             code,
-            Some(
-                "authentication"
-                    | "invalid_api_key"
-                    | "AuthError"
-                    | "invalid_request_error"
-                    | "unauthorized"
-            )
+            Some("authentication" | "invalid_api_key" | "AuthError" | "unauthorized")
         )
     }
 
     pub fn user_message(&self) -> &'static str {
         match self {
             Self::InvalidApiKey => "The API key is invalid.",
+            Self::Incomplete => {
+                "The provider stopped before completing the response. Try again or choose another model."
+            }
             Self::InaccessibleSource => {
                 "Link summaries need the Gemini provider. Paste the text or transcript instead."
             }
@@ -1029,6 +1026,7 @@ impl OpencodeError {
             Self::InaccessibleSource => "inaccessible_source",
             Self::Transport(_) => "transport",
             Self::InvalidResponse(_) => "invalid_response",
+            Self::Incomplete => "incomplete",
             _ if self.is_out_of_credits() => "insufficient_credits",
             Self::Api { status, code }
                 if *status == StatusCode::TOO_MANY_REQUESTS
@@ -1078,7 +1076,8 @@ impl std::error::Error for OpencodeError {
 /// (and must not burn quota).
 fn is_failover_terminal(error: &OpencodeError) -> bool {
     match error {
-        OpencodeError::InvalidApiKey | OpencodeError::Transport(_) => true,
+        OpencodeError::InvalidApiKey => true,
+        OpencodeError::Transport(error) => !error.is_timeout(),
         OpencodeError::Api { status, code }
             if *status == StatusCode::UNAUTHORIZED
                 || *status == StatusCode::FORBIDDEN
@@ -1099,10 +1098,34 @@ impl OpenAiCompatClient {
     pub fn new() -> Result<Self, OpencodeError> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20))
+            .timeout(Duration::from_secs(90))
             .build()
             .map_err(OpencodeError::Transport)?;
         Ok(Self { http })
+    }
+
+    fn chat_request(&self, provider: AiProvider, chat_url: &str) -> reqwest::RequestBuilder {
+        let request = self.http.post(chat_url);
+        if matches!(provider, AiProvider::Zen | AiProvider::Go) {
+            // Each stateless writing operation is a separate conversation. Identify
+            // Kivo honestly and provide the routing header required by Go.
+            static NEXT_SESSION: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let session = format!(
+                "kivo-{}-{}-{sequence}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            );
+            request
+                .header("user-agent", concat!("Kivo/", env!("CARGO_PKG_VERSION")))
+                .header("x-opencode-session", session)
+        } else {
+            request
+        }
     }
 
     fn auth_header(api_key: Option<&SecretString>) -> Result<Option<HeaderValue>, OpencodeError> {
@@ -1128,6 +1151,9 @@ impl OpenAiCompatClient {
         api_key: Option<&SecretString>,
     ) -> Result<Vec<ListedAiModel>, OpencodeError> {
         let mut request = self.http.get(models_url);
+        if matches!(provider, AiProvider::Zen | AiProvider::Go) {
+            request = request.header("user-agent", concat!("Kivo/", env!("CARGO_PKG_VERSION")));
+        }
         if let Some(auth) = Self::auth_header(api_key)? {
             request = request.header("authorization", auth);
         }
@@ -1188,11 +1214,22 @@ impl OpenAiCompatClient {
                 },
             ],
             max_tokens: None,
-            temperature: 0.2,
         };
-        let mut call = self.http.post(chat_url).json(&request);
+        let protocol = completion_protocol(provider, &model);
+        let (url, body) = completion_request(protocol, chat_url, &request);
+        let mut call = self.chat_request(provider, &url).json(&body);
+        if protocol == CompletionProtocol::Messages {
+            call = call.header("anthropic-version", "2023-06-01");
+        }
         if let Some(auth) = Self::auth_header(api_key)? {
             call = call.header("authorization", auth);
+        }
+        if protocol == CompletionProtocol::Messages
+            && let Some(key) = api_key
+        {
+            let header =
+                HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
+            call = call.header("x-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
         let status = response.status();
@@ -1208,15 +1245,13 @@ impl OpenAiCompatClient {
             });
         }
         let completion = response
-            .json::<ChatCompletionResponse>()
+            .json::<serde_json::Value>()
             .await
             .map_err(OpencodeError::InvalidResponse)?;
-        parse_chat_completion(completion)
+        parse_completion(protocol, completion)
     }
 
-    /// Cheap key check: a one-token completion. Unlike Gemini's free metadata
-    /// GET, Zen/Go list their models publicly, so validating the key costs a
-    /// single output token on the selected model.
+    /// Authenticated generation probe: public model listings cannot validate a key.
     pub async fn test_connection(
         &self,
         provider: AiProvider,
@@ -1235,15 +1270,22 @@ impl OpenAiCompatClient {
                 content: "ok",
             }],
             max_tokens: Some(1),
-            temperature: 0.0,
         };
-        let mut call = self
-            .http
-            .post(chat_url)
-            .timeout(Duration::from_secs(20))
-            .json(&request);
+        let protocol = completion_protocol(provider, &model);
+        let (url, body) = completion_request(protocol, chat_url, &request);
+        let mut call = self.chat_request(provider, &url).json(&body);
+        if protocol == CompletionProtocol::Messages {
+            call = call.header("anthropic-version", "2023-06-01");
+        }
         if let Some(auth) = Self::auth_header(api_key)? {
             call = call.header("authorization", auth);
+        }
+        if protocol == CompletionProtocol::Messages
+            && let Some(key) = api_key
+        {
+            let header =
+                HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
+            call = call.header("x-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
         let status = response.status();
@@ -1291,7 +1333,144 @@ impl OpenAiCompatClient {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CompletionProtocol {
+    Chat,
+    Messages,
+    Responses,
+}
+
+fn completion_protocol(provider: AiProvider, model: &str) -> CompletionProtocol {
+    // Go publishes model-specific protocols. Custom endpoints retain their
+    // explicitly configured OpenAI chat-completions contract.
+    if provider == AiProvider::Go {
+        if model.starts_with("minimax-") || model.starts_with("qwen") || model == "union-alpha" {
+            return CompletionProtocol::Messages;
+        }
+        if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-") {
+            return CompletionProtocol::Responses;
+        }
+    }
+    CompletionProtocol::Chat
+}
+
+fn completion_request(
+    protocol: CompletionProtocol,
+    chat_url: &str,
+    request: &ChatCompletionRequest<'_>,
+) -> (String, serde_json::Value) {
+    let base = chat_url
+        .strip_suffix("/chat/completions")
+        .unwrap_or(chat_url);
+    match protocol {
+        CompletionProtocol::Chat => (
+            chat_url.to_owned(),
+            serde_json::to_value(request).expect("serializable request"),
+        ),
+        CompletionProtocol::Messages => {
+            let system = request
+                .messages
+                .iter()
+                .filter(|message| message.role == "system")
+                .map(|message| message.content)
+                .collect::<Vec<_>>()
+                .join("\n");
+            let messages: Vec<_> = request
+                .messages
+                .iter()
+                .filter(|message| message.role != "system")
+                .collect();
+            (
+                format!("{base}/messages"),
+                serde_json::json!({
+                    "model": request.model,
+                    "system": system,
+                    "messages": messages,
+                    // Anthropic's protocol requires an explicit output limit.
+                    "max_tokens": request.max_tokens.unwrap_or(8192),
+                }),
+            )
+        }
+        CompletionProtocol::Responses => {
+            let mut body = serde_json::json!({
+                "model": request.model,
+                "input": request.messages,
+                "store": false,
+            });
+            if let Some(limit) = request.max_tokens {
+                // The Responses protocol requires at least 16 output tokens.
+                body["max_output_tokens"] = limit.max(16).into();
+            }
+            (format!("{base}/responses"), body)
+        }
+    }
+}
+
+fn parse_completion(
+    protocol: CompletionProtocol,
+    body: serde_json::Value,
+) -> Result<String, OpencodeError> {
+    let incomplete = match protocol {
+        CompletionProtocol::Messages => matches!(
+            body["stop_reason"].as_str(),
+            Some("max_tokens" | "pause_turn")
+        ),
+        CompletionProtocol::Responses => matches!(
+            body["status"].as_str(),
+            Some("incomplete" | "failed" | "cancelled" | "in_progress" | "queued")
+        ),
+        CompletionProtocol::Chat => body["choices"].as_array().is_some_and(|choices| {
+            choices
+                .iter()
+                .any(|choice| choice["finish_reason"] == "length")
+        }),
+    };
+    if incomplete {
+        return Err(OpencodeError::Incomplete);
+    }
+    if protocol == CompletionProtocol::Chat {
+        // Malformed successful payloads must not count as completed writing.
+        let response = serde_json::from_value(body).map_err(|_| OpencodeError::EmptyResponse)?;
+        return parse_chat_completion(response);
+    }
+    let parts: Vec<&serde_json::Value> = match protocol {
+        CompletionProtocol::Messages => body
+            .get("content")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|part| part["type"] == "text")
+            .collect(),
+        CompletionProtocol::Responses => body
+            .get("output")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|item| item["type"] == "message")
+            .flat_map(|item| {
+                item.get("content")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .filter(|part| part["type"] == "output_text")
+            .collect(),
+        CompletionProtocol::Chat => unreachable!(),
+    };
+    let output = parts
+        .iter()
+        .filter_map(|part| part["text"].as_str())
+        .collect::<String>();
+    let output = output.trim();
+    if output.is_empty() {
+        Err(OpencodeError::EmptyResponse)
+    } else {
+        Ok(output.to_owned())
+    }
+}
+
 #[derive(Serialize)]
+// Omit temperature: models such as Kimi only accept their default sampling settings.
 struct ChatCompletionRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage<'a>],
@@ -1300,7 +1479,6 @@ struct ChatCompletionRequest<'a> {
     // small outputs). Only the connection probe caps to one token.
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
-    temperature: f32,
 }
 
 #[derive(Serialize)]
@@ -1436,6 +1614,76 @@ fn parse_chat_completion(response: ChatCompletionResponse) -> Result<String, Ope
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn go_requests_identify_kivo_and_use_model_sampling_defaults() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut sessions = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let header_end = loop {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).unwrap();
+                    bytes.push(byte[0]);
+                    if bytes.ends_with(b"\r\n\r\n") {
+                        break bytes.len();
+                    }
+                };
+                let headers = String::from_utf8(bytes.clone()).unwrap().to_lowercase();
+                assert!(headers.contains("user-agent: kivo/"));
+                let session = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("x-opencode-session: "))
+                    .unwrap();
+                assert!(session.starts_with("kivo-"));
+                sessions.push(session.to_owned());
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                bytes.resize(header_end + length, 0);
+                stream.read_exact(&mut bytes[header_end..]).unwrap();
+                let body: serde_json::Value = serde_json::from_slice(&bytes[header_end..]).unwrap();
+                assert_eq!(body["model"], "kimi-k2.7-code");
+                assert!(body.get("temperature").is_none());
+                let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            }
+            assert_ne!(sessions[0], sessions[1]);
+        });
+        let client = OpenAiCompatClient::new().unwrap();
+        let key = SecretString::new("test-key".to_owned()).unwrap();
+        client
+            .test_connection(AiProvider::Go, &url, Some(&key), "kimi-k2.7-code")
+            .await
+            .unwrap();
+        let prompt = AiPrompt {
+            system_instruction: "Correct spelling".into(),
+            input: "helo world".into(),
+        };
+        assert_eq!(
+            client
+                .generate(AiProvider::Go, &url, Some(&key), "kimi-k2.7-code", &prompt)
+                .await
+                .unwrap(),
+            "hello world"
+        );
+        server.join().unwrap();
+        let custom = client
+            .chat_request(AiProvider::Custom, &url)
+            .build()
+            .unwrap();
+        assert!(!custom.headers().contains_key("x-opencode-session"));
+    }
+
     #[test]
     fn provider_ids_parse_and_round_trip() {
         assert_eq!(AiProvider::parse("gemini"), AiProvider::Gemini);
@@ -1464,7 +1712,7 @@ mod tests {
         assert!(zen.test_uses_quota);
         let gemini = infos.iter().find(|info| info.id == "gemini").unwrap();
         assert!(gemini.supports_link_summary);
-        assert!(!gemini.test_uses_quota);
+        assert!(gemini.test_uses_quota);
         let custom = infos.iter().find(|info| info.id == "custom").unwrap();
         assert!(custom.key_optional);
         assert_eq!(
@@ -1695,6 +1943,237 @@ mod tests {
         assert_eq!(parse_chat_completion(parts).unwrap(), "Hi there.");
         let empty = serde_json::from_str::<ChatCompletionResponse>(r#"{"choices":[]}"#).unwrap();
         assert!(parse_chat_completion(empty).is_err());
+    }
+
+    #[test]
+    fn go_models_use_their_required_protocol_without_changing_custom_servers() {
+        for model in ["minimax-m2.7", "qwen3.5-plus", "union-alpha"] {
+            assert_eq!(
+                completion_protocol(AiProvider::Go, model),
+                CompletionProtocol::Messages
+            );
+            assert_eq!(
+                completion_protocol(AiProvider::Custom, model),
+                CompletionProtocol::Chat
+            );
+        }
+        for model in ["gpt-5.6-luna", "grok-4.5", "muse-spark"] {
+            assert_eq!(
+                completion_protocol(AiProvider::Go, model),
+                CompletionProtocol::Responses
+            );
+            assert_eq!(
+                completion_protocol(AiProvider::Custom, model),
+                CompletionProtocol::Chat
+            );
+        }
+        assert_eq!(
+            completion_protocol(AiProvider::Go, "kimi-k2.7-code"),
+            CompletionProtocol::Chat
+        );
+    }
+
+    #[test]
+    fn messages_requests_preserve_instructions_and_supply_required_output_limit() {
+        let messages = [
+            ChatMessage {
+                role: "system",
+                content: "Preserve meaning.",
+            },
+            ChatMessage {
+                role: "user",
+                content: "helo world",
+            },
+        ];
+        let request = ChatCompletionRequest {
+            model: "minimax-m2.7",
+            messages: &messages,
+            max_tokens: None,
+        };
+        let (url, body) = completion_request(
+            CompletionProtocol::Messages,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &request,
+        );
+        assert_eq!(url, "https://opencode.ai/zen/go/v1/messages");
+        assert_eq!(body["model"], "minimax-m2.7");
+        assert_eq!(body["system"], "Preserve meaning.");
+        assert_eq!(
+            body["messages"],
+            serde_json::json!([{"role":"user", "content":"helo world"}])
+        );
+        assert_eq!(body["max_tokens"], 8192);
+        assert!(body.get("temperature").is_none());
+        let probe = ChatCompletionRequest {
+            max_tokens: Some(1),
+            ..request
+        };
+        let (_, body) = completion_request(
+            CompletionProtocol::Messages,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &probe,
+        );
+        assert_eq!(body["max_tokens"], 1);
+    }
+
+    #[test]
+    fn responses_requests_are_stateless_and_use_protocol_specific_probe_limit() {
+        let messages = [
+            ChatMessage {
+                role: "system",
+                content: "Preserve meaning.",
+            },
+            ChatMessage {
+                role: "user",
+                content: "helo world",
+            },
+        ];
+        let request = ChatCompletionRequest {
+            model: "gpt-5.6-luna",
+            messages: &messages,
+            max_tokens: None,
+        };
+        let (url, body) = completion_request(
+            CompletionProtocol::Responses,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &request,
+        );
+        assert_eq!(url, "https://opencode.ai/zen/go/v1/responses");
+        assert_eq!(body["model"], "gpt-5.6-luna");
+        assert_eq!(
+            body["input"],
+            serde_json::json!([
+                {"role":"system", "content":"Preserve meaning."},
+                {"role":"user", "content":"helo world"}
+            ])
+        );
+        assert_eq!(body["store"], false);
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("temperature").is_none());
+        let probe = ChatCompletionRequest {
+            max_tokens: Some(1),
+            ..request
+        };
+        let (_, body) = completion_request(
+            CompletionProtocol::Responses,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &probe,
+        );
+        assert_eq!(body["max_output_tokens"], 16);
+        assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn protocol_parsers_return_only_visible_answer_text() {
+        let messages = serde_json::json!({"content":[
+            {"type":"thinking", "thinking":"secret", "text":"Do not reveal"},
+            {"type":"text", "text":" Hello, "},
+            {"type":"tool_use", "text":"Not the answer"},
+            {"type":"text", "text":"world. "}
+        ]});
+        assert_eq!(
+            parse_completion(CompletionProtocol::Messages, messages).unwrap(),
+            "Hello, world."
+        );
+        let responses = serde_json::json!({"status":"completed", "output":[
+            {"type":"reasoning", "content":[{"type":"output_text", "text":"Do not reveal"}]},
+            {"type":"message", "content":[
+                {"type":"output_text", "text":" Hello, "},
+                {"type":"reasoning_text", "text":"secret"},
+                {"type":"output_text", "text":"world. "}
+            ]}
+        ]});
+        assert_eq!(
+            parse_completion(CompletionProtocol::Responses, responses).unwrap(),
+            "Hello, world."
+        );
+        for (protocol, body) in [
+            (
+                CompletionProtocol::Messages,
+                serde_json::json!({"content":[{"type":"thinking", "thinking":"secret"}]}),
+            ),
+            (
+                CompletionProtocol::Responses,
+                serde_json::json!({"output":[{"type":"reasoning", "summary":[]}]}),
+            ),
+            (
+                CompletionProtocol::Messages,
+                serde_json::json!({"content":"malformed"}),
+            ),
+            (
+                CompletionProtocol::Responses,
+                serde_json::json!({"output":null}),
+            ),
+        ] {
+            assert!(matches!(
+                parse_completion(protocol, body),
+                Err(OpencodeError::EmptyResponse)
+            ));
+        }
+    }
+
+    #[test]
+    fn protocol_parsers_reject_partial_answers_before_replacing_user_text() {
+        for status in ["incomplete", "failed", "cancelled", "in_progress", "queued"] {
+            let body = serde_json::json!({
+                "status":status,
+                "output":[{"type":"message", "content":[{"type":"output_text", "text":"Partial answer"}]}]
+            });
+            assert!(matches!(
+                parse_completion(CompletionProtocol::Responses, body),
+                Err(OpencodeError::Incomplete)
+            ));
+        }
+        for stop_reason in ["max_tokens", "pause_turn"] {
+            let body = serde_json::json!({
+                "stop_reason":stop_reason,
+                "content":[{"type":"text", "text":"Partial answer"}]
+            });
+            assert!(matches!(
+                parse_completion(CompletionProtocol::Messages, body),
+                Err(OpencodeError::Incomplete)
+            ));
+        }
+        let chat = serde_json::json!({"choices":[{
+            "finish_reason":"length", "message":{"content":"Partial answer"}
+        }]});
+        assert!(matches!(
+            parse_completion(CompletionProtocol::Chat, chat),
+            Err(OpencodeError::Incomplete)
+        ));
+        assert!(!is_failover_terminal(&OpencodeError::Incomplete));
+    }
+
+    #[test]
+    fn invalid_request_errors_do_not_mark_valid_keys_invalid() {
+        let body = serde_json::json!({
+            "error": {
+                "type": "invalid_request_error",
+                "message": "This model does not support the requested temperature."
+            }
+        });
+        let error = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: parse_openai_error_code(&body),
+        };
+        assert_eq!(error.code(), "api_error");
+        assert!(!is_failover_terminal(&error));
+        assert!(!error.user_message().contains("API key"));
+
+        // The same generic error type may accompany genuine HTTP auth errors.
+        let unauthorized = OpencodeError::Api {
+            status: StatusCode::UNAUTHORIZED,
+            code: Some("invalid_request_error".into()),
+        };
+        assert_eq!(unauthorized.code(), "invalid_api_key");
+        assert!(is_failover_terminal(&unauthorized));
+        let invalid_key = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: Some("invalid_api_key".into()),
+        };
+        assert_eq!(invalid_key.code(), "invalid_api_key");
+        assert!(is_failover_terminal(&invalid_key));
     }
 
     #[test]

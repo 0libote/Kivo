@@ -164,14 +164,27 @@ impl AppCore {
         match provider {
             AiProvider::Gemini => {
                 let api_key = self.require_provider_key(provider)?;
-                // A single ListModels fetch validates the key and reports every
-                // model id the key can actually use, so Test connection doubles as
-                // the availability check for the whole queue: no separate
-                // per-model GET and no full generation (fast, no quota).
-                // Same behavior on macOS and Windows: pure HTTPS via reqwest.
-                let listed = self.ai.list_models(&api_key).await?;
-                if let Some(missing) = find_unavailable_model(&listed, provider, &models) {
-                    return Err(AppCoreError::AiModelUnavailable { model: missing });
+                // Model listings include models that may reject generation for
+                // this account. Exercise the selected model before reporting ready.
+                let first = models
+                    .first()
+                    .map(String::as_str)
+                    .unwrap_or(crate::ai::DEFAULT_GEMINI_MODEL);
+                self.ai
+                    .generate(
+                        &api_key,
+                        first,
+                        &AiPrompt {
+                            input: "Reply with OK.".into(),
+                            system_instruction: "Return only OK.".into(),
+                        },
+                    )
+                    .await?;
+                if models.len() > 1 {
+                    let listed = self.ai.list_models(&api_key).await?;
+                    if let Some(missing) = find_unavailable_model(&listed, provider, &models[1..]) {
+                        return Err(AppCoreError::AiModelUnavailable { model: missing });
+                    }
                 }
                 Ok(CredentialStatus { configured: true })
             }
@@ -1257,6 +1270,15 @@ pub struct SettingsPatch {
 
 impl SettingsPatch {
     fn apply(self, mut settings: FrontendSettings) -> FrontendSettings {
+        if let Some(provider) = self.ai_provider.as_deref() {
+            let provider = AiProvider::parse(provider);
+            if provider != AiProvider::parse(&settings.ai_provider) && self.ai_models.is_none() {
+                // Model IDs are provider-specific even when their syntax is valid
+                // on both services. Keep an explicitly supplied queue, otherwise
+                // start the new provider with its supported default.
+                settings.ai_models = vec![provider.default_model().to_owned()];
+            }
+        }
         macro_rules! assign {
             ($field:ident) => {
                 if let Some(value) = self.$field {

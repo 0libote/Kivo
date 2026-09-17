@@ -210,6 +210,10 @@ struct HttpSequenceFixture {
 
 impl HttpSequenceFixture {
     fn new(responses: Vec<(u16, &'static str)>) -> Self {
+        Self::with_first_delay(responses, Duration::ZERO)
+    }
+
+    fn with_first_delay(responses: Vec<(u16, &'static str)>, first_delay: Duration) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://{}/interactions", listener.local_addr().unwrap());
         listener.set_nonblocking(true).unwrap();
@@ -217,11 +221,14 @@ impl HttpSequenceFixture {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let worker = thread::spawn(move || {
-            for (status, response) in responses {
+            for (index, (status, response)) in responses.into_iter().enumerate() {
                 let Some((mut stream, body)) = read_fixture_request(&listener, &worker_stop) else {
                     return;
                 };
                 let _ = bodies_tx.send(body);
+                if index == 0 && !first_delay.is_zero() {
+                    thread::sleep(first_delay);
+                }
                 let response = format!(
                     "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
                     response.len()
@@ -1092,4 +1099,85 @@ fn failed_settings_write_restores_runtime_and_keeps_previous_preferences() {
     assert_eq!(*runtime.0.lock().unwrap(), vec![changed, previous]);
     assert_eq!(std::fs::read(&parent).unwrap(), b"sentinel");
     std::fs::remove_file(parent).unwrap();
+}
+
+#[tokio::test]
+async fn gemini_generation_timeout_tries_the_next_model() {
+    let mut server = HttpSequenceFixture::with_first_delay(
+        vec![(200, TEXT_RESPONSE), (200, TEXT_RESPONSE)],
+        Duration::from_millis(750),
+    );
+    let client = GeminiClient::with_endpoint(server.endpoint.clone())
+        .unwrap()
+        .with_timeout(Duration::from_millis(500));
+    let result = client
+        .generate_in_order(
+            &SecretString::new("test-key".into()).unwrap(),
+            &["gemini-3.8-flash".into(), "gemini-3.5-flash".into()],
+            &AiPrompt {
+                input: "Reply with OK.".into(),
+                system_instruction: "Return only OK.".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(result, "Summary");
+    assert_eq!(server.next_request()["model"], "gemini-3.8-flash");
+    assert_eq!(server.next_request()["model"], "gemini-3.5-flash");
+}
+
+#[tokio::test]
+async fn gemini_connection_test_requires_successful_generation() {
+    let mut server = HttpSequenceFixture::new(vec![(200, TEXT_RESPONSE)]);
+    let (core, _) = core(&server.endpoint, None);
+    assert!(core.test_api_key().await.unwrap().configured);
+    let request = server.next_request();
+    assert_eq!(request["model"], crate::ai::DEFAULT_GEMINI_MODEL);
+    assert_eq!(request["input"], "Reply with OK.");
+    assert_eq!(request["store"], false);
+}
+
+#[tokio::test]
+async fn gemini_connection_test_reports_generation_rejection() {
+    let mut server = HttpSequenceFixture::new(vec![(
+        404,
+        r#"{"error":{"status":"NOT_FOUND","message":"This model is retired."}}"#,
+    )]);
+    let (core, _) = core(&server.endpoint, None);
+    let error = core.test_api_key().await.unwrap_err();
+    assert!(matches!(error, AppCoreError::Gemini(ref error) if error.is_not_found()));
+    assert_eq!(server.next_request()["input"], "Reply with OK.");
+}
+
+#[test]
+fn switching_ai_provider_resets_implicit_queue_but_preserves_explicit_models() {
+    let mut current = FrontendSettings::from(AppSettings::default());
+    current.ai_models = vec!["gemini-3.1-flash-lite".into(), "gemini-3.5-flash".into()];
+    for provider in [AiProvider::Go, AiProvider::Zen, AiProvider::Custom] {
+        let patch = SettingsPatch {
+            ai_provider: Some(provider.as_str().into()),
+            ..SettingsPatch::default()
+        };
+        let updated = patch.apply(current.clone());
+        assert_eq!(updated.ai_models, vec![provider.default_model().to_owned()]);
+    }
+    let explicit = SettingsPatch {
+        ai_provider: Some("go".into()),
+        ai_models: Some(vec!["minimax-m2.7".into()]),
+        ..SettingsPatch::default()
+    }
+    .apply(current.clone());
+    assert_eq!(explicit.ai_models, vec!["minimax-m2.7"]);
+    let unchanged = SettingsPatch {
+        ai_provider: Some("gemini".into()),
+        ..SettingsPatch::default()
+    }
+    .apply(current.clone());
+    assert_eq!(unchanged.ai_models, current.ai_models);
+    let unrelated = SettingsPatch {
+        theme: Some("dark".into()),
+        ..SettingsPatch::default()
+    }
+    .apply(current.clone());
+    assert_eq!(unrelated.ai_models, current.ai_models);
 }

@@ -242,11 +242,14 @@ class MockBridge implements NativeBridge {
   }
 
   async updateSettings(patch: Partial<AppSettings>) {
+    const previousProvider = this.settings.aiProvider;
     this.settings = { ...this.settings, ...patch };
-    // Mirror the backend: provider switches re-normalize the queue (a model
-    // valid for one provider may fall back to the default on another).
+    // Mirror SettingsPatch: provider-specific IDs must not carry over by default.
     if (patch.aiProvider !== undefined) {
       this.settings.aiProvider = normalizeAiProvider(patch.aiProvider);
+      if (this.settings.aiProvider !== previousProvider && patch.aiModels === undefined) {
+        this.settings.aiModels = [];
+      }
     }
     if (patch.aiModels !== undefined || patch.aiProvider !== undefined) {
       this.settings.aiModels = normalizeAiModelList(
@@ -298,7 +301,7 @@ class MockBridge implements NativeBridge {
 
   async listAiProviders(): Promise<AiProviderInfo[]> {
     return [
-      { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: false },
+      { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
       { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
       { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "kimi-k2.7-code", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
       { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },

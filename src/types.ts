@@ -39,7 +39,7 @@ export interface AiProviderInfo {
   defaultModel: string;
   defaultBaseUrl: string | null;
   supportsLinkSummary: boolean;
-  /** Gemini tests with a free metadata check; others send 1 token. */
+  /** Connection tests send a short generation request and consume quota. */
   testUsesQuota: boolean;
 }
 

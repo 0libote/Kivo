@@ -729,7 +729,7 @@ function AiSection({
         </div>
       </SettingsGroup>
       {info.testUsesQuota ? (
-        <p className="settings-note">Test connection sends a one-token request, so it costs a fraction of a cent on pay-as-you-go credits.</p>
+        <p className="settings-note">Test connection sends a short generation request using your first model and consumes API quota. Backup models are checked against the model list.</p>
       ) : null}
       {info.keyUrl ? (
         <button className="text-link" onClick={() => void nativeBridge.openExternal(info.keyUrl as string).catch(() => setNotice(`${info.label} couldn’t be opened.`))} type="button">{keyLinkLabel(info)}</button>
@@ -741,7 +741,7 @@ function AiSection({
 }
 
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
-  { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: false },
+  { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
   { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
   { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "kimi-k2.7-code", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
   { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
