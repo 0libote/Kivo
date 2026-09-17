@@ -95,7 +95,7 @@ The app is one Tauri process with four pre-created webview surfaces:
 
 React owns presentation and transient UI state. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle. Sensitive text and keys are intentionally absent from serializable types wherever the UI does not need them. The latest completed dictation is kept only in memory for the current app session and can be copied or cleared from Home. Cancelled dictations are discarded.
 
-Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Native AX/UIA capture leaves the clipboard unchanged. Kivo validates the original field and selection before insertion; unsupported targets or changed selections keep the result available to copy instead of automatically pasting into another field.
+Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free AX/UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
 
 ## Permissions
 
@@ -105,6 +105,12 @@ Kivo asks only in onboarding or when a feature is invoked:
 - Input Monitoring observes and suppresses the modifier-only dictation gesture.
 - Microphone records only while dictation is active.
 - Speech Recognition sends audio only to the operating-system speech engine. Microphone audio is never sent to Gemini.
+
+On Windows there is no in-app consent prompt: the microphone row reads
+granted (capture problems surface when dictation starts, pointing back at
+the microphone privacy settings), and Speech Recognition reflects the
+installed desktop speech languages — an empty engine list shows guidance
+to install one instead of an Allow button that could never resolve.
 
 ## Packaging and signing
 

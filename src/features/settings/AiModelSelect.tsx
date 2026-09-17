@@ -67,9 +67,11 @@ function refreshSharedModels(silent: boolean): Promise<void> {
       sharedLoaded = true;
     })
     .catch(() => {
-      // Keep the bundled fallback so the selector never appears empty.
+      // Keep the bundled fallback so the selector never appears empty, but
+      // say so even on the silent first load — otherwise offline users never
+      // learn the list is stale.
       sharedLoaded = true;
-      if (!silent) sharedError = "Couldn't refresh models. Showing the saved list.";
+      sharedError = "Couldn't refresh models. Showing the saved list.";
     })
     .then(() => {
       sharedInflight = null;

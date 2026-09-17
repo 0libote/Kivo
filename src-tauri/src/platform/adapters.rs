@@ -15,7 +15,7 @@ use crate::{
     },
     text::{
         ActiveApplication as CoreApplication, CapturedSelection, ScreenPoint as CorePoint,
-        ScreenRect as CoreRect, TextAccessStrategy, TextError, TextFuture, TextService,
+        ScreenRect as CoreRect, TextError, TextFuture, TextService,
     },
 };
 
@@ -86,9 +86,6 @@ impl TextService for PlatformTextService {
         replacement: &'a str,
     ) -> TextFuture<'a, Result<(), TextError>> {
         Box::pin(async move {
-            if selection.strategy() != TextAccessStrategy::Accessibility {
-                return Err(TextError::UnsupportedApplication);
-            }
             let snapshot = self
                 .selections
                 .lock()

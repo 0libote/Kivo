@@ -105,8 +105,11 @@ function backState(state: WritingToolsState): WritingToolsState {
   }
   if (!["custom", "summary", "error", "result"].includes(state.mode)) return state;
   // With no selection there is no menu to return to: land on the summarize
-  // entry, keeping any typed input so it can be adjusted and retried.
+  // entry, keeping any typed input so it can be adjusted and retried. When
+  // Summarize itself is disabled there is nowhere to go, so stay put and let
+  // the error view offer Close instead of a dead-end Back.
   if (!state.context?.hasSelection) {
+    if (!state.enabledActions.includes("summarize")) return state;
     return {
       ...state,
       mode: "summary",

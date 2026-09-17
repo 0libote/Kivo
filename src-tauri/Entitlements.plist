@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Microphone for dictation. The App Sandbox stays OFF on purpose:
+       system-wide Accessibility, event taps, and global shortcuts are
+       incompatible with it (see README "Supported systems"). -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
 </dict>

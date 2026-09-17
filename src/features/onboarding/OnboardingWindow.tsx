@@ -21,17 +21,18 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
   const [apiKey, setApiKey] = useState("");
   const [apiStatus, setApiStatus] = useState<ApiKeyStatus>({ configured: false, connection: "untested" });
   const [savingKey, setSavingKey] = useState(false);
+  const [finishing, setFinishing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([nativeBridge.getPermissions(), nativeBridge.getApiKeyStatus()])
-      .then(([nextPermissions, nextApi]) => {
-        if (!active) return;
-        setPermissions(nextPermissions);
-        setApiStatus(nextApi);
-      })
+    // Load independently so a key failure never misreports permissions.
+    void nativeBridge.getPermissions()
+      .then((nextPermissions) => active && setPermissions(nextPermissions))
       .catch(() => active && setMessage("Permission status isn’t available right now."));
+    void nativeBridge.getApiKeyStatus()
+      .then((nextApi) => active && setApiStatus(nextApi))
+      .catch(() => active && setMessage("Saved key status isn’t available right now."));
     return () => {
       active = false;
     };
@@ -46,8 +47,14 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
     setBusyPermission(kind);
     setMessage(null);
     try {
-      if (context.platform === "windows") await nativeBridge.openPermissionSettings(kind);
-      setPermissions(await nativeBridge.requestPermission(kind));
+      // Windows has no in-app prompt: open the Settings page, then re-read
+      // the (possibly changed) state instead of firing a no-op request.
+      if (context.platform === "windows") {
+        await nativeBridge.openPermissionSettings(kind);
+        setPermissions(await nativeBridge.getPermissions());
+      } else {
+        setPermissions(await nativeBridge.requestPermission(kind));
+      }
     } catch {
       setMessage("Permission wasn’t granted. You can open Settings and try again.");
     } finally {
@@ -56,12 +63,15 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
   }
 
   async function finish() {
+    if (finishing) return;
+    setFinishing(true);
     setMessage(null);
     try {
       await updateSettings({ onboardingComplete: true });
       await nativeBridge.completeOnboarding();
     } catch {
       setMessage("Setup couldn’t be saved. Please try again.");
+      setFinishing(false);
     }
   }
 
@@ -75,6 +85,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
             dictationShortcut={settings.dictationShortcut}
             platform={context.platform}
             request={(kind) => void request(kind)}
+            setMessage={setMessage}
             statusByKind={statusByKind}
           />
         ) : null}
@@ -84,6 +95,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
             busyPermission={busyPermission}
             platform={context.platform}
             request={(kind) => void request(kind)}
+            setMessage={setMessage}
             statusByKind={statusByKind}
           />
         ) : null}
@@ -105,7 +117,14 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
         {message ? <p aria-live="polite" className="onboarding-message">{message}</p> : null}
 
         {step > 0 ? (
-          <OnboardingFooter finish={() => void finish()} next={() => setStep((current) => current + 1)} prev={() => setStep((current) => current - 1)} step={step} />
+          <OnboardingFooter
+            busy={busyPermission !== null || savingKey || finishing}
+            finish={() => void finish()}
+            finishing={finishing}
+            next={() => setStep((current) => current + 1)}
+            prev={() => setStep((current) => current - 1)}
+            step={step}
+          />
         ) : null}
       </section>
     </main>
@@ -129,10 +148,11 @@ interface StepPermissionsProps {
   readonly dictationShortcut: string;
   readonly platform: AppContext["platform"];
   readonly request: (kind: PermissionKind) => void;
+  readonly setMessage: (value: string | null) => void;
   readonly statusByKind: Partial<Record<PermissionKind, PermissionStatus>>;
 }
 
-function PermissionsStep({ busyPermission, dictationShortcut, platform, request, statusByKind }: StepPermissionsProps) {
+function PermissionsStep({ busyPermission, dictationShortcut, platform, request, setMessage, statusByKind }: StepPermissionsProps) {
   const isMacos = platform === "macos";
   return (
     <div className="onboarding-step">
@@ -149,14 +169,14 @@ function PermissionsStep({ busyPermission, dictationShortcut, platform, request,
           <PermissionRow
             busy={busyPermission === "accessibility"}
             label="Accessibility"
-            onOpen={() => void nativeBridge.openPermissionSettings("accessibility")}
+            onOpen={() => void nativeBridge.openPermissionSettings("accessibility").catch(() => setMessage("The system settings page couldn’t be opened."))}
             onRequest={() => request("accessibility")}
             status={statusByKind.accessibility?.state ?? "not-determined"}
           />
           <PermissionRow
             busy={busyPermission === "input-monitoring"}
             label={dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring"}
-            onOpen={() => void nativeBridge.openPermissionSettings("input-monitoring")}
+            onOpen={() => void nativeBridge.openPermissionSettings("input-monitoring").catch(() => setMessage("The system settings page couldn’t be opened."))}
             onRequest={() => request("input-monitoring")}
             optional={dictationShortcut !== "Fn"}
             status={statusByKind["input-monitoring"]?.state ?? "not-determined"}
@@ -169,8 +189,11 @@ function PermissionsStep({ busyPermission, dictationShortcut, platform, request,
   );
 }
 
-function DictationStep({ busyPermission, platform, request, statusByKind, dictationShortcut }: StepPermissionsProps) {
+function DictationStep({ busyPermission, platform, request, setMessage, statusByKind, dictationShortcut }: StepPermissionsProps) {
   const showSpeechRecognition = platform === "macos" && statusByKind["speech-recognition"]?.state !== "unavailable";
+  const openSettings = (kind: PermissionKind) => {
+    void nativeBridge.openPermissionSettings(kind).catch(() => setMessage("The system settings page couldn’t be opened."));
+  };
   return (
     <div className="onboarding-step">
       <div className="onboarding-step__icon"><Icon name="microphone" size={25} /></div>
@@ -181,7 +204,7 @@ function DictationStep({ busyPermission, platform, request, statusByKind, dictat
         <PermissionRow
           busy={busyPermission === "microphone"}
           label="Microphone"
-          onOpen={() => void nativeBridge.openPermissionSettings("microphone")}
+          onOpen={() => openSettings("microphone")}
           onRequest={() => request("microphone")}
           status={statusByKind.microphone?.state ?? "not-determined"}
         />
@@ -189,7 +212,7 @@ function DictationStep({ busyPermission, platform, request, statusByKind, dictat
           <PermissionRow
             busy={busyPermission === "speech-recognition"}
             label="Speech Recognition"
-            onOpen={() => void nativeBridge.openPermissionSettings("speech-recognition")}
+            onOpen={() => openSettings("speech-recognition")}
             onRequest={() => request("speech-recognition")}
             status={statusByKind["speech-recognition"]?.state ?? "not-determined"}
           />
@@ -224,7 +247,7 @@ function ApiKeyStep(props: ApiKeyStepProps) {
       <p className="onboarding-copy">Your Google AI Studio key is stored by the operating system. It never appears in Kivo’s settings files or logs.</p>
       <div className="onboarding-key">
         {apiStatus.configured ? (
-          <StatusIndicator label="API key saved" state="connected" />
+          <StatusIndicator label={apiConnectionLabel(apiStatus.connection)} state={apiStatus.connection} />
         ) : (
           <div className="onboarding-key__input">
             <input aria-label="Google AI Studio API key" autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder="Google AI Studio API key" spellCheck={false} type="password" value={apiKey} />
@@ -275,15 +298,27 @@ function ApiKeyStep(props: ApiKeyStepProps) {
   );
 }
 
-function OnboardingFooter({ step, prev, next, finish }: { readonly step: number; readonly prev: () => void; readonly next: () => void; readonly finish: () => void }) {
+function apiConnectionLabel(connection: ApiKeyStatus["connection"]): string {
+  switch (connection) {
+    case "connected": return "API key saved";
+    case "testing": return "Testing key…";
+    case "invalid": return "Key not accepted";
+    case "model": return "Model unavailable — pick another in Settings → AI";
+    case "rate-limited": return "Rate limited — try again shortly";
+    case "offline": return "Offline — key saved but not verified";
+    case "untested": return "API key saved — use Test connection in Settings → AI to verify";
+  }
+}
+
+function OnboardingFooter({ step, prev, next, finish, busy, finishing }: { readonly step: number; readonly prev: () => void; readonly next: () => void; readonly finish: () => void; readonly busy: boolean; readonly finishing: boolean }) {
   const isLast = step >= 3;
   return (
     <footer className="onboarding-footer">
-      <button className="onboarding-back" onClick={prev} type="button">Back</button>
+      <button className="onboarding-back" disabled={busy} onClick={prev} type="button">Back</button>
       <div className="onboarding-progress" aria-label={`Onboarding step ${step} of 3`}>
         {[1, 2, 3].map((value) => <span data-active={value === step} key={value} />)}
       </div>
-      {isLast ? <Button onClick={finish} tone="primary">Finish setup</Button> : <Button onClick={next} tone="primary">Continue</Button>}
+      {isLast ? <Button disabled={busy} onClick={finish} tone="primary">{finishing ? "Finishing…" : "Finish setup"}</Button> : <Button disabled={busy} onClick={next} tone="primary">Continue</Button>}
     </footer>
   );
 }

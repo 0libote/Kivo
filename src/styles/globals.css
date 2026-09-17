@@ -104,10 +104,14 @@ input::placeholder { color: var(--text-tertiary); }
 kbd { font-family: inherit; }
 
 .icon { display: block; flex: 0 0 auto; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .bootstrap-surface, .fatal-surface { width: 100%; height: 100%; background: var(--bg); }
 .fatal-surface { display: grid; place-items: center; }
 .fatal-surface > div { display: grid; gap: 5px; text-align: center; }
 .fatal-surface span { color: var(--text-secondary); }
+.fatal-surface button { justify-self: center; }
+.service-notice { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 12px; background: var(--surface-muted); color: var(--text-secondary); font-size: 12px; text-align: center; }
+.service-notice button { flex-shrink: 0; }
 
 .developer-menu {
   position: fixed;

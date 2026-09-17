@@ -7,7 +7,9 @@ use std::{
 
 use ::windows::{
     Win32::{
-        Foundation::{ERROR_NOT_FOUND, HWND, LPARAM, LRESULT, POINT, WPARAM},
+        Foundation::{
+            ERROR_NOT_FOUND, GlobalFree, HANDLE, HGLOBAL, HWND, LPARAM, LRESULT, POINT, WPARAM,
+        },
         Graphics::Dwm::{
             DWM_SYSTEMBACKDROP_TYPE, DWMSBT_NONE, DWMWA_BORDER_COLOR, DWMWA_SYSTEMBACKDROP_TYPE,
             DwmSetWindowAttribute,
@@ -18,22 +20,28 @@ use ::windows::{
         },
         System::Com::{
             CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-            CoUninitialize,
+            CoUninitialize, IDataObject,
         },
+        System::DataExchange::{
+            CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+            OpenClipboard, SetClipboardData,
+        },
+        System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        System::Ole::{CF_UNICODETEXT, OleFlushClipboard, OleGetClipboard, OleSetClipboard},
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
             },
             Input::KeyboardAndMouse::{
                 GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-                KEYEVENTF_UNICODE, SendInput, VIRTUAL_KEY, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN,
+                SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN, VK_V,
             },
             WindowsAndMessaging::{
                 CallNextHookEx, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetMessageW,
-                GetWindowLongPtrW, GetWindowTextW, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
-                SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW, UnhookWindowsHookEx,
-                WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
-                WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG,
+                PostThreadMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
+                UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
+                WM_SYSKEYUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -73,13 +81,37 @@ impl PlatformImpl {
     }
 
     pub(super) fn get_selected_text(&self) -> PlatformResult<SelectionSnapshot> {
-        let (text, process_id, bounds) = selected_text()?;
+        let native = selected_text();
         let window = unsafe { GetForegroundWindow() };
+        let target = WindowsTextTarget::capture()?;
+        let (text, process_id, bounds, strategy) = match native {
+            Ok((text, process_id, bounds)) => (
+                text,
+                process_id,
+                bounds,
+                crate::text::TextAccessStrategy::Accessibility,
+            ),
+            Err(error)
+                if error.operation == "get_selected_text"
+                    && matches!(
+                        error.kind,
+                        PlatformErrorKind::Unsupported | PlatformErrorKind::NotFound
+                    ) =>
+            {
+                let text = capture_selected_text_fallback(window)?;
+                (
+                    text,
+                    target.process_id,
+                    None,
+                    crate::text::TextAccessStrategy::ClipboardFallback,
+                )
+            }
+            Err(error) => return Err(error),
+        };
         let mut title = [0_u16; 260];
         let title_length = unsafe { GetWindowTextW(window, &mut title) }.max(0) as usize;
         let name = String::from_utf16_lossy(&title[..title_length]);
         let token = NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed);
-        let target = WindowsTextTarget::capture()?;
         *self
             .selection
             .lock()
@@ -98,7 +130,7 @@ impl PlatformImpl {
                 identifier: None,
                 native_handle: window.0 as usize,
             },
-            strategy: crate::text::TextAccessStrategy::Accessibility,
+            strategy,
             native_token: token,
         })
     }
@@ -141,7 +173,22 @@ impl PlatformImpl {
                 "The original text field or selection changed.",
             ));
         }
-        let (current, process_id, _) = selected_text()?;
+        let (current, process_id) = match selected_text() {
+            Ok((current, process_id, _)) => (current, process_id),
+            Err(error)
+                if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback
+                    && matches!(
+                        error.kind,
+                        PlatformErrorKind::Unsupported | PlatformErrorKind::NotFound
+                    ) =>
+            {
+                (
+                    capture_selected_text_fallback(window)?,
+                    snapshot.owner.process_id,
+                )
+            }
+            Err(error) => return Err(error),
+        };
         if current != snapshot.text || process_id != snapshot.owner.process_id {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
@@ -149,7 +196,7 @@ impl PlatformImpl {
                 "The selection changed before Kivo could replace it.",
             ));
         }
-        send_unicode(replacement, "replace_selected_text")
+        paste_text_fallback(window, replacement, "replace_selected_text")
     }
 
     pub(super) fn capture_insertion_target(
@@ -166,8 +213,21 @@ impl PlatformImpl {
             PermissionKind::Accessibility | PermissionKind::InputMonitoring => {
                 PermissionStatus::Unavailable
             }
-            PermissionKind::Microphone | PermissionKind::SpeechRecognition => {
-                PermissionStatus::NotDetermined
+            // Desktop Windows has no in-app consent prompt for these: SAPI
+            // and WASAPI capture just work or fail at use time with an
+            // actionable error (see windows_speech::start). Reporting
+            // NotDetermined here left the UI on an Allow button that could
+            // never resolve, so report the checkable state instead: the
+            // microphone is assumed available until capture fails, while
+            // speech recognition reflects whether a desktop recognizer is
+            // actually installed.
+            PermissionKind::Microphone => PermissionStatus::Granted,
+            PermissionKind::SpeechRecognition => {
+                if super::windows_speech::languages().is_empty() {
+                    PermissionStatus::Denied
+                } else {
+                    PermissionStatus::Granted
+                }
             }
         })
     }
@@ -258,19 +318,39 @@ impl PlatformImpl {
 
 struct WindowsTextTarget {
     window: usize,
+    process_id: u32,
     identity: Vec<i32>,
 }
 
 impl WindowsTextTarget {
     fn capture() -> PlatformResult<Self> {
+        let window = unsafe { GetForegroundWindow() };
+        let (identity, process_id) = focused_identity().unwrap_or_else(|_| {
+            let mut process_id = 0;
+            unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
+            (Vec::new(), process_id)
+        });
         Ok(Self {
-            window: unsafe { GetForegroundWindow() }.0 as usize,
-            identity: focused_identity()?,
+            window: window.0 as usize,
+            process_id,
+            identity,
         })
     }
     fn is_current(&self) -> bool {
         unsafe { GetForegroundWindow() }.0 as usize == self.window
-            && focused_identity().ok().as_ref() == Some(&self.identity)
+            && if self.identity.is_empty() {
+                let mut process_id = 0;
+                unsafe {
+                    GetWindowThreadProcessId(HWND(self.window as *mut _), Some(&mut process_id))
+                };
+                process_id == self.process_id
+            } else {
+                focused_identity()
+                    .ok()
+                    .is_some_and(|(identity, process_id)| {
+                        identity == self.identity && process_id == self.process_id
+                    })
+            }
     }
 }
 
@@ -297,16 +377,16 @@ impl crate::text::InsertionTarget for WindowsTextTarget {
         if !self.is_current() {
             return Err(crate::text::TextError::SelectionExpired);
         }
-        send_unicode(text, "insert_text_at_cursor")
+        paste_text_fallback(HWND(self.window as *mut _), text, "insert_text_at_cursor")
             .map_err(|_| crate::text::TextError::InsertionFailed)
     }
 }
 
-fn focused_identity() -> PlatformResult<Vec<i32>> {
+fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
     use ::windows::Win32::System::Ole::{
         SafeArrayDestroy, SafeArrayGetElement, SafeArrayGetLBound, SafeArrayGetUBound,
     };
-    let read = || -> ::windows::core::Result<Vec<i32>> {
+    let read = || -> ::windows::core::Result<(Vec<i32>, u32)> {
         unsafe {
             let _apartment = AutomationApartment::new();
             let automation: IUIAutomation =
@@ -321,7 +401,8 @@ fn focused_identity() -> PlatformResult<Vec<i32>> {
             let result = (|| {
                 let low = SafeArrayGetLBound(array, 1)?;
                 let high = SafeArrayGetUBound(array, 1)?;
-                let mut identity = vec![element.CurrentProcessId()?];
+                let process_id = element.CurrentProcessId()?;
+                let mut identity = Vec::new();
                 for index in low..=high {
                     let mut value = 0_i32;
                     SafeArrayGetElement(array, &index, (&mut value as *mut i32).cast())?;
@@ -329,27 +410,42 @@ fn focused_identity() -> PlatformResult<Vec<i32>> {
                 }
                 // Remember the caret/selection offsets as well as the control.
                 // A moved caret in the same editor must also require recovery.
-                let pattern: IUIAutomationTextPattern =
-                    element.GetCurrentPatternAs(UIA_TextPatternId)?;
-                let selections = pattern.GetSelection()?;
-                if selections.Length()? != 1 {
-                    return Err(::windows::core::Error::from_hresult(HRESULT(
-                        0x80004005u32 as i32,
-                    )));
+                if let Ok(pattern) =
+                    element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+                    && let Ok(selections) = pattern.GetSelection()
+                    && selections.Length().unwrap_or_default() == 1
+                    && let Ok(selected) = selections.GetElement(0)
+                    && let Ok(before) = pattern.DocumentRange()
+                {
+                    use ::windows::Win32::UI::Accessibility::{
+                        TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
+                    };
+                    if before
+                        .MoveEndpointByRange(
+                            TextPatternRangeEndpoint_End,
+                            &selected,
+                            TextPatternRangeEndpoint_Start,
+                        )
+                        .is_ok()
+                    {
+                        // Hash (not length) the text: a same-length edit in
+                        // the same control must invalidate the snapshot, or
+                        // replacement could land on changed text.
+                        identity.push(
+                            before
+                                .GetText(-1)
+                                .map(|v| text_identity(&v.to_string()))
+                                .unwrap_or(-1),
+                        );
+                        identity.push(
+                            selected
+                                .GetText(-1)
+                                .map(|v| text_identity(&v.to_string()))
+                                .unwrap_or(-1),
+                        );
+                    }
                 }
-                let selected = selections.GetElement(0)?;
-                let before = pattern.DocumentRange()?;
-                use ::windows::Win32::UI::Accessibility::{
-                    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start,
-                };
-                before.MoveEndpointByRange(
-                    TextPatternRangeEndpoint_End,
-                    &selected,
-                    TextPatternRangeEndpoint_Start,
-                )?;
-                identity.push(before.GetText(-1)?.len() as i32);
-                identity.push(selected.GetText(-1)?.len() as i32);
-                Ok(identity)
+                Ok((identity, process_id.max(0) as u32))
             })();
             let _ = SafeArrayDestroy(array);
             result
@@ -442,7 +538,7 @@ fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
             .map_err(|_| os_error("get_selected_text", "The focused control is unavailable."))?;
         if focused.CurrentIsPassword().unwrap_or_default().as_bool() {
             return Err(PlatformError::unsupported(
-                "get_selected_text",
+                "secure_text",
                 "Password fields are excluded.",
             ));
         }
@@ -492,33 +588,158 @@ fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
     }
 }
 
-fn send_unicode(text: &str, operation: &'static str) -> PlatformResult<()> {
-    let mut inputs = Vec::with_capacity(text.encode_utf16().count() * 2);
-    for unit in text.encode_utf16() {
-        inputs.push(keyboard_input(unit, KEYEVENTF_UNICODE));
-        inputs.push(keyboard_input(unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+fn capture_selected_text_fallback(window: HWND) -> PlatformResult<String> {
+    let _apartment = AutomationApartment::new();
+    let snapshot = unsafe { OleGetClipboard().ok() };
+    // Never clear the clipboard before asking the target to copy: clearing
+    // first destroys non-text formats, and if the target then ignores Ctrl+C
+    // (or another app writes in between) the restore is skipped and the
+    // user's original clipboard is lost. Instead, record the sequence and
+    // treat only a change as a fresh copy — a real copy always bumps the
+    // sequence, even when the bytes are identical.
+    let before_sequence = unsafe { GetClipboardSequenceNumber() };
+    send_control_shortcut(VK_C, "get_selected_text")?;
+    let mut captured_sequence = before_sequence;
+    for _ in 0..150 {
+        captured_sequence = unsafe { GetClipboardSequenceNumber() };
+        if captured_sequence != before_sequence {
+            break;
+        }
+        thread::sleep(std::time::Duration::from_millis(10));
     }
+    if captured_sequence == before_sequence {
+        // The target ignored the copy; the clipboard was never touched.
+        return Err(PlatformError::new(
+            PlatformErrorKind::Unsupported,
+            "get_selected_text",
+            "The selection could not be read in this application.",
+        ));
+    }
+    let text = read_clipboard_text(window, "get_selected_text");
+    restore_clipboard_if_unchanged(snapshot.as_ref(), captured_sequence);
+    let text = text?;
+    if text.trim().is_empty() {
+        Err(PlatformError::new(
+            PlatformErrorKind::NotFound,
+            "get_selected_text",
+            "Select some text first.",
+        ))
+    } else {
+        Ok(text)
+    }
+}
+
+fn paste_text_fallback(window: HWND, text: &str, operation: &'static str) -> PlatformResult<()> {
+    let _apartment = AutomationApartment::new();
+    let snapshot = unsafe { OleGetClipboard().ok() };
+    write_clipboard_text(window, text, operation)?;
+    let written_sequence = unsafe { GetClipboardSequenceNumber() };
+    if let Err(error) = send_control_shortcut(VK_V, operation) {
+        restore_clipboard_if_unchanged(snapshot.as_ref(), written_sequence);
+        return Err(error);
+    }
+    thread::sleep(std::time::Duration::from_millis(350));
+    restore_clipboard_if_unchanged(snapshot.as_ref(), written_sequence);
+    Ok(())
+}
+
+fn write_clipboard_text(window: HWND, value: &str, operation: &'static str) -> PlatformResult<()> {
+    let text: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        let memory = GlobalAlloc(GMEM_MOVEABLE, text.len() * 2)
+            .map_err(|_| os_error(operation, "The clipboard text could not be allocated."))?;
+        let locked = GlobalLock(memory) as *mut u16;
+        if locked.is_null() {
+            let _ = GlobalFree(Some(memory));
+            return Err(os_error(
+                operation,
+                "The clipboard text could not be written.",
+            ));
+        }
+        ptr::copy_nonoverlapping(text.as_ptr(), locked, text.len());
+        let _ = GlobalUnlock(memory);
+        if OpenClipboard(Some(window)).is_err() {
+            let _ = GlobalFree(Some(memory));
+            return Err(os_error(operation, "The clipboard is busy."));
+        }
+        let result = EmptyClipboard()
+            .and_then(|_| SetClipboardData(u32::from(CF_UNICODETEXT.0), Some(HANDLE(memory.0))));
+        let _ = CloseClipboard();
+        if result.is_err() {
+            let _ = GlobalFree(Some(memory));
+            return Err(os_error(
+                operation,
+                "The clipboard text could not be written.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn read_clipboard_text(window: HWND, operation: &'static str) -> PlatformResult<String> {
+    unsafe {
+        OpenClipboard(Some(window)).map_err(|_| os_error(operation, "The clipboard is busy."))?;
+        let result = (|| {
+            let handle = GetClipboardData(u32::from(CF_UNICODETEXT.0))?;
+            let locked = GlobalLock(HGLOBAL(handle.0)) as *const u16;
+            if locked.is_null() {
+                return Err(::windows::core::Error::from_hresult(HRESULT(
+                    0x80004005u32 as i32,
+                )));
+            }
+            let mut length = 0usize;
+            while *locked.add(length) != 0 {
+                length += 1;
+            }
+            let text = String::from_utf16_lossy(std::slice::from_raw_parts(locked, length));
+            let _ = GlobalUnlock(HGLOBAL(handle.0));
+            Ok(text)
+        })();
+        let _ = CloseClipboard();
+        result.map_err(|_| os_error(operation, "The copied selection did not contain text."))
+    }
+}
+
+fn restore_clipboard_if_unchanged(snapshot: Option<&IDataObject>, expected_sequence: u32) {
+    if unsafe { GetClipboardSequenceNumber() } != expected_sequence {
+        return;
+    }
+    unsafe {
+        if OleSetClipboard(snapshot).is_ok() && snapshot.is_some() {
+            let _ = OleFlushClipboard();
+        }
+    }
+}
+
+fn send_control_shortcut(key: VIRTUAL_KEY, operation: &'static str) -> PlatformResult<()> {
+    let inputs = [
+        virtual_key_input(VK_CONTROL, Default::default()),
+        virtual_key_input(key, Default::default()),
+        virtual_key_input(key, KEYEVENTF_KEYUP),
+        virtual_key_input(VK_CONTROL, KEYEVENTF_KEYUP),
+    ];
     let sent = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) } as usize;
     if sent == inputs.len() {
         Ok(())
     } else {
-        Err(os_error(operation, "Windows could not insert the text."))
+        Err(os_error(
+            operation,
+            "Windows blocked the keyboard shortcut.",
+        ))
     }
 }
 
-fn keyboard_input(
-    scan: u16,
+fn virtual_key_input(
+    key: VIRTUAL_KEY,
     flags: ::windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS,
 ) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: VIRTUAL_KEY(0),
-                wScan: scan,
+                wVk: key,
                 dwFlags: flags,
-                time: 0,
-                dwExtraInfo: 0,
+                ..Default::default()
             },
         },
     }
@@ -662,6 +883,28 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
+/// Identity hash of surrounding text for selection snapshots. Lengths alone
+/// would let a same-length edit in the same control compare equal.
+fn text_identity(text: &str) -> i32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish() as i32
+}
+
 fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformError {
     PlatformError::new(PlatformErrorKind::Os, operation, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_identity;
+
+    #[test]
+    fn text_identity_distinguishes_same_length_edits() {
+        assert_eq!(text_identity("hello"), text_identity("hello"));
+        assert_ne!(text_identity("hello"), text_identity("hallo"));
+        assert_ne!(text_identity(""), text_identity(" "));
+    }
 }

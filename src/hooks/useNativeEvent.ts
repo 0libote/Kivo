@@ -14,7 +14,12 @@ export function useNativeEvent<T>(event: EventName, handler: (payload: T) => voi
       .then((cleanup) => {
         if (disposed) cleanup();
         else unlisten = cleanup;
-      }).catch(() => { /* A closed native surface may reject registration. */ });
+      }).catch(() => {
+        // A closed native surface may reject registration; warn so a
+        // silently-stale subscription (settings, dictation level) is visible
+        // in diagnostics instead of failing without a trace.
+        console.warn(`Kivo event subscription failed: ${event}`);
+      });
 
     return () => {
       disposed = true;

@@ -31,6 +31,10 @@ const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEYCODE_FIELD: u32 = 9;
 const ESCAPE_KEYCODE: i64 = 53;
+// Delivered as pseudo-events when macOS disables a slow tap; the tap must be
+// re-enabled or the Fn monitor silently dies until restart.
+const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
 static NEXT_SELECTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 
@@ -54,10 +58,24 @@ impl PlatformImpl {
     pub(super) fn get_selected_text(&self) -> PlatformResult<SelectionSnapshot> {
         ensure_accessibility("get_selected_text")?;
         let (application, element) = focused_ax_elements("get_selected_text")?;
-        let text_value =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "get_selected_text")?;
-        let text = cf_string_to_string(text_value.as_ptr(), "get_selected_text")?;
-        if text.is_empty() {
+        let native_text =
+            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "get_selected_text")
+                .and_then(|value| cf_string_to_string(value.as_ptr(), "get_selected_text"));
+        let (text, strategy) = match native_text {
+            Ok(text) if !text.trim().is_empty() => {
+                (text, crate::text::TextAccessStrategy::Accessibility)
+            }
+            Ok(_) => (
+                capture_selected_text_fallback()?,
+                crate::text::TextAccessStrategy::ClipboardFallback,
+            ),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => (
+                capture_selected_text_fallback()?,
+                crate::text::TextAccessStrategy::ClipboardFallback,
+            ),
+            Err(error) => return Err(error),
+        };
+        if text.trim().is_empty() {
             return Err(PlatformError::new(
                 PlatformErrorKind::NotFound,
                 "get_selected_text",
@@ -69,7 +87,7 @@ impl PlatformImpl {
         let bounds = selection_bounds(element.as_ptr()).into_iter().collect();
 
         let range =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedTextRange", "get_selected_text")?;
+            copy_ax_attribute(element.as_ptr(), "AXSelectedTextRange", "get_selected_text").ok();
         let token = NEXT_SELECTION_TOKEN.fetch_add(1, Ordering::Relaxed);
         *self
             .selection
@@ -80,7 +98,7 @@ impl PlatformImpl {
             text,
             bounds,
             owner,
-            strategy: crate::text::TextAccessStrategy::Accessibility,
+            strategy,
             native_token: token,
         })
     }
@@ -133,9 +151,12 @@ impl PlatformImpl {
             ));
         }
 
-        let current =
-            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")?;
-        let current = cf_string_to_string(current.as_ptr(), "replace_selected_text")?;
+        let current = if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback {
+            capture_selected_text_fallback()?
+        } else {
+            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")
+                .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))?
+        };
         if current != snapshot.text {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
@@ -144,12 +165,18 @@ impl PlatformImpl {
             ));
         }
 
-        set_ax_string_attribute(
+        match set_ax_string_attribute(
             element.as_ptr(),
             "AXSelectedText",
             replacement,
             "replace_selected_text",
-        )
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => {
+                paste_text_fallback(replacement, "replace_selected_text")
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(super) fn capture_insertion_target(
@@ -161,7 +188,8 @@ impl PlatformImpl {
             element.as_ptr(),
             "AXSelectedTextRange",
             "capture_insertion_target",
-        )?;
+        )
+        .ok();
         Ok(Box::new(MacTextTarget { element, range }))
     }
 
@@ -185,10 +213,10 @@ impl PlatformImpl {
                 }
             },
             PermissionKind::Microphone => {
-                permission_from_apple_status(unsafe { kivo_microphone_authorization_status() })
+                permission_from_microphone_status(unsafe { kivo_microphone_authorization_status() })
             }
             PermissionKind::SpeechRecognition => {
-                permission_from_apple_status(unsafe { kivo_speech_authorization_status() })
+                permission_from_speech_status(unsafe { kivo_speech_authorization_status() })
             }
         };
         Ok(status)
@@ -205,7 +233,17 @@ impl PlatformImpl {
                 }
             }
             PermissionKind::InputMonitoring => unsafe {
-                if !CGRequestListenEventAccess() {
+                // `CGRequestListenEventAccess` returns false both when the
+                // prompt was just shown (awaiting the user) and when access
+                // was denied. Erroring on the first call reports failure the
+                // moment the system prompt appears, so treat the first
+                // request as "prompt shown" and only error once a prompt has
+                // already been answered.
+                static INPUT_MONITORING_PROMPTED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !CGRequestListenEventAccess()
+                    && INPUT_MONITORING_PROMPTED.swap(true, std::sync::atomic::Ordering::AcqRel)
+                {
                     return Err(PlatformError::new(
                         PlatformErrorKind::PermissionDenied,
                         "request_permission",
@@ -303,11 +341,26 @@ impl PlatformImpl {
     }
 }
 
-fn permission_from_apple_status(status: i32) -> PermissionStatus {
+/// `AVAuthorizationStatus`: 0 not-determined, 1 restricted, 2 denied,
+/// 3 authorized.
+fn permission_from_microphone_status(status: i32) -> PermissionStatus {
     match status {
         0 => PermissionStatus::NotDetermined,
         1 => PermissionStatus::Restricted,
         2 => PermissionStatus::Denied,
+        3 => PermissionStatus::Granted,
+        _ => PermissionStatus::Unavailable,
+    }
+}
+
+/// `SFSpeechRecognizerAuthorizationStatus` orders its cases differently:
+/// 0 not-determined, 1 denied, 2 restricted, 3 authorized. Sharing one
+/// mapper would swap denied and restricted for speech.
+fn permission_from_speech_status(status: i32) -> PermissionStatus {
+    match status {
+        0 => PermissionStatus::NotDetermined,
+        1 => PermissionStatus::Denied,
+        2 => PermissionStatus::Restricted,
         3 => PermissionStatus::Granted,
         _ => PermissionStatus::Unavailable,
     }
@@ -781,12 +834,21 @@ struct MacShortcutState {
 }
 
 extern "C" fn mac_event_tap_callback(
-    _proxy: *mut c_void,
+    proxy: *mut c_void,
     event_type: u32,
     event: *mut c_void,
     context: *mut c_void,
 ) -> *mut c_void {
     if event.is_null() || context.is_null() {
+        return event;
+    }
+    // macOS disables an unresponsive tap and reports it as a pseudo-event.
+    // Re-enable immediately so the Fn monitor survives a slow callback.
+    if event_type == EVENT_TAP_DISABLED_BY_TIMEOUT || event_type == EVENT_TAP_DISABLED_BY_USER_INPUT
+    {
+        if !proxy.is_null() {
+            unsafe { CGEventTapEnable(proxy, true) };
+        }
         return event;
     }
     let state = unsafe { &mut *context.cast::<MacShortcutState>() };
@@ -894,7 +956,7 @@ impl Drop for MacSpeechSession {
 
 struct MacTextTarget {
     element: CfOwned,
-    range: CfOwned,
+    range: Option<CfOwned>,
 }
 
 // AXUIElement references are retained remote accessibility objects, not AppKit
@@ -906,16 +968,17 @@ impl MacTextTarget {
         let Ok((_, current)) = focused_ax_elements("validate_text_target") else {
             return false;
         };
-        let Ok(range) = copy_ax_attribute(
-            current.as_ptr(),
-            "AXSelectedTextRange",
-            "validate_text_target",
-        ) else {
+        if unsafe { !CFEqual(current.as_ptr(), self.element.as_ptr()) } {
             return false;
-        };
-        unsafe {
-            CFEqual(current.as_ptr(), self.element.as_ptr())
-                && CFEqual(range.as_ptr(), self.range.as_ptr())
+        }
+        match &self.range {
+            Some(expected) => copy_ax_attribute(
+                current.as_ptr(),
+                "AXSelectedTextRange",
+                "validate_text_target",
+            )
+            .is_ok_and(|range| unsafe { CFEqual(range.as_ptr(), expected.as_ptr()) }),
+            None => true,
         }
     }
 }
@@ -924,13 +987,55 @@ impl crate::text::InsertionTarget for MacTextTarget {
         if !self.is_current() {
             return Err(crate::text::TextError::SelectionExpired);
         }
-        set_ax_string_attribute(
+        match set_ax_string_attribute(
             self.element.as_ptr(),
             "AXSelectedText",
             text,
             "insert_text_at_cursor",
+        ) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind == PlatformErrorKind::Unsupported => {
+                paste_text_fallback(text, "insert_text_at_cursor")
+                    .map_err(|_| crate::text::TextError::InsertionFailed)
+            }
+            Err(_) => Err(crate::text::TextError::InsertionFailed),
+        }
+    }
+}
+
+fn capture_selected_text_fallback() -> PlatformResult<String> {
+    let pointer = unsafe { kivo_capture_selected_text() };
+    if pointer.is_null() {
+        return Err(PlatformError::new(
+            PlatformErrorKind::NotFound,
+            "get_selected_text",
+            "Select some text first.",
+        ));
+    }
+    let text = unsafe {
+        std::ffi::CStr::from_ptr(pointer)
+            .to_string_lossy()
+            .into_owned()
+    };
+    unsafe { kivo_free_text(pointer) };
+    Ok(text)
+}
+
+fn paste_text_fallback(text: &str, operation: &'static str) -> PlatformResult<()> {
+    let text = CString::new(text).map_err(|_| {
+        PlatformError::new(
+            PlatformErrorKind::InvalidState,
+            operation,
+            "Text contains a null character.",
         )
-        .map_err(|_| crate::text::TextError::InsertionFailed)
+    })?;
+    if unsafe { kivo_paste_text(text.as_ptr()) } {
+        Ok(())
+    } else {
+        Err(os_error(
+            operation,
+            "macOS could not paste into the focused application.",
+        ))
     }
 }
 
@@ -1276,6 +1381,9 @@ unsafe extern "C" {
 }
 
 unsafe extern "C" {
+    fn kivo_capture_selected_text() -> *mut c_char;
+    fn kivo_paste_text(text: *const c_char) -> bool;
+    fn kivo_free_text(text: *mut c_char);
     fn kivo_microphone_authorization_status() -> i32;
     fn kivo_speech_authorization_status() -> i32;
     fn kivo_request_microphone_authorization();

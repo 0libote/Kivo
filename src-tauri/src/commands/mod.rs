@@ -98,6 +98,10 @@ impl AppCore {
 
         self.settings_runtime.apply(&previous, &settings)?;
         if let Err(error) = self.settings_repository.save(&settings) {
+            // Restore the previous runtime state. A failing restore cannot
+            // reintroduce `settings` (see ShellSettingsRuntime::apply);
+            // shortcuts and theme are re-applied from the saved file on next
+            // launch, so any residual OS-side divergence is transient.
             let _ = self.settings_runtime.apply(&settings, &previous);
             return Err(error.into());
         }
@@ -366,7 +370,18 @@ impl AppCore {
             generation
         };
         let cursor = self.text.cursor_position();
-        let captured = self.text.capture_selection().await;
+        // Native capture normally resolves in milliseconds, but a hung
+        // AX/UIA query must not hang the shortcut forever: time out so the
+        // popup can show a failure instead of never opening.
+        let captured = match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.text.capture_selection(),
+        )
+        .await
+        {
+            Ok(captured) => captured,
+            Err(_) => Err(crate::text::TextError::Backend),
+        };
         let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
         self.check_writing_generation(generation)?;
         *self
@@ -1423,7 +1438,21 @@ pub async fn replace_writing_result(
     core: State<'_, AppCore>,
     text: String,
 ) -> Result<(), CommandError> {
-    let _ = text;
+    // The ticket is the stored result (prevents paste-twice races), but never
+    // silently substitute: if the caller's text drifted from what is stored,
+    // fail instead of inserting something the user did not approve.
+    let matches = core
+        .last_result
+        .lock()
+        .map(|stored| {
+            stored
+                .as_ref()
+                .is_some_and(|result| result.text.as_ref() == text)
+        })
+        .unwrap_or(false);
+    if !matches {
+        return Err(CommandError::from(AppCoreError::NoResult));
+    }
     core.replace_with_last_result()
         .await
         .map_err(CommandError::from)?;
@@ -1456,6 +1485,16 @@ pub fn close_surface(
     surface: String,
     core: State<'_, AppCore>,
 ) -> Result<(), CommandError> {
+    if !matches!(
+        surface.as_str(),
+        "flow-bar" | "writing-tools" | "settings" | "onboarding"
+    ) {
+        return Err(CommandError {
+            code: "invalid_surface".into(),
+            message: "That surface does not exist.".into(),
+            recoverable: false,
+        });
+    }
     if surface == "writing-tools" {
         let _ = core.dismiss_writing_tools();
     }
@@ -1482,6 +1521,16 @@ pub fn set_surface_mode(
         return Err(CommandError {
             code: "invalid_surface".into(),
             message: "That surface cannot be resized.".into(),
+            recoverable: false,
+        });
+    }
+    if !matches!(
+        mode.as_str(),
+        "menu" | "custom" | "summary" | "processing" | "result" | "error"
+    ) {
+        return Err(CommandError {
+            code: "invalid_surface".into(),
+            message: "That writing-tools mode is not known.".into(),
             recoverable: false,
         });
     }
@@ -1554,6 +1603,13 @@ fn permission_statuses(
     platform: &crate::platform::PlatformServices,
 ) -> Result<Vec<FrontendPermissionStatus>, crate::platform::PlatformError> {
     let host = crate::config::HostPlatform::current();
+    // Windows has no OS consent prompt for SAPI: the row reflects installed
+    // engines instead, so the explanation points at the language packs.
+    let speech_explanation = if matches!(host, crate::config::HostPlatform::Windows) {
+        "Needs an installed Windows desktop speech language."
+    } else {
+        "Transcribe speech using the operating system."
+    };
     [
         (
             crate::platform::PermissionKind::Accessibility,
@@ -1577,7 +1633,7 @@ fn permission_statuses(
             crate::platform::PermissionKind::SpeechRecognition,
             "speech-recognition",
             permission_required_for(crate::platform::PermissionKind::SpeechRecognition, host),
-            "Transcribe speech using the operating system.",
+            speech_explanation,
         ),
     ]
     .into_iter()
@@ -1657,7 +1713,9 @@ fn platform_command_error(error: crate::platform::PlatformError) -> CommandError
 }
 
 fn invalid_settings_json() -> serde_json::Error {
-    serde_json::from_str::<serde_json::Value>("{").unwrap_err()
+    // Never parse to obtain this: a serde_json behavior change must not turn
+    // settings validation into a backend panic.
+    serde::de::Error::custom("invalid settings value")
 }
 
 #[cfg(test)]

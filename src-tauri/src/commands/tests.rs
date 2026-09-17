@@ -922,6 +922,27 @@ impl SettingsRuntime for RecordingSettingsRuntime {
     }
 }
 
+struct FailingSettingsRuntime;
+impl SettingsRuntime for FailingSettingsRuntime {
+    fn apply(&self, _: &AppSettings, _: &AppSettings) -> Result<(), SettingsRuntimeError> {
+        Err(SettingsRuntimeError::ShortcutUnavailable)
+    }
+}
+
+#[test]
+fn failed_settings_apply_keeps_previous_preferences() {
+    // The OS-side apply path is fallible (shortcut conflicts, autostart
+    // denial): a failure must abort the save with memory and file untouched.
+    let (mut core, _) = core("http://127.0.0.1:1", None);
+    let state = Arc::get_mut(&mut core).unwrap();
+    state.settings_runtime = Arc::new(FailingSettingsRuntime);
+    let previous = core.settings().unwrap();
+    let mut changed = previous.clone();
+    changed.general.launch_at_login = !previous.general.launch_at_login;
+    assert!(core.save_settings(changed).is_err());
+    assert_eq!(core.settings().unwrap(), previous);
+}
+
 #[test]
 fn failed_settings_write_restores_runtime_and_keeps_previous_preferences() {
     let (mut core, _) = core("http://127.0.0.1:1", None);

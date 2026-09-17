@@ -68,7 +68,10 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
       if (event.key !== "Escape" || state.status === "hidden" || state.status === "idle") return;
       event.preventDefault();
       dispatch({ type: "CANCEL" });
-      void nativeBridge.cancelDictation();
+      void nativeBridge.cancelDictation().catch(() => {
+        // Local state already cancelled; a backend failure here is not
+        // user-actionable (the session is gone from the UI's perspective).
+      });
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -108,7 +111,11 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
                   <i key={bar.id} style={{ "--level": bar.value } as React.CSSProperties} />
                 ))}
               </span> : <><span aria-hidden="true" className="flow-bar__input-level" style={{ "--level": state.level } as React.CSSProperties}><i /><i /><i /></span><span className="flow-bar__listening">Listening</span></>}
-              <button className="flow-bar__stop" aria-label="Finish dictation" onClick={() => void nativeBridge.stopDictation()} type="button"><span /></button>
+              <button className="flow-bar__stop" aria-label="Finish dictation" onClick={() => void nativeBridge.stopDictation().catch((error: unknown) => dispatch({
+                type: "FAIL",
+                message: error instanceof Error ? error.message : "Dictation could not finish.",
+                canRetry: true,
+              }))} type="button"><span /></button>
             </>
           ) : null}
 
@@ -125,7 +132,11 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
               <Icon name="error" size={16} />
               <span>{state.message}</span>
               <div className="flow-bar__error-actions">
-              <button onClick={() => void nativeBridge.showSurface("settings")} type="button">Open Kivo</button>
+              <button onClick={() => void nativeBridge.showSurface("settings").catch((error: unknown) => dispatch({
+                type: "FAIL",
+                message: error instanceof Error ? error.message : "Kivo could not open its window.",
+                canRetry: state.canRetry,
+              }))} type="button">Open Kivo</button>
               {state.canRetry ? (
                 <button
                   onClick={() => {
@@ -140,7 +151,12 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
                   Retry
                 </button>
               ) : null}
-              <button aria-label="Dismiss dictation error" onClick={() => void nativeBridge.cancelDictation()} type="button">Dismiss</button>
+              <button aria-label="Dismiss dictation error" onClick={() => {
+                dispatch({ type: "HIDE" });
+                void nativeBridge.cancelDictation().catch(() => {
+                  // Local state already hid the error; nothing to report.
+                });
+              }} type="button">Dismiss</button>
               </div>
             </div>
           ) : null}
