@@ -5,7 +5,7 @@ This repo is maintained with AI help on a Linux server. Read this before changin
 ## Verify (Linux-safe, run these)
 
 ```sh
-bun run ai-check        # typecheck + lint + vitest + 3 parity gates + cargo test (~30s)
+bun run ai-check        # typecheck + lint + fmt/clippy + vitest + 3 parity gates + cargo test (~40s)
 bun run ai-check:full   # ai-check + vite build + playwright smoke (~2min)
 ```
 
