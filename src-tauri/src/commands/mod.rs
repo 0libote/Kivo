@@ -845,6 +845,7 @@ impl From<AppCoreError> for CommandError {
             | AppCoreError::Speech(SpeechError::RecognitionUnavailable)
             | AppCoreError::Speech(SpeechError::Backend) => true,
             AppCoreError::Gemini(error) if error.is_rate_limited() => true,
+            AppCoreError::Gemini(error) if error.is_server_error() => true,
             _ => false,
         };
         Self {

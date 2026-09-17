@@ -411,6 +411,70 @@ async fn rate_limited_primary_retries_once_on_the_backup_model() {
     assert_eq!(second["model"], "gemini-2.5-flash");
 }
 
+#[tokio::test]
+async fn transient_server_error_retries_once_on_the_same_model() {
+    let mut server = HttpSequenceFixture::new(vec![
+        (
+            500,
+            r#"{"error":{"message":"Internal error encountered.","code":"api_error"}}"#,
+        ),
+        (200, TEXT_RESPONSE),
+    ]);
+    let (core, text) = core(&server.endpoint, Some("Original selection"));
+    core.open_writing_tools().await.unwrap();
+    let result = core
+        .run_writing_action(
+            WritingAction::Proofread,
+            None,
+            None,
+            WritingSourceKind::Text,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(result, WritingOutcome::Replaced));
+    assert_eq!(
+        *text.replacements.lock().unwrap(),
+        vec![(1, "Summary".into())]
+    );
+    let first = server.next_request();
+    let second = server.next_request();
+    assert_eq!(first["model"], "gemini-3.8-flash");
+    assert_eq!(second["model"], "gemini-3.8-flash");
+}
+
+#[tokio::test]
+async fn persistent_server_errors_fail_retryable_after_retries() {
+    let internal = r#"{"error":{"message":"Internal error encountered.","code":"api_error"}}"#;
+    // Exactly 4 fixtures: 1 initial + 3 retries. A 5th attempt would find no
+    // server and fail differently, so this proves the retry count.
+    let mut server = HttpSequenceFixture::new(vec![
+        (500, internal),
+        (500, internal),
+        (500, internal),
+        (500, internal),
+    ]);
+    let (core, _) = core(&server.endpoint, Some("Original selection"));
+    core.open_writing_tools().await.unwrap();
+    let error = core
+        .run_writing_action(
+            WritingAction::Proofread,
+            None,
+            None,
+            WritingSourceKind::Text,
+        )
+        .await
+        .unwrap_err();
+    for _ in 0..4 {
+        assert_eq!(server.next_request()["model"], "gemini-3.8-flash");
+    }
+    let command = CommandError::from(error);
+    assert_eq!(
+        command.message,
+        "Gemini hit a temporary error. Try again shortly."
+    );
+    assert!(command.recoverable);
+}
+
 #[test]
 fn model_unavailable_error_names_the_model_and_keeps_key_guidance() {
     let error = AppCoreError::AiModelUnavailable {
