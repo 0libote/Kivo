@@ -121,6 +121,36 @@ the microphone privacy settings), and Speech Recognition reflects the
 installed desktop speech languages — an empty engine list shows guidance
 to install one instead of an Allow button that could never resolve.
 
+### macOS beta: repeated prompts and "Settings shows on, app shows off"
+
+The rolling `continuous` beta is ad-hoc signed (`signingIdentity: "-"`,
+free). macOS TCC keys Accessibility and Input Monitoring grants to the
+code signature, not just the bundle id, so every rebuilt/updated beta
+looks like a brand-new app: System Settings may still list Kivo as
+enabled while `AXIsProcessTrusted()` returns false, unlocking Privacy &
+Security asks for a password each time, and Keychain may re-prompt for
+the API-key item after an update. This is expected for ad-hoc builds —
+stable `app-v*` releases are Developer-ID signed and notarized when the
+Apple secrets are configured, and their grants persist across updates.
+
+What to check on the Mac:
+
+- `codesign -dv --verbose=4 /Applications/Kivo.app` — `Signature=adhoc`
+  means grants will not survive updates; a Developer ID line means they should.
+- If an old build's entry is stuck and the new one can't be enabled, use
+  Settings → Permissions → Clear stale entries (runs
+  `tccutil reset All com.kivo.desktop` for Kivo only, no sudo needed),
+  then re-allow each permission in turn. Manual equivalent:
+  `tccutil reset All com.kivo.desktop`, then re-add Kivo in
+  System Settings → Privacy & Security → Accessibility.
+- `log show --last 10m --predicate 'process == "Kivo"'` and Console.app
+  show the prompt / TCC denial lines; Kivo never logs text, transcripts,
+  or keys.
+- In-app, Settings → Permissions now refreshes automatically (poll +
+  window focus) after you grant in System Settings; the first Allow click
+  shows the system prompt, a still-off state afterwards means open System
+  Settings and toggle Kivo there.
+
 ## Packaging and signing
 
 ### macOS
@@ -164,7 +194,7 @@ Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. When a stable update is available, Settings → About offers **Download and Install** in the app (signed `latest.json` artifacts, then **Restart now** to finish; the Windows installer exits the app itself). Install failures, unsigned local builds, and beta builds fall back to the manual GitHub download. Beta builds are ad-hoc signed (free, not notarized) and always require a manual download plus the one-time macOS approval above.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. When a stable update is available, Settings → About offers **Download and Install** in the app (signed `latest.json` updater artifacts are published for both macOS and Windows; installing automatically restarts to finish — the Windows installer exits the app itself — with a **Restart now** fallback if the app is still alive). Install failures, unsigned local builds, and beta builds fall back to the manual GitHub download. Beta builds are ad-hoc signed (free, not notarized) and always require a manual download plus the one-time macOS approval above.
 
 ## Privacy and diagnostics
 

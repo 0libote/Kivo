@@ -61,6 +61,7 @@ export interface NativeBridge {
   getPermissions(): Promise<PermissionStatus[]>;
   requestPermission(kind: PermissionKind): Promise<PermissionStatus[]>;
   openPermissionSettings(kind: PermissionKind): Promise<void>;
+  resetPermissionGrants(): Promise<PermissionStatus[]>;
   listMicrophones(): Promise<MicrophoneDevice[]>;
   listSpeechLanguages(): Promise<SpeechLanguage[]>;
   listAiProviders(): Promise<AiProviderInfo[]>;
@@ -148,6 +149,7 @@ class TauriBridge implements NativeBridge {
   getPermissions = () => call<PermissionStatus[]>("get_permission_statuses");
   requestPermission = (kind: PermissionKind) => call<PermissionStatus[]>("request_permission", { kind });
   openPermissionSettings = (kind: PermissionKind) => call<void>("open_permission_settings", { kind });
+  resetPermissionGrants = () => call<PermissionStatus[]>("reset_permission_grants");
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
@@ -281,6 +283,18 @@ class MockBridge implements NativeBridge {
 
   async openPermissionSettings() {
     // Intentional no-op: browser harness has no OS settings screen to open.
+  }
+
+  async resetPermissionGrants() {
+    // Mirror a TCC reset: entries the OS would forget become grantable again.
+    await delay(350);
+    this.permissions = this.permissions.map((permission) =>
+      permission.state === "unavailable"
+        ? permission
+        : { ...permission, state: "not-determined" as const },
+    );
+    this.emit("permission-status-changed", structuredClone(this.permissions));
+    return structuredClone(this.permissions);
   }
 
   async listMicrophones() {

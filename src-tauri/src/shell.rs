@@ -1606,14 +1606,14 @@ fn update_check_error() -> CommandError {
 }
 
 /// Install the pending stable update in-app via the Tauri updater plugin
-/// (signed artifacts from `latest.json`). Only offered for the stable
-/// channel: beta builds are ad-hoc signed and local builds carry no trusted
-/// updater key, so those keep the manual GitHub download. Windows takes the
-/// same path once its release job publishes updater artifacts; until then
-/// the plugin reports no installable update and callers fall back to the
-/// download link. Identical Rust on both desktops; platform differences
-/// (installer exit on Windows vs. relaunch on macOS) are handled by the
-/// plugin and the explicit `restart_app` step below.
+/// (signed artifacts from `latest.json`, published for both desktops by the
+/// stable release workflow). Only offered for the stable channel: beta builds
+/// are ad-hoc signed and local builds carry no trusted updater key, so those
+/// keep the manual GitHub download. Identical Rust on both desktops; platform
+/// differences (installer exit on Windows vs. relaunch on macOS) are handled
+/// by the plugin and the explicit `restart_app` step below, which the UI
+/// invokes automatically after a successful install (with a manual
+/// "Restart now" fallback).
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
     use tauri_plugin_updater::UpdaterExt;
@@ -1633,7 +1633,15 @@ pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
             )
         })?
         .ok_or_else(|| {
-            update_install_error("update_not_available", "Kivo is already up to date.")
+            // `check_for_updates` (GitHub API) and the updater plugin
+            // (`latest.json`) can disagree briefly after a release is tagged
+            // but before its artifacts finish uploading. Point at the manual
+            // download instead of claiming "up to date" so the UI, which just
+            // offered an install, does not contradict itself.
+            update_install_error(
+                "update_not_available",
+                "No installable update was found. Use the download link instead.",
+            )
         })?;
     update
         .download_and_install(|_, _| {}, || {})

@@ -1464,6 +1464,59 @@ pub fn open_permission_settings(kind: String) -> Result<(), CommandError> {
     crate::shell::open_permission_settings(parse_permission(&kind)?).map_err(platform_command_error)
 }
 
+/// Clears Kivo's own TCC entries so a new build can be enabled when a stale
+/// entry from a previous (ad-hoc signed) build is stuck in System Settings.
+/// Scoped to Kivo's bundle id only: other apps' grants are never touched.
+/// After the reset the user re-allows each permission; statuses are
+/// re-read and broadcast like any other permission change.
+#[tauri::command]
+pub fn reset_permission_grants(
+    app: AppHandle,
+    core: State<'_, AppCore>,
+    platform: State<'_, Arc<crate::platform::PlatformServices>>,
+) -> Result<Vec<FrontendPermissionStatus>, CommandError> {
+    reset_tcc_grants().map_err(platform_command_error)?;
+    let statuses = permission_statuses(&platform).map_err(platform_command_error)?;
+    refresh_shortcuts_after_permission(&app, &core, &statuses);
+    let _ = app.emit("permission-status-changed", &statuses);
+    Ok(statuses)
+}
+
+/// `tccutil reset All <bundle-id>` drops every TCC grant for Kivo's bundle
+/// id (Accessibility, Input Monitoring, Microphone, Speech Recognition)
+/// without touching other apps. Per-user database, so no sudo needed.
+#[cfg(target_os = "macos")]
+fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
+    let output = std::process::Command::new("tccutil")
+        .args(["reset", "All", "com.kivo.desktop"])
+        .output()
+        .map_err(|_| {
+            crate::platform::PlatformError::new(
+                crate::platform::PlatformErrorKind::Os,
+                "reset_permission_grants",
+                "Could not clear the old permission entries.",
+            )
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(crate::platform::PlatformError::new(
+            crate::platform::PlatformErrorKind::Os,
+            "reset_permission_grants",
+            "Could not clear the old permission entries.",
+        ))
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
+    Err(crate::platform::PlatformError::new(
+        crate::platform::PlatformErrorKind::Unsupported,
+        "reset_permission_grants",
+        "Clearing permission entries is only available on macOS.",
+    ))
+}
+
 #[tauri::command]
 pub async fn list_microphones(
     core: State<'_, AppCore>,

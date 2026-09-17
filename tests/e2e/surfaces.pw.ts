@@ -19,7 +19,7 @@ test("settings navigation and controls work", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "AI" })).toBeVisible();
   await expect(page.getByLabel("Google AI Studio API key")).toBeVisible();
   await expect(page.getByText("Models in order")).toBeVisible();
-  const firstModel = page.getByLabel("Model 1 of 1", { exact: true });
+  const firstModel = page.getByLabel("Model 1 of 1 (first choice)", { exact: true });
   await expect(firstModel).toBeVisible();
   const options = await firstModel.locator("option").allTextContents();
   expect(options.length).toBeGreaterThan(0);
@@ -32,15 +32,15 @@ test("settings navigation and controls work", async ({ page }) => {
   await firstModel.selectOption("gemini-3.6-flash");
   await expect(firstModel).toHaveValue("gemini-3.6-flash");
   await page.getByRole("button", { name: "+ Add model", exact: true }).click();
-  const queueFirst = page.getByLabel("Model 1 of 2", { exact: true });
-  const queueSecond = page.getByLabel("Model 2 of 2", { exact: true });
+  const queueFirst = page.getByLabel("Model 1 of 2 (first choice)", { exact: true });
+  const queueSecond = page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true });
   await expect(queueFirst).toHaveValue("gemini-3.6-flash");
   await expect(queueSecond).toBeVisible();
-  await page.getByRole("button", { name: "Move Gemini 3.6 Flash down", exact: true }).click();
-  await expect(page.getByLabel("Model 1 of 2", { exact: true })).not.toHaveValue("gemini-3.6-flash");
-  await expect(page.getByLabel("Model 2 of 2", { exact: true })).toHaveValue("gemini-3.6-flash");
-  await page.getByRole("button", { name: "Remove Gemini 3.6 Flash", exact: true }).click();
-  await expect(page.getByLabel("Model 1 of 1", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Move Gemini 3.6 Flash down (now first choice)", exact: true }).click();
+  await expect(page.getByLabel("Model 1 of 2 (first choice)", { exact: true })).not.toHaveValue("gemini-3.6-flash");
+  await expect(page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true })).toHaveValue("gemini-3.6-flash");
+  await page.getByRole("button", { name: "Remove Gemini 3.6 Flash (fallback 1)", exact: true }).click();
+  await expect(page.getByLabel("Model 1 of 1 (first choice)", { exact: true })).toBeVisible();
   assertNoErrors();
 });
 
@@ -53,9 +53,9 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   await expect(providerSelect).toBeVisible();
   await providerSelect.selectOption("zen");
   await expect(page.getByLabel("OpenCode API key")).toBeVisible();
-  const modelSelect = page.getByLabel("Model 1 of 1", { exact: true });
-  // Zen options carry their per-1M cost so the price is visible up front.
-  await expect(modelSelect.locator("option", { hasText: "per 1M" }).first()).toBeAttached();
+  const modelSelect = page.getByLabel("Model 1 of 1 (first choice)", { exact: true });
+  // Zen rows show their per-1M cost under the picker so the price is visible up front.
+  await expect(page.locator(".ai-model-queue__cost", { hasText: "per 1M" }).first()).toBeVisible();
   await providerSelect.selectOption("go");
   await expect(modelSelect).toHaveValue("kimi-k2.7-code");
   await expect(modelSelect.locator('option[value="gemini-3.8-flash"]')).toHaveCount(0);
@@ -102,7 +102,7 @@ test("onboarding completes the concise four-screen flow", async ({ page }) => {
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: /Add AI/ })).toBeVisible();
   await expect(page.locator(".shortcut-demo").getByText("Writing Tools", { exact: true })).toBeVisible();
-  await expect(page.getByLabel("Model 1 of 1", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Model 1 of 1 (first choice)", { exact: true })).toBeVisible();
   assertNoErrors();
 });
 

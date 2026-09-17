@@ -216,6 +216,7 @@ function PermissionsSection({
 }) {
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
   const [busy, setBusy] = useState<PermissionKind | null>(null);
+  const [resetting, setResetting] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useNativeEvent<PermissionStatus[]>("permission-status-changed", setPermissions);
 
@@ -230,6 +231,23 @@ function PermissionsSection({
   }, [setNotice]);
 
   useEffect(refresh, [refresh]);
+
+  // macOS grants happen in System Settings / system prompts outside the app:
+  // the native request returns before the user answers (mic/speech are
+  // async), and Accessibility can only be toggled in Settings. Re-read on
+  // window focus and poll while open so a grant flips to Allowed without
+  // requiring the manual Refresh button.
+  useEffect(() => {
+    const poll = () => {
+      void nativeBridge.getPermissions().then(setPermissions).catch(() => {});
+    };
+    const interval = window.setInterval(poll, 2500);
+    window.addEventListener("focus", poll);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", poll);
+    };
+  }, []);
 
   async function request(kind: PermissionKind) {
     setBusy(kind);
@@ -262,6 +280,23 @@ function PermissionsSection({
       setNotice("The system settings page couldn’t be opened.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Clears Kivo's own TCC entries when a stale entry from a previous build
+  // blocks the new one from being enabled. Re-asks for every permission,
+  // including ones already working — that is the point: only a clean slate
+  // lets macOS bind the grant to the current build.
+  async function resetGrants() {
+    setResetting(true);
+    setNotice(null);
+    try {
+      setPermissions(await nativeBridge.resetPermissionGrants());
+      setNotice("Old entries cleared. Re-allow each permission in turn — open System Settings where asked.");
+    } catch (error) {
+      setNotice(error instanceof NativeError ? error.message : "The old entries couldn’t be cleared.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -304,7 +339,7 @@ function PermissionsSection({
                 ) : (
                   <Button
                     compact
-                    disabled={busy !== null || !loaded}
+                    disabled={busy !== null || resetting || !loaded}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
                   >
                     {permissionActionLabel(busy === kind, denied)}
@@ -316,8 +351,16 @@ function PermissionsSection({
         })}
       </SettingsGroup>
       <div className="settings-group__footer settings-group__footer--split">
-        <Button compact disabled={busy !== null} onClick={refresh}>Refresh status</Button>
+        <Button compact disabled={busy !== null || resetting} onClick={refresh}>Refresh status</Button>
+        {context.platform === "macos" ? (
+          <Button compact disabled={busy !== null || resetting || !loaded} onClick={() => void resetGrants()}>
+            {resetting ? "Clearing…" : "Clear stale entries"}
+          </Button>
+        ) : null}
       </div>
+      {context.platform === "macos" ? (
+        <p className="settings-note">Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets Accessibility and Fn-shortcut grants on every update — re-allow after updating, or use a Developer-ID signed stable release for grants that persist. If an old build's entry is stuck and the new one can't be enabled, Clear stale entries removes Kivo's old grants so you can re-allow from scratch. Unlocking Privacy &amp; Security and Keychain prompts each ask for a password by design.</p>
+      ) : null}
     </SettingsContent>
   );
 }
@@ -583,7 +626,7 @@ function AiSection({
   return (
     <SettingsContent title="AI" subtitle={aiSubtitle(info)}>
       <SettingsGroup header="Provider">
-        <SettingRow label="Provider" description="Gemini calls Google directly. Zen is OpenCode pay-as-you-go credits. Go is the $10/month OpenCode subscription. Custom talks to any OpenAI-compatible endpoint." stacked>
+        <SettingRow label="Provider" description={providerBlurb(info)} stacked>
           <select
             aria-label="AI provider"
             disabled={busy !== null}
@@ -629,7 +672,7 @@ function AiSection({
         ) : null}
       </SettingsGroup>
       <SettingsGroup header="Models in order">
-        <SettingRow label="Models" description="Tried top to bottom until one succeeds — a failure moves to the next. Key or balance problems stop immediately. Each option shows its cost when known, or type any model ID via Custom." stacked>
+        <SettingRow label="Models" description="Tried top to bottom until one succeeds — the first row is your main model, the rest are fallbacks. Key or balance problems stop immediately. Pick Custom model ID in a row to type any ID." stacked>
           <ModelQueueEditor
             disabled={busy !== null}
             provider={provider}
@@ -740,6 +783,19 @@ function AiSection({
   );
 }
 
+function providerBlurb(info: AiProviderInfo): string {
+  switch (info.id as AiProviderId) {
+    case "zen":
+      return "Pay-as-you-go credits from OpenCode. Works with any model below; each row shows its price.";
+    case "go":
+      return "Included in the $10/month OpenCode Go subscription. Usage counts against your plan allowance.";
+    case "custom":
+      return "Any OpenAI-compatible endpoint — Ollama or LM Studio on your machine, or a hosted provider.";
+    default:
+      return "Calls Google directly. The only provider that supports summarize-link.";
+  }
+}
+
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
   { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
   { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
@@ -811,7 +867,7 @@ function AboutSection({
     <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
       <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
       <SettingsGroup>
-        <SettingRow label="Software updates" description={installed ? "Update installed. Restart Kivo to finish." : updateDescription(updateResult)}>
+        <SettingRow label="Software updates" description={installed ? (busy === "restart" ? "Update installed. Restarting…" : "Update installed. Restart Kivo to finish.") : updateDescription(updateResult)}>
           {installed ? (
             <Button
               compact
@@ -850,8 +906,19 @@ function AboutSection({
                 setNotice(null);
                 void nativeBridge.installUpdate()
                   .then(() => {
+                    // Install succeeded: restart automatically so a single
+                    // click finishes the update. The Windows installer exits
+                    // the app itself; on macOS this relaunch applies it. If
+                    // the app is still alive afterwards (browser harness or
+                    // a failed relaunch), fall back to the manual Restart now
+                    // button below.
                     setInstalled(true);
-                    setNotice("Update installed. Restart Kivo to finish.");
+                    setNotice("Update installed. Restarting…");
+                    setBusy("restart");
+                    void nativeBridge.restartApp()
+                      .then(() => setNotice("Update installed. Restart Kivo to finish."))
+                      .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
+                      .finally(() => setBusy(null));
                   })
                   .catch((error: unknown) => {
                     const code = error instanceof NativeError ? error.code : "";
@@ -859,11 +926,11 @@ function AboutSection({
                     // drop the button instead of looping on the same error.
                     if (code === "update_install_unavailable" || code === "update_not_available") setInstallUnsupported(true);
                     setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead.");
-                  })
-                  .finally(() => setBusy(null));
+                    setBusy(null);
+                  });
               }}
               tone="primary"
-            >{busy === "install" ? "Installing…" : "Download and Install"}</Button>
+            >{busy === "install" ? "Installing…" : busy === "restart" ? "Restarting…" : "Download and Install"}</Button>
           </SettingRow>
         ) : null}
       </SettingsGroup>

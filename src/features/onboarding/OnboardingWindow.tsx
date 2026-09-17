@@ -27,6 +27,11 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
 
   useEffect(() => {
     let active = true;
+    const pollPermissions = () => {
+      void nativeBridge.getPermissions()
+        .then((nextPermissions) => active && setPermissions(nextPermissions))
+        .catch(() => {});
+    };
     // Load independently so a key failure never misreports permissions.
     void nativeBridge.getPermissions()
       .then((nextPermissions) => active && setPermissions(nextPermissions))
@@ -34,8 +39,15 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
     void nativeBridge.getApiKeyStatus()
       .then((nextApi) => active && setApiStatus(nextApi))
       .catch(() => active && setMessage("Saved key status isn’t available right now."));
+    // Grants happen outside the app (system prompt / System Settings) and
+    // the native request returns before the user answers, so re-read on
+    // focus and poll while onboarding is open.
+    const interval = window.setInterval(pollPermissions, 2500);
+    window.addEventListener("focus", pollPermissions);
     return () => {
       active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", pollPermissions);
     };
   }, []);
 
@@ -298,7 +310,7 @@ function ApiKeyStep(props: ApiKeyStepProps) {
           }}
           value={settings.aiModels}
         />
-        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}. Each option shows its cost when known.</p>
+        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds — the first row is your main model{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}.</p>
       </div>
       <div className="shortcut-demo">
         <ShortcutSummary label="Dictate" platform={platform} shortcut={settings.dictationShortcut} />

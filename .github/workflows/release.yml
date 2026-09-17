@@ -103,10 +103,28 @@ jobs:
       - run: bun run check:platform-parity
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-      # NSIS needs no paid certificate or store account. If an Authenticode
-      # certificate is available, sign the final installer.
-      - name: Build Windows .exe installer
-        run: bun tauri build --bundles nsis
+      # NSIS needs no paid certificate or store account. The Tauri updater
+      # artifacts (.nsis.zip + .sig, merged into latest.json by tauri-action)
+      # are signed with the same TAURI_SIGNING_* key as macOS, so Windows
+      # offers the same in-app Download and Install path. If an Authenticode
+      # certificate is available, sign the final .exe installer afterwards
+      # and re-upload it: Authenticode only touches the manual .exe, never
+      # the updater .nsis.zip signature.
+      - run: bun run prepare:release
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: Kivo __VERSION__
+          releaseBody: See the attached installers and update manifest.
+          releaseDraft: true
+          prerelease: false
+          args: --bundles nsis --config src-tauri/target/release-tauri.conf.json
       - name: Sign installer when a certificate is configured
         shell: pwsh
         env:
@@ -125,11 +143,14 @@ jobs:
               }
             } finally { Remove-Item -LiteralPath $certificateFile -ErrorAction SilentlyContinue }
           }
-      - name: Attach .exe to the draft release
+      - name: Re-upload signed .exe when a certificate is configured
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
         run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).version
-          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "app-v$version" }
-          gh release upload $tag "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
+          if ($env:WINDOWS_CERTIFICATE_BASE64) {
+            $version = (Get-Content package.json | ConvertFrom-Json).version
+            $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "app-v$version" }
+            gh release upload $tag "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
+          }
