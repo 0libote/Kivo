@@ -132,8 +132,8 @@ impl GeminiClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.json::<serde_json::Value>().await.ok();
-            let code = body.as_ref().and_then(|body| parse_api_error_code(body));
-            let detail = body.as_ref().and_then(|body| parse_api_error_detail(body));
+            let code = body.as_ref().and_then(parse_api_error_code);
+            let detail = body.as_ref().and_then(parse_api_error_detail);
             return Err(GeminiError::Api {
                 status,
                 code,
@@ -209,9 +209,8 @@ impl<'a> LinkSummaryRequest<'a> {
             input,
             system_instruction: SUMMARY_SYSTEM,
             store: false,
-            generation_config: super::thinking_level_for(&model).map(|thinking_level| GenerationConfig {
-                thinking_level,
-            }),
+            generation_config: super::thinking_level_for(model)
+                .map(|thinking_level| GenerationConfig { thinking_level }),
             tools,
         }
     }

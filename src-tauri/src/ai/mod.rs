@@ -403,9 +403,8 @@ impl GeminiClient {
             input: &prompt.input,
             system_instruction: &prompt.system_instruction,
             store: false,
-            generation_config: thinking_level_for(&model).map(|thinking_level| GenerationConfig {
-                thinking_level,
-            }),
+            generation_config: thinking_level_for(&model)
+                .map(|thinking_level| GenerationConfig { thinking_level }),
         };
 
         let response = self
@@ -697,10 +696,7 @@ fn api_error_object(body: &serde_json::Value) -> Option<&serde_json::Value> {
 /// block), trimmed for UI display. Shown verbatim where no tailored
 /// guidance exists, so users see the actual failure.
 fn parse_api_error_detail(body: &serde_json::Value) -> Option<String> {
-    let message = api_error_object(body)?
-        .get("message")?
-        .as_str()?
-        .trim();
+    let message = api_error_object(body)?.get("message")?.as_str()?.trim();
     if message.is_empty() {
         return None;
     }
@@ -953,9 +949,8 @@ mod tests {
             input: "source",
             system_instruction: "instruction",
             store: false,
-            generation_config: thinking_level_for(GEMINI_MODEL).map(|thinking_level| {
-                GenerationConfig { thinking_level }
-            }),
+            generation_config: thinking_level_for(GEMINI_MODEL)
+                .map(|thinking_level| GenerationConfig { thinking_level }),
         };
         let json = serde_json::to_value(request).unwrap();
         assert_eq!(json["store"], false);
@@ -978,9 +973,8 @@ mod tests {
             input: "source",
             system_instruction: "instruction",
             store: false,
-            generation_config: thinking_level_for("gemma-4-31b-it").map(|thinking_level| {
-                GenerationConfig { thinking_level }
-            }),
+            generation_config: thinking_level_for("gemma-4-31b-it")
+                .map(|thinking_level| GenerationConfig { thinking_level }),
         };
         let json = serde_json::to_value(request).unwrap();
         assert!(json.get("generation_config").is_none());
@@ -1306,7 +1300,9 @@ mod tests {
         });
         assert_eq!(
             parse_api_error_detail(&bad_level).as_deref(),
-            Some("'low' is not a supported thinking level for this model. Allowed values are: high, minimal.")
+            Some(
+                "'low' is not a supported thinking level for this model. Allowed values are: high, minimal."
+            )
         );
         let error = GeminiError::Api {
             status: reqwest::StatusCode::BAD_REQUEST,
@@ -1320,7 +1316,10 @@ mod tests {
             code: None,
             detail: None,
         };
-        assert_eq!(bare.user_message(), "Gemini couldn't complete that request.");
+        assert_eq!(
+            bare.user_message(),
+            "Gemini couldn't complete that request."
+        );
         // Long messages (doc URLs, model lists) cap at 300 chars.
         let long = serde_json::json!({"error": {"message": "x".repeat(500)}});
         assert_eq!(parse_api_error_detail(&long).unwrap().chars().count(), 300);
