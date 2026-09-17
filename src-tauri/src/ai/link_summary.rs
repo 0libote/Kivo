@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     GeminiClient, GeminiError, GenerationConfig, InteractionResponse, LinkSourceKind,
-    parse_api_error_code, parse_interaction,
+    parse_api_error_code, parse_api_error_detail, parse_interaction,
 };
 use crate::security::SecretString;
 
@@ -111,6 +111,26 @@ impl GeminiClient {
         model: &str,
         source: &LinkSource,
     ) -> Result<String, GeminiError> {
+        // Same retry as text generation: 500s are transient.
+        let mut delay = Duration::from_millis(500);
+        for _ in 0..3 {
+            match self.summarize_link_once(api_key, model, source).await {
+                Err(error) if error.is_server_error() => {
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(10));
+                }
+                result => return result,
+            }
+        }
+        self.summarize_link_once(api_key, model, source).await
+    }
+
+    async fn summarize_link_once(
+        &self,
+        api_key: &SecretString,
+        model: &str,
+        source: &LinkSource,
+    ) -> Result<String, GeminiError> {
         // Revalidate even if a caller constructed/deserialized LinkSource directly.
         let validated = LinkSource::parse(&source.url)?;
         if validated.kind != source.kind {
@@ -124,19 +144,20 @@ impl GeminiClient {
             .http
             .post(&self.endpoint)
             .header("x-goog-api-key", api_key)
-            .timeout(Duration::from_secs(90))
             .json(&request)
             .send()
             .await
             .map_err(GeminiError::Transport)?;
         let status = response.status();
         if !status.is_success() {
-            let code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_api_error_code(&body));
-            return Err(GeminiError::Api { status, code });
+            let body = response.json::<serde_json::Value>().await.ok();
+            let code = body.as_ref().and_then(parse_api_error_code);
+            let detail = body.as_ref().and_then(parse_api_error_detail);
+            return Err(GeminiError::Api {
+                status,
+                code,
+                detail,
+            });
         }
         let interaction = response
             .json::<LinkSummaryResponse>()
@@ -182,7 +203,8 @@ struct LinkSummaryRequest<'a> {
     input: Vec<LinkInput<'a>>,
     system_instruction: &'static str,
     store: bool,
-    generation_config: GenerationConfig<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation_config: Option<GenerationConfig<'a>>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<LinkTool>,
 }
@@ -211,10 +233,8 @@ impl<'a> LinkSummaryRequest<'a> {
             input,
             system_instruction: SUMMARY_SYSTEM,
             store: false,
-            generation_config: GenerationConfig {
-                thinking_level: "low",
-                max_output_tokens: 4_096,
-            },
+            generation_config: super::thinking_level_for(model)
+                .map(|thinking_level| GenerationConfig { thinking_level }),
             tools,
         }
     }
@@ -362,7 +382,6 @@ mod tests {
                     .unwrap();
             assert_eq!(request["store"], false);
             assert_eq!(request["generation_config"]["thinking_level"], "low");
-            assert_eq!(request["generation_config"]["max_output_tokens"], 4096);
             assert!(
                 request["system_instruction"]
                     .as_str()

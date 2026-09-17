@@ -84,6 +84,12 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
           setInvalid(false);
           buttonRef.current?.focus();
         }}
+        // Leaving the button disarms the recorder so a later keystroke
+        // elsewhere is never swallowed by a forgotten armed state.
+        onBlur={() => {
+          setRecording(false);
+          setInvalid(false);
+        }}
         ref={buttonRef}
         type="button"
       >
@@ -93,7 +99,7 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
           formatShortcut(value, platform).map((key, index) => <kbd key={`${key}-${index}`}>{key}</kbd>)
         )}
       </button>
-      {invalid ? <span className="shortcut-recorder__error">Include a key with your modifiers.</span> : null}
+      {invalid ? <span className="shortcut-recorder__error" role="alert">Include a key with your modifiers.</span> : null}
     </div>
   );
 }

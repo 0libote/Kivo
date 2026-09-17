@@ -31,6 +31,10 @@ const EVENT_FLAGS_CHANGED: u32 = 12;
 const EVENT_KEY_DOWN: u32 = 10;
 const EVENT_KEYCODE_FIELD: u32 = 9;
 const ESCAPE_KEYCODE: i64 = 53;
+// Delivered as pseudo-events when macOS disables a slow tap; the tap must be
+// re-enabled or the Fn monitor silently dies until restart.
+const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
+const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
 static NEXT_SELECTION_TOKEN: AtomicU64 = AtomicU64::new(1);
 
@@ -71,7 +75,7 @@ impl PlatformImpl {
             ),
             Err(error) => return Err(error),
         };
-        if text.is_empty() {
+        if text.trim().is_empty() {
             return Err(PlatformError::new(
                 PlatformErrorKind::NotFound,
                 "get_selected_text",
@@ -209,10 +213,10 @@ impl PlatformImpl {
                 }
             },
             PermissionKind::Microphone => {
-                permission_from_apple_status(unsafe { kivo_microphone_authorization_status() })
+                permission_from_microphone_status(unsafe { kivo_microphone_authorization_status() })
             }
             PermissionKind::SpeechRecognition => {
-                permission_from_apple_status(unsafe { kivo_speech_authorization_status() })
+                permission_from_speech_status(unsafe { kivo_speech_authorization_status() })
             }
         };
         Ok(status)
@@ -229,7 +233,17 @@ impl PlatformImpl {
                 }
             }
             PermissionKind::InputMonitoring => unsafe {
-                if !CGRequestListenEventAccess() {
+                // `CGRequestListenEventAccess` returns false both when the
+                // prompt was just shown (awaiting the user) and when access
+                // was denied. Erroring on the first call reports failure the
+                // moment the system prompt appears, so treat the first
+                // request as "prompt shown" and only error once a prompt has
+                // already been answered.
+                static INPUT_MONITORING_PROMPTED: std::sync::atomic::AtomicBool =
+                    std::sync::atomic::AtomicBool::new(false);
+                if !CGRequestListenEventAccess()
+                    && INPUT_MONITORING_PROMPTED.swap(true, std::sync::atomic::Ordering::AcqRel)
+                {
                     return Err(PlatformError::new(
                         PlatformErrorKind::PermissionDenied,
                         "request_permission",
@@ -327,11 +341,26 @@ impl PlatformImpl {
     }
 }
 
-fn permission_from_apple_status(status: i32) -> PermissionStatus {
+/// `AVAuthorizationStatus`: 0 not-determined, 1 restricted, 2 denied,
+/// 3 authorized.
+fn permission_from_microphone_status(status: i32) -> PermissionStatus {
     match status {
         0 => PermissionStatus::NotDetermined,
         1 => PermissionStatus::Restricted,
         2 => PermissionStatus::Denied,
+        3 => PermissionStatus::Granted,
+        _ => PermissionStatus::Unavailable,
+    }
+}
+
+/// `SFSpeechRecognizerAuthorizationStatus` orders its cases differently:
+/// 0 not-determined, 1 denied, 2 restricted, 3 authorized. Sharing one
+/// mapper would swap denied and restricted for speech.
+fn permission_from_speech_status(status: i32) -> PermissionStatus {
+    match status {
+        0 => PermissionStatus::NotDetermined,
+        1 => PermissionStatus::Denied,
+        2 => PermissionStatus::Restricted,
         3 => PermissionStatus::Granted,
         _ => PermissionStatus::Unavailable,
     }
@@ -809,12 +838,21 @@ struct MacShortcutState {
 }
 
 extern "C" fn mac_event_tap_callback(
-    _proxy: *mut c_void,
+    proxy: *mut c_void,
     event_type: u32,
     event: *mut c_void,
     context: *mut c_void,
 ) -> *mut c_void {
     if event.is_null() || context.is_null() {
+        return event;
+    }
+    // macOS disables an unresponsive tap and reports it as a pseudo-event.
+    // Re-enable immediately so the Fn monitor survives a slow callback.
+    if event_type == EVENT_TAP_DISABLED_BY_TIMEOUT || event_type == EVENT_TAP_DISABLED_BY_USER_INPUT
+    {
+        if !proxy.is_null() {
+            unsafe { CGEventTapEnable(proxy, true) };
+        }
         return event;
     }
     let state = unsafe { &mut *context.cast::<MacShortcutState>() };

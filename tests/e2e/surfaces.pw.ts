@@ -29,17 +29,17 @@ test("settings navigation and controls work", async ({ page }) => {
     expect(option.toLowerCase()).not.toContain("banana");
     expect(option.toLowerCase()).not.toContain("live");
   }
-  await firstModel.selectOption("gemini-2.5-flash");
-  await expect(firstModel).toHaveValue("gemini-2.5-flash");
+  await firstModel.selectOption("gemini-3.6-flash");
+  await expect(firstModel).toHaveValue("gemini-3.6-flash");
   await page.getByRole("button", { name: "+ Add model", exact: true }).click();
   const queueFirst = page.getByLabel("Model 1 of 2", { exact: true });
   const queueSecond = page.getByLabel("Model 2 of 2", { exact: true });
-  await expect(queueFirst).toHaveValue("gemini-2.5-flash");
+  await expect(queueFirst).toHaveValue("gemini-3.6-flash");
   await expect(queueSecond).toBeVisible();
-  await page.getByRole("button", { name: "Move Gemini 2.5 Flash down", exact: true }).click();
-  await expect(page.getByLabel("Model 1 of 2", { exact: true })).not.toHaveValue("gemini-2.5-flash");
-  await expect(page.getByLabel("Model 2 of 2", { exact: true })).toHaveValue("gemini-2.5-flash");
-  await page.getByRole("button", { name: "Remove Gemini 2.5 Flash", exact: true }).click();
+  await page.getByRole("button", { name: "Move Gemini 3.6 Flash down", exact: true }).click();
+  await expect(page.getByLabel("Model 1 of 2", { exact: true })).not.toHaveValue("gemini-3.6-flash");
+  await expect(page.getByLabel("Model 2 of 2", { exact: true })).toHaveValue("gemini-3.6-flash");
+  await page.getByRole("button", { name: "Remove Gemini 3.6 Flash", exact: true }).click();
   await expect(page.getByLabel("Model 1 of 1", { exact: true })).toBeVisible();
   assertNoErrors();
 });

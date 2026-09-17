@@ -21,7 +21,8 @@ dialog.writing-popup:not([open]) { display: none; }
 .custom-instruction input:focus { outline: none; }
 .custom-instruction__submit { height: 28px; border: 0; border-radius: 6px; background: var(--accent); color: var(--accent-text); }
 .custom-instruction__submit:disabled { opacity: .35; }
-.writing-processing { height: 50px; display: grid; grid-template-columns: 17px 1fr 26px; gap: 8px; align-items: center; padding: 7px 8px 7px 13px; color: var(--text-secondary); }
+.writing-processing { min-height: 50px; display: grid; grid-template-columns: 17px 1fr 26px; gap: 8px; align-items: center; padding: 7px 8px 7px 13px; color: var(--text-secondary); }
+.writing-processing__hint { grid-column: 2 / 3; margin: 0; font-size: 11px; color: var(--text-tertiary); }
 .writing-result__header { display: flex; justify-content: space-between; align-items: flex-start; padding: 13px 10px 9px 15px; border-bottom: 1px solid var(--border); }
 .writing-result__eyebrow { display: block; margin-bottom: 2px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
 .writing-result h1 { margin: 0; font-size: 15px; font-weight: 650; }
@@ -60,11 +61,13 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-summary__input input, .writing-summary__input textarea { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-control); background: var(--surface-muted); color: var(--text); font: inherit; line-height: 1.5; resize: none; }
 .writing-summary__input input:focus, .writing-summary__input textarea:focus { outline: none; border-color: var(--accent); }
 .writing-summary__input p { margin: 0; color: var(--text-secondary); font-size: 11.5px; }
+.writing-summary__error { color: var(--danger); }
 .writing-summary__footer { display: flex; justify-content: space-between; padding: 0 12px 12px; }
 .writing-result { display: flex; flex-direction: column; max-height: calc(var(--writing-max-height, 460px) - 4px); }
 .writing-result__header, .writing-result__footer, .writing-result__source { flex-shrink: 0; }
 .writing-result__source { display: flex; gap: 7px; min-width: 0; padding: 8px 15px 0; color: var(--text-secondary); font-size: 11px; }
 .writing-result__source > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.writing-result__error { margin: 0; padding: 6px 15px 0; color: var(--danger); font-size: 12px; }
 
 .writing-more summary { padding: 10px; margin-top: 5px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; cursor: default; }
 .writing-more[open] summary { margin-bottom: 4px; }

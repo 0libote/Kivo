@@ -10,19 +10,27 @@ import { nativeBridge, initialAppContext } from "./platform/native";
 import type { AppContext } from "./types";
 
 export function App() {
-  // ponytail: render the window-label surface immediately; context hydrates async.
+  // Render the window-label surface immediately; context hydrates async.
   const [context, setContext] = useState<AppContext>(() => initialAppContext());
+  const [contextError, setContextError] = useState<string | null>(null);
   useNativeEvent<boolean>("pause-changed", paused => setContext(current => ({ ...current, paused })));
   const platform = context.platform;
-  const { settings, loading, error, update } = useSystemPreferences(platform);
+  const { settings, loading, error, update, retry } = useSystemPreferences(platform);
 
   useEffect(() => {
     let active = true;
     void nativeBridge.getContext()
       .then((next) => {
-        if (active) setContext(next);
+        if (active) {
+          setContext(next);
+          setContextError(null);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Keep the synchronous surface guess so the window still paints, but
+        // say so: the version/paused state may be stale.
+        if (active) setContextError("Kivo could not reach its background service. Some information may be out of date.");
+      });
     return () => {
       active = false;
     };
@@ -33,7 +41,20 @@ export function App() {
     document.documentElement.dataset.surface = context.surface;
   }, [context]);
 
-  if (error) return <main className="fatal-surface"><p role="alert">{error}</p></main>;
+  if (error) {
+    return (
+      <main className="fatal-surface">
+        <div>
+          <p role="alert">{error}</p>
+          <button onClick={() => void retry()} type="button">Try again</button>
+        </div>
+      </main>
+    );
+  }
+
+  // The background-service notice only fits the large windows; the compact
+  // overlays (flow-bar, writing-tools) have no room for a banner.
+  const showServiceNotice = contextError !== null && (context.surface === "settings" || context.surface === "onboarding");
 
   let surface: React.ReactNode;
   switch (context.surface) {
@@ -51,5 +72,16 @@ export function App() {
       break;
   }
 
-  return <>{surface}<DeveloperSurfaceMenu current={context.surface} /></>;
+  return (
+    <>
+      {showServiceNotice ? (
+        <div className="service-notice" role="status">
+          <span>{contextError}</span>
+          <button className="text-link" onClick={() => setContextError(null)} type="button">Dismiss</button>
+        </div>
+      ) : null}
+      {surface}
+      <DeveloperSurfaceMenu current={context.surface} />
+    </>
+  );
 }

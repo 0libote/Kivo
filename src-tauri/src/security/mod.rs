@@ -74,6 +74,9 @@ pub enum CredentialError {
     #[allow(dead_code)]
     AccessDenied,
     InvalidSecret,
+    // Constructed only by the cfg-gated Keychain/Credential-Manager backends;
+    // allowed dead on other hosts for the same reason as above.
+    #[allow(dead_code)]
     Backend,
 }
 

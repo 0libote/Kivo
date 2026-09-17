@@ -82,9 +82,11 @@ function refreshSharedModels(provider: AiProviderId, silent: boolean): Promise<v
       cache.loaded = true;
     })
     .catch(() => {
-      // Keep the bundled fallback so the selector never appears empty.
+      // Keep the bundled fallback so the selector never appears empty, but
+      // say so even on the silent first load — otherwise offline users never
+      // learn the list is stale.
       cache.loaded = true;
-      if (!silent) cache.error = "Couldn't refresh models. Showing the saved list.";
+      cache.error = "Couldn't refresh models. Showing the saved list.";
     })
     .then(() => {
       cache.inflight = null;

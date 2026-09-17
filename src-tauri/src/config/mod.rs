@@ -186,7 +186,9 @@ impl DictationSettings {
     }
 
     fn normalize(&mut self) {
-        self.hold_threshold_ms = self.hold_threshold_ms.min(5000);
+        // A zero threshold would classify every press as a hold and break
+        // tap-to-dictate; 50 ms is the smallest distinguishable hold.
+        self.hold_threshold_ms = self.hold_threshold_ms.clamp(50, 5000);
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
