@@ -770,6 +770,16 @@ impl GeminiError {
         }
     }
 
+    /// HTTP 500s / INTERNAL: transient server failures worth a retry.
+    pub fn is_server_error(&self) -> bool {
+        match self {
+            Self::Api { status, code, .. } => {
+                status.is_server_error() || matches!(code.as_deref(), Some("INTERNAL"))
+            }
+            _ => false,
+        }
+    }
+
     fn is_auth_code(code: Option<&str>) -> bool {
         matches!(
             code,
@@ -805,6 +815,14 @@ impl GeminiError {
                     || matches!(code.as_deref(), Some("rate_limited" | "RESOURCE_EXHAUSTED")) =>
             {
                 "Gemini is temporarily rate limited. Try again shortly.".into()
+            }
+            // Server-side 500s (Gemini "Internal error encountered.") say
+            // nothing actionable: friendly retry text instead of raw detail.
+            Self::Api { status, code, .. }
+                if status.is_server_error()
+                    || matches!(code.as_deref(), Some("INTERNAL")) =>
+            {
+                "Gemini hit a temporary error. Try again shortly.".into()
             }
             // Otherwise the server's own message wins (retired model naming
             // its replacement, bad thinking level, safety block): it names
@@ -1324,6 +1342,25 @@ mod tests {
         let long = serde_json::json!({"error": {"message": "x".repeat(500)}});
         assert_eq!(parse_api_error_detail(&long).unwrap().chars().count(), 300);
         assert!(parse_api_error_detail(&serde_json::json!({"error": {}})).is_none());
+    }
+
+    #[test]
+    fn server_error_detail_yields_retry_message() {
+        // Live Gemma shape: HTTP 500 with a content-free message.
+        let internal = serde_json::json!({
+            "error": {"message": "Internal error encountered.", "code": "api_error"}
+        });
+        let error = GeminiError::Api {
+            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            code: parse_api_error_code(&internal),
+            detail: parse_api_error_detail(&internal),
+        };
+        assert!(error.is_server_error());
+        assert_eq!(
+            error.user_message(),
+            "Gemini hit a temporary error. Try again shortly."
+        );
+        assert_eq!(error.code(), "api_error");
     }
 
     fn api_model(name: &str, display_name: Option<&str>, description: Option<&str>) -> ApiModel {
