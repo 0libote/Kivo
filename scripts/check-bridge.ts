@@ -58,11 +58,21 @@ if (invoked.size > 0) {
 }
 
 const rustSources = `${commandsRs}\n${shellRs}`;
-const defined = new Set(
-  [...rustSources.matchAll(/#\[tauri::command\]\s*\n\s*pub (?:async )?fn ([a-z_]+)/g)].map(
-    (m) => m[1],
-  ),
-);
+// Read the fn name off the lines right after each attribute instead of
+// matching across newlines (`\s*\n\s*` backtracks super-linearly).
+const defined = new Set<string>();
+const marker = "#[tauri::command]";
+let markerPos = rustSources.indexOf(marker);
+while (markerPos !== -1) {
+  const snippet = rustSources
+    .slice(markerPos, markerPos + 200)
+    .split("\n")
+    .slice(0, 3)
+    .join(" ");
+  const fnMatch = /pub (?:async )?fn ([a-z_]+)/.exec(snippet);
+  if (fnMatch) defined.add(fnMatch[1]);
+  markerPos = rustSources.indexOf(marker, markerPos + marker.length);
+}
 if (defined.size > 0) {
   pass("Rust defines at least one command");
 } else {
@@ -112,11 +122,14 @@ for (const command of [...registered].sort(byName)) {
 }
 
 // --- 4. Every listened event is emitted by Rust --------------------------------
-const eventBlockMatch = /type NativeEventMap = \{([\s\S]*?)\n\};/.exec(nativeTs);
+// Slice the type block with indexOf instead of a `[\s\S]*?` regex.
+const eventAnchor = "type NativeEventMap = {";
+const eventStart = nativeTs.indexOf(eventAnchor);
+const eventEnd = nativeTs.indexOf("\n};", eventStart);
+const eventBlock =
+  eventStart === -1 || eventEnd === -1 ? "" : nativeTs.slice(eventStart, eventEnd);
 const events = new Set(
-  eventBlockMatch
-    ? [...eventBlockMatch[1].matchAll(/"([a-z-]+)":/g)].map((m) => m[1])
-    : [],
+  [...eventBlock.matchAll(/"([a-z-]+)":/g)].map((m) => m[1]),
 );
 if (events.size > 0) {
   pass("event map parses");
@@ -151,7 +164,15 @@ const appSettingsBlock = typesTs.slice(
   typesTs.indexOf("interface AppSettings"),
   typesTs.indexOf("}", typesTs.indexOf("interface AppSettings")) + 1,
 );
-const tsFields = [...appSettingsBlock.matchAll(/^\s*([a-zA-Z]+)[?]?:/gm)].map((m) => m[1]);
+// Read field names line by line (`name: Type;`, optional `?`) instead of a
+// multiline `^\s*...` regex.
+const tsFields: string[] = [];
+for (const line of appSettingsBlock.split("\n")) {
+  if (!line.includes(":")) continue;
+  const head = line.split(":")[0].trim();
+  const name = head.endsWith("?") ? head.slice(0, -1) : head;
+  if (/^[A-Za-z]+$/.test(name)) tsFields.push(name);
+}
 const frontendBlock = commandsRs.slice(
   commandsRs.indexOf("pub struct FrontendSettings"),
   commandsRs.indexOf("}", commandsRs.indexOf("pub struct FrontendSettings")) + 1,
