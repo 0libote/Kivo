@@ -427,10 +427,6 @@ impl GeminiClient {
                 thinking_level: "low",
                 max_output_tokens: prompt.max_output_tokens,
             },
-            response_format: ResponseFormat {
-                output_type: "text",
-                mime_type: "text/plain",
-            },
         };
 
         let response = self
@@ -557,20 +553,12 @@ struct InteractionRequest<'a> {
     system_instruction: &'a str,
     store: bool,
     generation_config: GenerationConfig<'a>,
-    response_format: ResponseFormat<'a>,
 }
 
 #[derive(Serialize)]
 struct GenerationConfig<'a> {
     thinking_level: &'a str,
     max_output_tokens: u32,
-}
-
-#[derive(Serialize)]
-struct ResponseFormat<'a> {
-    #[serde(rename = "type")]
-    output_type: &'a str,
-    mime_type: &'a str,
 }
 
 /// One entry from `GET /v1beta/models`. Only `name` drives filtering;
@@ -891,10 +879,10 @@ impl std::error::Error for GeminiError {
 mod tests {
     use super::{
         ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig,
-        InteractionRequest, InteractionResponse, ResponseFormat, WritingAction,
-        curated_listed_models, dictation_cleanup_prompt, filter_api_models, is_blocked_model,
-        is_usable_model, normalize_backup_model, normalize_model, parse_api_error_code,
-        parse_interaction, supported_models, writing_prompt,
+        InteractionRequest, InteractionResponse, WritingAction, curated_listed_models,
+        dictation_cleanup_prompt, filter_api_models, is_blocked_model, is_usable_model,
+        normalize_backup_model, normalize_model, parse_api_error_code, parse_interaction,
+        supported_models, writing_prompt,
     };
 
     #[test]
@@ -975,16 +963,14 @@ mod tests {
                 thinking_level: "low",
                 max_output_tokens: 128,
             },
-            response_format: ResponseFormat {
-                output_type: "text",
-                mime_type: "text/plain",
-            },
         };
         let json = serde_json::to_value(request).unwrap();
         assert_eq!(json["store"], false);
         assert_eq!(json["model"], "gemini-3.8-flash");
         assert_eq!(json["generation_config"]["thinking_level"], "low");
         assert!(json["generation_config"].get("temperature").is_none());
+        // ponytail: plain-text requests omit response_format (structured-output only).
+        assert!(json.get("response_format").is_none());
     }
 
     #[test]
