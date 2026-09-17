@@ -216,6 +216,7 @@ function PermissionsSection({
 }) {
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
   const [busy, setBusy] = useState<PermissionKind | null>(null);
+  const [resetting, setResetting] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useNativeEvent<PermissionStatus[]>("permission-status-changed", setPermissions);
 
@@ -230,6 +231,23 @@ function PermissionsSection({
   }, [setNotice]);
 
   useEffect(refresh, [refresh]);
+
+  // macOS grants happen in System Settings / system prompts outside the app:
+  // the native request returns before the user answers (mic/speech are
+  // async), and Accessibility can only be toggled in Settings. Re-read on
+  // window focus and poll while open so a grant flips to Allowed without
+  // requiring the manual Refresh button.
+  useEffect(() => {
+    const poll = () => {
+      void nativeBridge.getPermissions().then(setPermissions).catch(() => {});
+    };
+    const interval = window.setInterval(poll, 2500);
+    window.addEventListener("focus", poll);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", poll);
+    };
+  }, []);
 
   async function request(kind: PermissionKind) {
     setBusy(kind);
@@ -262,6 +280,23 @@ function PermissionsSection({
       setNotice("The system settings page couldn’t be opened.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  // Clears Kivo's own TCC entries when a stale entry from a previous build
+  // blocks the new one from being enabled. Re-asks for every permission,
+  // including ones already working — that is the point: only a clean slate
+  // lets macOS bind the grant to the current build.
+  async function resetGrants() {
+    setResetting(true);
+    setNotice(null);
+    try {
+      setPermissions(await nativeBridge.resetPermissionGrants());
+      setNotice("Old entries cleared. Re-allow each permission in turn — open System Settings where asked.");
+    } catch (error) {
+      setNotice(error instanceof NativeError ? error.message : "The old entries couldn’t be cleared.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -304,7 +339,7 @@ function PermissionsSection({
                 ) : (
                   <Button
                     compact
-                    disabled={busy !== null || !loaded}
+                    disabled={busy !== null || resetting || !loaded}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
                   >
                     {permissionActionLabel(busy === kind, denied)}
@@ -316,8 +351,16 @@ function PermissionsSection({
         })}
       </SettingsGroup>
       <div className="settings-group__footer settings-group__footer--split">
-        <Button compact disabled={busy !== null} onClick={refresh}>Refresh status</Button>
+        <Button compact disabled={busy !== null || resetting} onClick={refresh}>Refresh status</Button>
+        {context.platform === "macos" ? (
+          <Button compact disabled={busy !== null || resetting || !loaded} onClick={() => void resetGrants()}>
+            {resetting ? "Clearing…" : "Clear stale entries"}
+          </Button>
+        ) : null}
       </div>
+      {context.platform === "macos" ? (
+        <p className="settings-note">Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets Accessibility and Fn-shortcut grants on every update — re-allow after updating, or use a Developer-ID signed stable release for grants that persist. If an old build's entry is stuck and the new one can't be enabled, Clear stale entries removes Kivo's old grants so you can re-allow from scratch. Unlocking Privacy &amp; Security and Keychain prompts each ask for a password by design.</p>
+      ) : null}
     </SettingsContent>
   );
 }

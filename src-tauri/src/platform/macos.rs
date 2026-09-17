@@ -37,6 +37,16 @@ const EVENT_TAP_DISABLED_BY_TIMEOUT: u32 = 0xFFFF_FFFE;
 const EVENT_TAP_DISABLED_BY_USER_INPUT: u32 = 0xFFFF_FFFF;
 
 static NEXT_SELECTION_TOKEN: AtomicU64 = AtomicU64::new(1);
+// Whether the native prompt for each TCC-gated capability has been shown at
+// least once in this process. `AXIsProcessTrusted()` and
+// `CGPreflightListenEventAccess()` only report trusted/untrusted, so without
+// this the UI can never offer the first-run "Allow" prompt: every untrusted
+// state looks "denied" and jumps straight to System Settings, skipping the
+// system dialog. First untrusted read is `NotDetermined` (show Allow);
+// once the prompt has been shown, still-untrusted reads as `Denied`
+// (show Open Settings).
+static ACCESSIBILITY_PROMPTED: AtomicBool = AtomicBool::new(false);
+static INPUT_MONITORING_PROMPTED: AtomicBool = AtomicBool::new(false);
 
 pub(super) struct PlatformImpl {
     credentials: MacCredentialStore,
@@ -201,15 +211,19 @@ impl PlatformImpl {
             PermissionKind::Accessibility => unsafe {
                 if AXIsProcessTrusted() {
                     PermissionStatus::Granted
-                } else {
+                } else if ACCESSIBILITY_PROMPTED.load(Ordering::Acquire) {
                     PermissionStatus::Denied
+                } else {
+                    PermissionStatus::NotDetermined
                 }
             },
             PermissionKind::InputMonitoring => unsafe {
                 if CGPreflightListenEventAccess() {
                     PermissionStatus::Granted
-                } else {
+                } else if INPUT_MONITORING_PROMPTED.load(Ordering::Acquire) {
                     PermissionStatus::Denied
+                } else {
+                    PermissionStatus::NotDetermined
                 }
             },
             PermissionKind::Microphone => {
@@ -225,6 +239,7 @@ impl PlatformImpl {
     pub(super) fn request_permission(&self, permission: PermissionKind) -> PlatformResult<()> {
         match permission {
             PermissionKind::Accessibility => {
+                ACCESSIBILITY_PROMPTED.store(true, Ordering::Release);
                 let prompt_key = unsafe { kAXTrustedCheckOptionPrompt };
                 let prompt_value = unsafe { kCFBooleanTrue };
                 let options = cf_dictionary(&[(prompt_key, prompt_value)])?;
@@ -239,10 +254,8 @@ impl PlatformImpl {
                 // moment the system prompt appears, so treat the first
                 // request as "prompt shown" and only error once a prompt has
                 // already been answered.
-                static INPUT_MONITORING_PROMPTED: std::sync::atomic::AtomicBool =
-                    std::sync::atomic::AtomicBool::new(false);
                 if !CGRequestListenEventAccess()
-                    && INPUT_MONITORING_PROMPTED.swap(true, std::sync::atomic::Ordering::AcqRel)
+                    && INPUT_MONITORING_PROMPTED.swap(true, Ordering::AcqRel)
                 {
                     return Err(PlatformError::new(
                         PlatformErrorKind::PermissionDenied,

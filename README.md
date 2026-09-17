@@ -121,6 +121,36 @@ the microphone privacy settings), and Speech Recognition reflects the
 installed desktop speech languages — an empty engine list shows guidance
 to install one instead of an Allow button that could never resolve.
 
+### macOS beta: repeated prompts and "Settings shows on, app shows off"
+
+The rolling `continuous` beta is ad-hoc signed (`signingIdentity: "-"`,
+free). macOS TCC keys Accessibility and Input Monitoring grants to the
+code signature, not just the bundle id, so every rebuilt/updated beta
+looks like a brand-new app: System Settings may still list Kivo as
+enabled while `AXIsProcessTrusted()` returns false, unlocking Privacy &
+Security asks for a password each time, and Keychain may re-prompt for
+the API-key item after an update. This is expected for ad-hoc builds —
+stable `app-v*` releases are Developer-ID signed and notarized when the
+Apple secrets are configured, and their grants persist across updates.
+
+What to check on the Mac:
+
+- `codesign -dv --verbose=4 /Applications/Kivo.app` — `Signature=adhoc`
+  means grants will not survive updates; a Developer ID line means they should.
+- If an old build's entry is stuck and the new one can't be enabled, use
+  Settings → Permissions → Clear stale entries (runs
+  `tccutil reset All com.kivo.desktop` for Kivo only, no sudo needed),
+  then re-allow each permission in turn. Manual equivalent:
+  `tccutil reset All com.kivo.desktop`, then re-add Kivo in
+  System Settings → Privacy & Security → Accessibility.
+- `log show --last 10m --predicate 'process == "Kivo"'` and Console.app
+  show the prompt / TCC denial lines; Kivo never logs text, transcripts,
+  or keys.
+- In-app, Settings → Permissions now refreshes automatically (poll +
+  window focus) after you grant in System Settings; the first Allow click
+  shows the system prompt, a still-off state afterwards means open System
+  Settings and toggle Kivo there.
+
 ## Packaging and signing
 
 ### macOS

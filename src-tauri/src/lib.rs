@@ -88,6 +88,7 @@ pub fn run() {
             commands::get_permission_statuses,
             commands::request_permission,
             commands::open_permission_settings,
+            commands::reset_permission_grants,
             commands::list_microphones,
             commands::list_speech_languages,
             commands::list_ai_providers,
