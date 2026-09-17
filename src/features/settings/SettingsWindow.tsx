@@ -854,7 +854,7 @@ function AboutSection({
     <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
       <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
       <SettingsGroup>
-        <SettingRow label="Software updates" description={installed ? "Update installed. Restart Kivo to finish." : updateDescription(updateResult)}>
+        <SettingRow label="Software updates" description={installed ? (busy === "restart" ? "Update installed. Restarting…" : "Update installed. Restart Kivo to finish.") : updateDescription(updateResult)}>
           {installed ? (
             <Button
               compact
@@ -893,8 +893,19 @@ function AboutSection({
                 setNotice(null);
                 void nativeBridge.installUpdate()
                   .then(() => {
+                    // Install succeeded: restart automatically so a single
+                    // click finishes the update. The Windows installer exits
+                    // the app itself; on macOS this relaunch applies it. If
+                    // the app is still alive afterwards (browser harness or
+                    // a failed relaunch), fall back to the manual Restart now
+                    // button below.
                     setInstalled(true);
-                    setNotice("Update installed. Restart Kivo to finish.");
+                    setNotice("Update installed. Restarting…");
+                    setBusy("restart");
+                    void nativeBridge.restartApp()
+                      .then(() => setNotice("Update installed. Restart Kivo to finish."))
+                      .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
+                      .finally(() => setBusy(null));
                   })
                   .catch((error: unknown) => {
                     const code = error instanceof NativeError ? error.code : "";
@@ -902,11 +913,11 @@ function AboutSection({
                     // drop the button instead of looping on the same error.
                     if (code === "update_install_unavailable" || code === "update_not_available") setInstallUnsupported(true);
                     setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead.");
-                  })
-                  .finally(() => setBusy(null));
+                    setBusy(null);
+                  });
               }}
               tone="primary"
-            >{busy === "install" ? "Installing…" : "Download and Install"}</Button>
+            >{busy === "install" ? "Installing…" : busy === "restart" ? "Restarting…" : "Download and Install"}</Button>
           </SettingRow>
         ) : null}
       </SettingsGroup>
