@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { DictationPractice } from "../../components/DictationPractice";
-import { AiModelSelect } from "../settings/AiModelSelect";
+import { ModelQueueEditor } from "../settings/ModelQueueEditor";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { formatShortcut } from "../../components/ShortcutRecorder";
 import { StatusIndicator } from "../../components/StatusIndicator";
+import { normalizeAiProvider, providerDefaultModel } from "../../ai/models";
 import { nativeBridge } from "../../platform/native";
 import type { ApiKeyStatus, AppContext, AppSettings, PermissionKind, PermissionStatus } from "../../types";
 
@@ -176,7 +177,7 @@ function DictationStep({ busyPermission, platform, request, statusByKind, dictat
       <div className="onboarding-step__icon"><Icon name="microphone" size={25} /></div>
       <p className="onboarding-eyebrow">Step 2 of 3</p>
       <h1>Dictation uses system speech</h1>
-      <p className="onboarding-copy">Kivo needs microphone access while you hold the dictation shortcut. Audio is handled by the operating system and is never sent to Gemini or a server operated by Kivo.</p>
+      <p className="onboarding-copy">Kivo needs microphone access while you hold the dictation shortcut. Audio is handled by the operating system and is never sent to your AI provider or a server operated by Kivo.</p>
       <div className="permission-list">
         <PermissionRow
           busy={busyPermission === "microphone"}
@@ -216,18 +217,40 @@ interface ApiKeyStepProps {
 
 function ApiKeyStep(props: ApiKeyStepProps) {
   const { apiKey, apiStatus, platform, savingKey, setApiKey, setApiStatus, setMessage, setSavingKey, settings, updateSettings } = props;
+  const provider = normalizeAiProvider(settings.aiProvider);
+  const keyLabel = provider === "custom" ? "API key (optional for local servers)" : provider === "gemini" ? "Google AI Studio API key" : "OpenCode API key";
   return (
     <div className="onboarding-step">
       <div className="onboarding-step__icon"><Icon name="spark" size={24} /></div>
       <p className="onboarding-eyebrow">Step 3 of 3</p>
-      <h1>Add Gemini, then you’re ready</h1>
-      <p className="onboarding-copy">Your Google AI Studio key is stored by the operating system. It never appears in Kivo’s settings files or logs.</p>
+      <h1>Add AI, then you’re ready</h1>
+      <p className="onboarding-copy">Use Google Gemini directly, OpenCode Zen credits, the OpenCode Go subscription, or your own local endpoint. Keys are stored by the operating system and never appear in Kivo’s settings files or logs.</p>
+      <div className="onboarding-model">
+        <label className="onboarding-model__label" htmlFor="onboarding-ai-provider">Provider</label>
+        <select
+          aria-label="AI provider"
+          id="onboarding-ai-provider"
+          onChange={(event) => {
+            const aiProvider = normalizeAiProvider(event.target.value);
+            if (aiProvider === provider) return;
+            void updateSettings({ aiProvider })
+              .then(() => nativeBridge.getApiKeyStatus().then(setApiStatus).catch(() => {}))
+              .catch(() => setMessage("The provider couldn’t be saved."));
+          }}
+          value={provider}
+        >
+          <option value="gemini">Gemini</option>
+          <option value="zen">OpenCode Zen</option>
+          <option value="go">OpenCode Go</option>
+          <option value="custom">Custom (OpenAI-compatible)</option>
+        </select>
+      </div>
       <div className="onboarding-key">
         {apiStatus.configured ? (
           <StatusIndicator label="API key saved" state="connected" />
         ) : (
           <div className="onboarding-key__input">
-            <input aria-label="Google AI Studio API key" autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder="Google AI Studio API key" spellCheck={false} type="password" value={apiKey} />
+            <input aria-label={keyLabel} autoComplete="off" onChange={(event) => setApiKey(event.target.value)} placeholder={keyLabel} spellCheck={false} type="password" value={apiKey} />
             <Button
               compact
               disabled={apiKey.trim().length < 8 || savingKey}
@@ -244,28 +267,15 @@ function ApiKeyStep(props: ApiKeyStepProps) {
         )}
       </div>
       <div className="onboarding-model">
-        <label className="onboarding-model__label" htmlFor="onboarding-ai-model">Model</label>
-        <AiModelSelect
-          ariaLabel="AI model"
-          id="onboarding-ai-model"
-          onChange={(aiModel) => {
-            if (aiModel == null) return;
-            void updateSettings({ aiModel }).catch(() => setMessage("The model couldn’t be saved."));
+        <span className="onboarding-model__label" id="onboarding-ai-models-label">Models in order</span>
+        <ModelQueueEditor
+          provider={provider}
+          onChange={(aiModels) => {
+            void updateSettings({ aiModels }).catch(() => setMessage("The models couldn’t be saved."));
           }}
-          value={settings.aiModel}
+          value={settings.aiModels}
         />
-        <label className="onboarding-model__label" htmlFor="onboarding-ai-backup-model">Backup model (optional)</label>
-        <AiModelSelect
-          allowNone
-          ariaLabel="Backup AI model"
-          excludeId={settings.aiModel}
-          id="onboarding-ai-backup-model"
-          onChange={(aiBackupModel) => {
-            void updateSettings({ aiBackupModel }).catch(() => setMessage("The backup model couldn’t be saved."));
-          }}
-          value={settings.aiBackupModel}
-        />
-        <p className="onboarding-copy onboarding-model__note">Newest text models work automatically — speech, image, video, and agent models are blocked. If the primary hits its rate limit, Kivo retries once on the backup.</p>
+        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}. Each option shows its cost when known.</p>
       </div>
       <div className="shortcut-demo">
         <ShortcutSummary label="Dictate" platform={platform} shortcut={settings.dictationShortcut} />

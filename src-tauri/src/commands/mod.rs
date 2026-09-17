@@ -9,8 +9,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     ai::{
-        GeminiClient, GeminiError, LinkSource, ListedAiModel, PromptError, WritingAction,
-        dictation_cleanup_prompt, writing_prompt,
+        AiPrompt, AiProvider, GeminiClient, GeminiError, LinkSource, ListedAiModel,
+        OpenAiCompatClient, OpencodeError, PromptError, WritingAction, canonical_model_id_for,
+        curated_models_for, dictation_cleanup_prompt, writing_prompt,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
@@ -35,6 +36,7 @@ pub struct AppCore {
     settings_runtime: Arc<dyn SettingsRuntime>,
     credentials: Arc<dyn CredentialStore>,
     ai: GeminiClient,
+    compat: OpenAiCompatClient,
     speech: Arc<dyn SpeechEngine>,
     text: Arc<dyn TextService>,
     dictation: Mutex<DictationMachine>,
@@ -61,12 +63,14 @@ impl AppCore {
         text: Arc<dyn TextService>,
     ) -> Result<Self, AppCoreError> {
         let settings = settings_repository.load()?;
+        let compat = OpenAiCompatClient::new()?;
         Ok(Self {
             settings: RwLock::new(settings),
             settings_repository,
             settings_runtime,
             credentials,
             ai,
+            compat,
             speech,
             text,
             dictation: Mutex::new(DictationMachine::default()),
@@ -110,52 +114,192 @@ impl AppCore {
     }
 
     pub fn credential_status(&self) -> Result<CredentialStatus, AppCoreError> {
-        self.credentials.status().map_err(Into::into)
+        let provider = self.ai_provider();
+        self.credentials
+            .status(provider.credential_account())
+            .map_err(Into::into)
     }
 
     pub fn save_api_key(&self, api_key: SecretString) -> Result<CredentialStatus, AppCoreError> {
-        self.credentials.save_api_key(&api_key)?;
+        let provider = self.ai_provider();
+        self.credentials
+            .save_api_key(provider.credential_account(), &api_key)?;
         Ok(CredentialStatus { configured: true })
     }
 
     pub fn clear_api_key(&self) -> Result<CredentialStatus, AppCoreError> {
-        self.credentials.clear_api_key()?;
+        let provider = self.ai_provider();
+        self.credentials
+            .clear_api_key(provider.credential_account())?;
         Ok(CredentialStatus { configured: false })
     }
 
-    pub async fn test_api_key(&self) -> Result<CredentialStatus, AppCoreError> {
-        let api_key = self
-            .credentials
-            .load_api_key()?
-            .ok_or(AppCoreError::AiNotConfigured)?;
-        let (model, backup) = self.ai_models();
-        // A single ListModels fetch validates the key and reports every
-        // model id the key can actually use, so Test connection doubles as
-        // the availability check for the selected primary/backup models: no
-        // separate per-model GET and no full generation (fast, no quota).
-        // Same behavior on macOS and Windows: pure HTTPS via reqwest.
-        let models = self.ai.list_models(&api_key).await?;
-        if let Some(missing) = find_unavailable_model(&models, &model, backup.as_deref()) {
-            return Err(AppCoreError::AiModelUnavailable { model: missing });
-        }
-        Ok(CredentialStatus { configured: true })
+    fn load_provider_key(
+        &self,
+        provider: AiProvider,
+    ) -> Result<Option<SecretString>, AppCoreError> {
+        self.credentials
+            .load_api_key(provider.credential_account())
+            .map_err(Into::into)
     }
 
-    fn ai_models(&self) -> (String, Option<String>) {
+    fn require_provider_key(&self, provider: AiProvider) -> Result<SecretString, AppCoreError> {
+        // Custom targets local servers first: no stored key is fine there.
+        if provider.key_optional() {
+            if let Some(key) = self.load_provider_key(provider)? {
+                return Ok(key);
+            }
+            return Err(AppCoreError::AiNotConfigured { provider });
+        }
+        self.load_provider_key(provider)?
+            .ok_or(AppCoreError::AiNotConfigured { provider })
+    }
+
+    pub async fn test_api_key(&self) -> Result<CredentialStatus, AppCoreError> {
+        let (provider, models, base_url) = self.ai_config();
+        match provider {
+            AiProvider::Gemini => {
+                let api_key = self.require_provider_key(provider)?;
+                // A single ListModels fetch validates the key and reports every
+                // model id the key can actually use, so Test connection doubles as
+                // the availability check for the whole queue: no separate
+                // per-model GET and no full generation (fast, no quota).
+                // Same behavior on macOS and Windows: pure HTTPS via reqwest.
+                let listed = self.ai.list_models(&api_key).await?;
+                if let Some(missing) = find_unavailable_model(&listed, provider, &models) {
+                    return Err(AppCoreError::AiModelUnavailable { model: missing });
+                }
+                Ok(CredentialStatus { configured: true })
+            }
+            AiProvider::Zen | AiProvider::Go | AiProvider::Custom => {
+                // Zen/Go list their models publicly, so a metadata GET cannot
+                // validate the key: send a one-token completion on the first
+                // queue entry (the cheapest possible authenticated call), then
+                // verify the remaining entries against the public listing
+                // without spending further quota.
+                let chat_url = provider
+                    .resolve_chat_url(base_url.as_deref())
+                    .ok_or(AppCoreError::AiNotConfigured { provider })?;
+                let api_key = if provider.key_optional() {
+                    self.load_provider_key(provider)?
+                } else {
+                    Some(self.require_provider_key(provider)?)
+                };
+                let first = models
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| crate::ai::DEFAULT_GEMINI_MODEL.to_owned());
+                self.compat
+                    .test_connection(provider, &chat_url, api_key.as_ref(), &first)
+                    .await?;
+                if models.len() > 1 {
+                    let listed = self
+                        .list_provider_models(provider, base_url.as_deref())
+                        .await;
+                    if let Some(missing) = find_unavailable_model(&listed, provider, &models[1..]) {
+                        return Err(AppCoreError::AiModelUnavailable { model: missing });
+                    }
+                }
+                Ok(CredentialStatus { configured: true })
+            }
+        }
+    }
+
+    fn ai_provider(&self) -> AiProvider {
         self.settings()
-            .map(|settings| (settings.ai.model, settings.ai.backup_model))
-            .unwrap_or_else(|_| (crate::ai::DEFAULT_GEMINI_MODEL.to_owned(), None))
+            .map(|settings| settings.ai.provider)
+            .unwrap_or_default()
+    }
+
+    fn ai_config(&self) -> (AiProvider, Vec<String>, Option<String>) {
+        self.settings()
+            .map(|settings| {
+                (
+                    settings.ai.provider,
+                    settings.ai.models,
+                    settings.ai.custom_base_url,
+                )
+            })
+            .unwrap_or_else(|_| {
+                (
+                    AiProvider::default(),
+                    vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()],
+                    None,
+                )
+            })
     }
 
     /// Synchronous key load for the model picker. Returns `None` when no key
     /// is stored or it cannot be read; the caller falls back to curated
     /// suggestions instead of surfacing an error.
-    fn stored_api_key_for_models(&self) -> Option<SecretString> {
-        self.credentials.load_api_key().ok().flatten()
+    fn stored_api_key_for_models(&self, provider: AiProvider) -> Option<SecretString> {
+        self.load_provider_key(provider).ok().flatten()
     }
 
-    fn ai_models_client(&self) -> &GeminiClient {
-        &self.ai
+    /// Generate text on the configured provider, trying each queued model in
+    /// order until one succeeds (see the clients' `generate_in_order`).
+    async fn generate_text(
+        &self,
+        provider: AiProvider,
+        api_key: Option<&SecretString>,
+        models: &[String],
+        base_url: Option<&str>,
+        prompt: &AiPrompt,
+    ) -> Result<String, AppCoreError> {
+        match provider {
+            AiProvider::Gemini => {
+                let api_key = api_key.ok_or(AppCoreError::AiNotConfigured { provider })?;
+                self.ai
+                    .generate_in_order(api_key, models, prompt)
+                    .await
+                    .map_err(Into::into)
+            }
+            AiProvider::Zen | AiProvider::Go | AiProvider::Custom => {
+                let chat_url = provider
+                    .resolve_chat_url(base_url)
+                    .ok_or(AppCoreError::AiNotConfigured { provider })?;
+                self.compat
+                    .generate_in_order(provider, &chat_url, api_key, models, prompt)
+                    .await
+                    .map_err(Into::into)
+            }
+        }
+    }
+
+    /// List models on the configured provider. Dynamic source of truth with
+    /// a curated fallback so the selector never appears empty.
+    async fn list_provider_models(
+        &self,
+        provider: AiProvider,
+        base_url: Option<&str>,
+    ) -> Vec<ListedAiModel> {
+        match provider {
+            AiProvider::Gemini => {
+                let api_key = self.stored_api_key_for_models(provider);
+                match api_key {
+                    Some(api_key) => match self.ai.list_models(&api_key).await {
+                        Ok(models) if !models.is_empty() => models,
+                        _ => crate::ai::curated_listed_models(),
+                    },
+                    None => crate::ai::curated_listed_models(),
+                }
+            }
+            AiProvider::Zen | AiProvider::Go | AiProvider::Custom => {
+                let models_url = provider.resolve_models_url(base_url);
+                let api_key = self.stored_api_key_for_models(provider);
+                match models_url {
+                    Some(models_url) => match self
+                        .compat
+                        .list_models(provider, &models_url, api_key.as_ref())
+                        .await
+                    {
+                        Ok(models) if !models.is_empty() => models,
+                        _ => curated_models_for(provider),
+                    },
+                    None => curated_models_for(provider),
+                }
+            }
+        }
     }
 
     pub fn dictation_phase(&self) -> Result<DictationPhase, AppCoreError> {
@@ -289,21 +433,27 @@ impl AppCore {
             }
         };
         let settings = self.settings()?;
-        let ai_model = settings.ai.model.clone();
-        let ai_backup = settings.ai.backup_model.clone();
+        let ai_provider = settings.ai.provider;
+        let ai_models = settings.ai.models.clone();
+        let ai_base_url = settings.ai.custom_base_url.clone();
         let dictation = settings.dictation;
         let mut final_text = transcript.into_text();
         if dictation.improve_with_ai
-            && let Ok(Some(api_key)) = self.credentials.load_api_key()
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
         {
-            let cleaned = tokio::select! {
-                biased;
-                _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-                result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.ai.generate_with_fallback(&api_key, &ai_model, ai_backup.as_deref(), &prompt)) => result,
-            };
-            if let Ok(Ok(cleaned)) = cleaned {
-                final_text = cleaned;
+            // Missing keys fail silently here (raw transcript is kept): dictation
+            // cleanup is best-effort inside a 4s deadline, never a hard error.
+            // Custom targets local servers, so no stored key is fine there.
+            let api_key = self.load_provider_key(ai_provider).ok().flatten();
+            if api_key.is_some() || ai_provider.key_optional() {
+                let cleaned = tokio::select! {
+                    biased;
+                    _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
+                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &ai_models, ai_base_url.as_deref(), &prompt)) => result,
+                };
+                if let Ok(Ok(cleaned)) = cleaned {
+                    final_text = cleaned;
+                }
             }
         }
         // Serialize the final check and synchronous native delivery with cancel.
@@ -461,23 +611,38 @@ impl AppCore {
                 .as_deref()
                 .or_else(|| selection.as_ref().map(|value| value.text()))
                 .ok_or(PromptError::EmptySource)?;
-            let api_key = self
-                .credentials
-                .load_api_key()?
-                .ok_or(AppCoreError::AiNotConfigured)?;
-            let (model, backup) = self.ai_models();
+            let (provider, models, base_url) = self.ai_config();
             if source_kind == WritingSourceKind::Link {
                 let source = LinkSource::parse(source_text)?;
+                // Link retrieval (URL context / video input) is a Gemini
+                // Interactions API capability. Other providers summarize pasted
+                // text normally; for links they get the paste-instead guidance.
+                if provider != AiProvider::Gemini {
+                    return Err(AppCoreError::Opencode(
+                        crate::ai::OpencodeError::InaccessibleSource,
+                    ));
+                }
+                let api_key = self.require_provider_key(provider)?;
                 let result = self
                     .ai
-                    .summarize_link_with_fallback(&api_key, &model, backup.as_deref(), &source)
+                    .summarize_link_in_order(&api_key, &models, &source)
                     .await?;
                 Ok::<_, AppCoreError>((result, Some(source)))
             } else {
                 let prompt = writing_prompt(action, source_text, custom_instruction.as_deref())?;
+                let api_key = if provider.key_optional() {
+                    self.load_provider_key(provider)?
+                } else {
+                    Some(self.require_provider_key(provider)?)
+                };
                 let result = self
-                    .ai
-                    .generate_with_fallback(&api_key, &model, backup.as_deref(), &prompt)
+                    .generate_text(
+                        provider,
+                        api_key.as_ref(),
+                        &models,
+                        base_url.as_deref(),
+                        &prompt,
+                    )
                     .await?;
                 Ok((result, None))
             }
@@ -635,19 +800,18 @@ impl AppCore {
     }
 }
 
-/// First of the selected primary/backup model ids missing from a successful
-/// ListModels result, if any. A missing id means it is retired or not enabled
-/// for the key's project/tier (the key itself is valid: ListModels succeeded),
-/// so Test connection reports "pick another model" instead of "bad key".
+/// First queue entry missing from a successful list result, if any. A missing
+/// id means it is retired or not enabled for the key's project/tier (the key
+/// itself is valid: listing succeeded), so Test connection reports "pick
+/// another model" instead of "bad key".
 fn find_unavailable_model(
     models: &[ListedAiModel],
-    primary: &str,
-    backup: Option<&str>,
+    provider: AiProvider,
+    queue: &[String],
 ) -> Option<String> {
-    [Some(primary), backup]
-        .into_iter()
-        .flatten()
-        .map(crate::ai::canonical_model_id)
+    queue
+        .iter()
+        .map(|id| canonical_model_id_for(provider, id))
         .find(|id| !models.iter().any(|model| model.id == *id))
 }
 
@@ -705,7 +869,7 @@ pub enum WritingSourceKind {
 #[derive(Debug)]
 pub enum AppCoreError {
     Unavailable,
-    AiNotConfigured,
+    AiNotConfigured { provider: AiProvider },
     AiModelUnavailable { model: String },
     ActionDisabled,
     SelectionExpired,
@@ -715,6 +879,7 @@ pub enum AppCoreError {
     SettingsRuntime(SettingsRuntimeError),
     Credential(CredentialError),
     Gemini(GeminiError),
+    Opencode(OpencodeError),
     Prompt(PromptError),
     Speech(SpeechError),
     DictationTransition(crate::speech::DictationTransitionError),
@@ -735,6 +900,7 @@ impl std::error::Error for AppCoreError {
             Self::SettingsRuntime(error) => Some(error),
             Self::Credential(error) => Some(error),
             Self::Gemini(error) => Some(error),
+            Self::Opencode(error) => Some(error),
             Self::Prompt(error) => Some(error),
             Self::Speech(error) => Some(error),
             Self::DictationTransition(error) => Some(error),
@@ -749,7 +915,7 @@ impl AppCoreError {
     fn code(&self) -> &'static str {
         match self {
             Self::Unavailable => "core_unavailable",
-            Self::AiNotConfigured => "ai_not_configured",
+            Self::AiNotConfigured { .. } => "ai_not_configured",
             Self::AiModelUnavailable { .. } => "model_unavailable",
             Self::ActionDisabled => "action_disabled",
             Self::SelectionExpired => "selection_expired",
@@ -759,6 +925,7 @@ impl AppCoreError {
             Self::SettingsRuntime(_) => "settings_runtime",
             Self::Credential(_) => "credential",
             Self::Gemini(error) => error.code(),
+            Self::Opencode(error) => error.code(),
             Self::Prompt(_) => "invalid_prompt",
             Self::Speech(_) => "speech",
             Self::DictationTransition(_) => "dictation_state",
@@ -770,7 +937,13 @@ impl AppCoreError {
     pub(crate) fn user_message(&self) -> String {
         match self {
             Self::Unavailable => "The application is temporarily unavailable.".into(),
-            Self::AiNotConfigured => "Add your Google AI Studio API key first.".into(),
+            Self::AiNotConfigured { provider } => match provider {
+                AiProvider::Gemini => "Add your Google AI Studio API key first.".into(),
+                AiProvider::Zen | AiProvider::Go => "Add your OpenCode API key first.".into(),
+                AiProvider::Custom => {
+                    "The custom endpoint couldn't be reached. Check the base URL.".into()
+                }
+            },
             Self::AiModelUnavailable { model } => format!(
                 "Your API key works, but \"{model}\" isn't available to it. Choose another model under AI → Model."
             ),
@@ -779,6 +952,7 @@ impl AppCoreError {
             Self::NoResult => "There is no result to replace the selection with.".into(),
             Self::WritingCancelled => "The writing request was cancelled.".into(),
             Self::Gemini(error) => error.user_message().into(),
+            Self::Opencode(error) => error.user_message().into(),
             Self::Settings(error) => error.to_string(),
             Self::SettingsRuntime(error) => error.to_string(),
             Self::Credential(error) => error.to_string(),
@@ -806,6 +980,7 @@ from_core_error!(Settings, SettingsError);
 from_core_error!(SettingsRuntime, SettingsRuntimeError);
 from_core_error!(Credential, CredentialError);
 from_core_error!(Gemini, GeminiError);
+from_core_error!(Opencode, OpencodeError);
 from_core_error!(Prompt, PromptError);
 from_core_error!(Speech, SpeechError);
 from_core_error!(DictationTransition, crate::speech::DictationTransitionError);
@@ -826,10 +1001,13 @@ impl From<AppCoreError> for CommandError {
             AppCoreError::Gemini(GeminiError::Transport(_))
             | AppCoreError::Gemini(GeminiError::Incomplete(_))
             | AppCoreError::Gemini(GeminiError::EmptyResponse)
+            | AppCoreError::Opencode(OpencodeError::Transport(_))
+            | AppCoreError::Opencode(OpencodeError::EmptyResponse)
             | AppCoreError::Speech(SpeechError::NoSpeechDetected)
             | AppCoreError::Speech(SpeechError::RecognitionUnavailable)
             | AppCoreError::Speech(SpeechError::Backend) => true,
             AppCoreError::Gemini(error) if error.is_rate_limited() => true,
+            AppCoreError::Opencode(error) if error.is_rate_limited() => true,
             _ => false,
         };
         Self {
@@ -874,15 +1052,28 @@ pub struct FrontendSettings {
     pub writing_popup_width: f64,
     pub writing_popup_height: f64,
     pub writing_allow_manual_text: bool,
-    #[serde(default = "default_ai_model")]
-    pub ai_model: String,
+    #[serde(default = "default_ai_provider")]
+    pub ai_provider: String,
+    #[serde(default = "default_ai_models")]
+    pub ai_models: Vec<String>,
     #[serde(default)]
-    pub ai_backup_model: Option<String>,
+    pub ai_custom_base_url: Option<String>,
     pub onboarding_complete: bool,
+    /// Legacy primary/backup pair, deserialize-only: accepted on the way in
+    /// when `ai_models` is absent (pre-queue payloads), never serialized
+    /// back out.
+    #[serde(default, skip_serializing)]
+    pub ai_model: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub ai_backup_model: Option<Option<String>>,
 }
 
-fn default_ai_model() -> String {
-    crate::ai::DEFAULT_GEMINI_MODEL.to_owned()
+fn default_ai_provider() -> String {
+    AiProvider::default().as_str().to_owned()
+}
+
+fn default_ai_models() -> Vec<String> {
+    vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
 }
 
 impl From<AppSettings> for FrontendSettings {
@@ -927,9 +1118,12 @@ impl From<AppSettings> for FrontendSettings {
             writing_popup_width: settings.writing_tools.popup_width,
             writing_popup_height: settings.writing_tools.popup_height,
             writing_allow_manual_text: settings.writing_tools.allow_manual_text,
-            ai_model: settings.ai.model,
-            ai_backup_model: settings.ai.backup_model,
+            ai_provider: settings.ai.provider.as_str().into(),
+            ai_models: settings.ai.models,
+            ai_custom_base_url: settings.ai.custom_base_url,
             onboarding_complete: settings.general.onboarding_complete,
+            ai_model: None,
+            ai_backup_model: None,
         }
     }
 }
@@ -954,13 +1148,28 @@ impl TryFrom<FrontendSettings> for AppSettings {
             "fixed" => crate::config::PopupAnchor::Fixed,
             _ => crate::config::PopupAnchor::Cursor,
         };
-        // Unknown / empty model ids fall back to the default so old settings
-        // files and forward-compat payloads never break AI requests. Custom
-        // model ids are allowed (see is_usable_model); only blocked
-        // non-text families normalize away.
-        let ai_model = crate::ai::normalize_model(&settings.ai_model);
-        let ai_backup_model =
-            crate::ai::normalize_backup_model(settings.ai_backup_model.as_deref(), &ai_model);
+        // The queue normalizes itself (dedupe, drop unusable, cap, fall
+        // back to the provider default) so old settings files and
+        // forward-compat payloads never break AI requests. Pre-queue
+        // payloads carrying only `aiModel`/`aiBackupModel` migrate into a
+        // two-entry queue. Unknown provider strings fall back to Gemini.
+        let ai_provider = AiProvider::parse(&settings.ai_provider);
+        let ai_models = if settings.ai_models.is_empty() {
+            let mut migrated = Vec::new();
+            for candidate in [settings.ai_model, settings.ai_backup_model.unwrap_or(None)] {
+                if let Some(candidate) = candidate
+                    && !candidate.trim().is_empty()
+                {
+                    migrated.push(candidate);
+                }
+            }
+            migrated
+        } else {
+            settings.ai_models
+        };
+        let ai_models = crate::ai::normalize_model_list(ai_provider, &ai_models);
+        let ai_custom_base_url =
+            crate::ai::normalize_base_url(settings.ai_custom_base_url.as_deref());
         Ok(AppSettings {
             schema_version: crate::config::SETTINGS_SCHEMA_VERSION,
             general: crate::config::GeneralSettings {
@@ -996,10 +1205,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 popup_height: settings.writing_popup_height,
                 allow_manual_text: settings.writing_allow_manual_text,
             },
-            ai: crate::config::AiSettings {
-                model: ai_model,
-                backup_model: ai_backup_model,
-            },
+            ai: crate::config::AiSettings::new(ai_provider, ai_models, ai_custom_base_url),
         })
     }
 }
@@ -1027,8 +1233,9 @@ pub struct SettingsPatch {
     writing_popup_width: Option<f64>,
     writing_popup_height: Option<f64>,
     writing_allow_manual_text: Option<bool>,
-    ai_model: Option<String>,
-    ai_backup_model: Option<Option<String>>,
+    ai_provider: Option<String>,
+    ai_models: Option<Vec<String>>,
+    ai_custom_base_url: Option<Option<String>>,
     onboarding_complete: Option<bool>,
 }
 
@@ -1061,8 +1268,9 @@ impl SettingsPatch {
         assign!(writing_popup_width);
         assign!(writing_popup_height);
         assign!(writing_allow_manual_text);
-        assign!(ai_model);
-        assign!(ai_backup_model);
+        assign!(ai_provider);
+        assign!(ai_models);
+        assign!(ai_custom_base_url);
         assign!(onboarding_complete);
         settings
     }
@@ -1275,31 +1483,24 @@ fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
 }
 
 #[tauri::command]
+pub fn list_ai_providers() -> Vec<crate::ai::ProviderInfo> {
+    crate::ai::provider_infos()
+}
+
+#[tauri::command]
 pub async fn list_ai_models(
     core: State<'_, AppCore>,
 ) -> Result<Vec<crate::ai::ListedAiModel>, CommandError> {
-    // Dynamic source of truth: ListModels filtered by the blocklist only,
-    // so newest text models appear without a Kivo update. Falls back to the
+    // Dynamic source of truth per provider (Gemini ListModels filtered by the
+    // blocklist; Zen/Go/Custom OpenAI-style listings with curated pricing),
+    // so newest models appear without a Kivo update. Falls back to the
     // curated list when no key is stored or the fetch fails (offline /
     // invalid key), so the selector never appears empty. Identical on macOS
-    // and Windows: the key stays in the Rust process and is sent via header.
-    let api_key = core
-        .credential_status()
-        .ok()
-        .filter(|status| status.configured)
-        .and_then(|_| {
-            // CredentialStore has no async API; load synchronously here.
-            // AppCore exposes it via a short-lived helper below.
-            core.stored_api_key_for_models()
-        });
-    let models = match api_key {
-        Some(api_key) => match core.ai_models_client().list_models(&api_key).await {
-            Ok(models) if !models.is_empty() => models,
-            _ => crate::ai::curated_listed_models(),
-        },
-        None => crate::ai::curated_listed_models(),
-    };
-    Ok(models)
+    // and Windows: keys stay in the Rust process and are sent via header.
+    let (provider, _, base_url) = core.ai_config();
+    Ok(core
+        .list_provider_models(provider, base_url.as_deref())
+        .await)
 }
 
 #[tauri::command]

@@ -37,8 +37,19 @@
 .ai-model-select__row select { flex: 1; min-width: 0; }
 .ai-model-select__row .button { flex: 0 0 auto; white-space: nowrap; }
 .ai-model-select__description { color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
+.ai-model-select__cost { display: inline-block; margin-left: 6px; padding: 1px 7px; border: 1px solid var(--border); border-radius: 20px; color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settings-note { margin: 2px 0 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.settings-note code { font-size: 11px; }
 .ai-model-select__custom { display: grid; gap: 4px; }
 .ai-model-select__custom input { width: 100%; }
+.ai-model-queue { width: 100%; display: grid; gap: 8px; }
+.ai-model-queue__list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.ai-model-queue__row { display: flex; align-items: start; gap: 8px; }
+.ai-model-queue__position { flex: 0 0 auto; width: 20px; height: 30px; display: grid; place-items: center; color: var(--text-tertiary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ai-model-queue__pick { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.ai-model-queue__pick select { width: 100%; }
+.ai-model-queue__actions { flex: 0 0 auto; display: flex; gap: 4px; }
+.ai-model-queue__footer { display: flex; gap: 7px; }
 .ai-model-select__hint { color: var(--text-tertiary); font-size: 11px; }
 .ai-model-select__error { color: var(--danger); font-size: 11px; line-height: 1.35; }
 .text-link { padding: 0; border: 0; background: transparent; color: var(--accent); }

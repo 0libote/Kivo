@@ -28,6 +28,21 @@ export type WritingActionId =
 
 export type WritingPopupAnchor = "cursor" | "selection" | "fixed";
 
+/** AI backends (mirrors `AiProvider` in `src-tauri/src/ai/providers.rs`). */
+export type AiProviderId = "gemini" | "zen" | "go" | "custom";
+
+export interface AiProviderInfo {
+  id: AiProviderId;
+  label: string;
+  keyUrl: string | null;
+  keyOptional: boolean;
+  defaultModel: string;
+  defaultBaseUrl: string | null;
+  supportsLinkSummary: boolean;
+  /** Gemini tests with a free metadata check; others send 1 token. */
+  testUsesQuota: boolean;
+}
+
 export interface AppSettings {
   launchAtLogin: boolean;
   theme: ThemePreference;
@@ -49,8 +64,10 @@ export interface AppSettings {
   writingPopupWidth: number;
   writingPopupHeight: number;
   writingAllowManualText: boolean;
-  aiModel: string;
-  aiBackupModel: string | null;
+  aiProvider: AiProviderId;
+  /** Ordered failover queue: tried top to bottom until one succeeds. */
+  aiModels: string[];
+  aiCustomBaseUrl: string | null;
   onboardingComplete: boolean;
 }
 
@@ -83,6 +100,13 @@ export interface AiModelInfo {
   id: string;
   label: string;
   description: string;
+  /** Short cost summary, e.g. `$0.95 in / $4.00 out per 1M · $60/mo incl.`. */
+  cost?: string | null;
+  inputPer1M?: number | null;
+  outputPer1M?: number | null;
+  monthlyLimitUsd?: number | null;
+  /** pay_per_token | zen_credits | go_subscription | free | local */
+  billing?: string | null;
 }
 
 export interface SelectionContext {
@@ -152,6 +176,7 @@ export const DEFAULT_WRITING_ACTIONS: WritingActionId[] = [
 ];
 
 export const DEFAULT_AI_MODEL = "gemini-3.8-flash";
+export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 
 export function defaultSettings(platform: Platform): AppSettings {
   return {
@@ -175,8 +200,9 @@ export function defaultSettings(platform: Platform): AppSettings {
     writingPopupWidth: 380,
     writingPopupHeight: 460,
     writingAllowManualText: true,
-    aiModel: DEFAULT_AI_MODEL,
-    aiBackupModel: null,
+    aiProvider: DEFAULT_AI_PROVIDER,
+    aiModels: [DEFAULT_AI_MODEL],
+    aiCustomBaseUrl: null,
     onboardingComplete: false,
   };
 }

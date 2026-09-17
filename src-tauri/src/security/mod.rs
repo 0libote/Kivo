@@ -95,14 +95,19 @@ impl std::error::Error for CredentialError {}
 ///
 /// Implementations must never persist the value anywhere except the operating
 /// system's credential vault and must not include it in backend error messages.
+///
+/// Keys are namespaced per AI provider via `account` (see
+/// [`crate::ai::AiProvider::credential_account`]): the Gemini slot keeps its
+/// historic name so existing installs keep working, while Zen, Go and Custom
+/// each get their own slot.
 pub trait CredentialStore: Send + Sync {
-    fn save_api_key(&self, secret: &SecretString) -> Result<(), CredentialError>;
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError>;
-    fn clear_api_key(&self) -> Result<(), CredentialError>;
+    fn save_api_key(&self, account: &str, secret: &SecretString) -> Result<(), CredentialError>;
+    fn load_api_key(&self, account: &str) -> Result<Option<SecretString>, CredentialError>;
+    fn clear_api_key(&self, account: &str) -> Result<(), CredentialError>;
 
-    fn status(&self) -> Result<CredentialStatus, CredentialError> {
+    fn status(&self, account: &str) -> Result<CredentialStatus, CredentialError> {
         Ok(CredentialStatus {
-            configured: self.load_api_key()?.is_some(),
+            configured: self.load_api_key(account)?.is_some(),
         })
     }
 }

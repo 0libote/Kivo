@@ -2,7 +2,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  fallbackAiModels,
+  migrateAiModels,
+  normalizeAiModelList,
+  normalizeAiProvider,
+} from "../ai/models";
+import {
   type AiModelInfo,
+  type AiProviderId,
+  type AiProviderInfo,
   type ApiKeyStatus,
   type AppContext,
   type AppSettings,
@@ -55,6 +63,7 @@ export interface NativeBridge {
   openPermissionSettings(kind: PermissionKind): Promise<void>;
   listMicrophones(): Promise<MicrophoneDevice[]>;
   listSpeechLanguages(): Promise<SpeechLanguage[]>;
+  listAiProviders(): Promise<AiProviderInfo[]>;
   listAiModels(): Promise<AiModelInfo[]>;
   getApiKeyStatus(): Promise<ApiKeyStatus>;
   saveApiKey(apiKey: string): Promise<ApiKeyStatus>;
@@ -141,6 +150,7 @@ class TauriBridge implements NativeBridge {
   openPermissionSettings = (kind: PermissionKind) => call<void>("open_permission_settings", { kind });
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
+  listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = () => call<AiModelInfo[]>("list_ai_models");
   getApiKeyStatus = () => call<ApiKeyStatus>("get_api_key_status");
   saveApiKey = (apiKey: string) => call<ApiKeyStatus>("store_api_key", { apiKey });
@@ -181,14 +191,27 @@ class MockBridge implements NativeBridge {
   private settings: AppSettings;
   private permissions: PermissionStatus[];
   private paused = false;
-  private apiKeyStatus: ApiKeyStatus = { configured: false, connection: "untested" };
+  private apiKeyStatuses: Record<AiProviderId, ApiKeyStatus> = {
+    gemini: { configured: false, connection: "untested" },
+    zen: { configured: false, connection: "untested" },
+    go: { configured: false, connection: "untested" },
+    custom: { configured: false, connection: "untested" },
+  };
   private readonly listeners: ListenerMap = {};
 
   constructor() {
     const stored = window.localStorage.getItem("kivo-dev-settings");
-    this.settings = stored
-      ? { ...defaultSettings(this.platform), ...(JSON.parse(stored) as Partial<AppSettings>) }
-      : defaultSettings(this.platform);
+    const parsed = stored ? (JSON.parse(stored) as Partial<AppSettings>) : {};
+    this.settings = { ...defaultSettings(this.platform), ...parsed };
+    // Pre-queue harnesses stored a single model + backup: fold them into the
+    // ordered queue so the selector never starts empty.
+    this.settings.aiProvider = normalizeAiProvider(
+      typeof parsed.aiProvider === "string" ? parsed.aiProvider : this.settings.aiProvider,
+    );
+    this.settings.aiModels = normalizeAiModelList(
+      this.settings.aiProvider,
+      migrateAiModels(parsed),
+    );
     this.permissions = [
       { kind: "accessibility", state: "not-determined", required: true },
       { kind: "input-monitoring", state: this.platform === "macos" ? "not-determined" : "unavailable", required: false },
@@ -216,6 +239,17 @@ class MockBridge implements NativeBridge {
 
   async updateSettings(patch: Partial<AppSettings>) {
     this.settings = { ...this.settings, ...patch };
+    // Mirror the backend: provider switches re-normalize the queue (a model
+    // valid for one provider may fall back to the default on another).
+    if (patch.aiProvider !== undefined) {
+      this.settings.aiProvider = normalizeAiProvider(patch.aiProvider);
+    }
+    if (patch.aiModels !== undefined || patch.aiProvider !== undefined) {
+      this.settings.aiModels = normalizeAiModelList(
+        this.settings.aiProvider,
+        this.settings.aiModels ?? [],
+      );
+    }
     window.localStorage.setItem("kivo-dev-settings", JSON.stringify(this.settings));
     this.emit("settings-changed", structuredClone(this.settings));
     return structuredClone(this.settings);
@@ -254,34 +288,48 @@ class MockBridge implements NativeBridge {
     ];
   }
 
+  async listAiProviders(): Promise<AiProviderInfo[]> {
+    return [
+      { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: false },
+      { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
+      { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "kimi-k2.7-code", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
+      { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
+    ];
+  }
+
   async listAiModels(): Promise<AiModelInfo[]> {
-    const { FALLBACK_AI_MODELS } = await import("../ai/models");
-    return structuredClone(FALLBACK_AI_MODELS);
+    return structuredClone(fallbackAiModels(this.settings.aiProvider));
+  }
+
+  private currentKeyStatus(): ApiKeyStatus {
+    return { ...this.apiKeyStatuses[this.settings.aiProvider] };
   }
 
   async getApiKeyStatus() {
-    return { ...this.apiKeyStatus };
+    return this.currentKeyStatus();
   }
 
   async saveApiKey(apiKey: string) {
     await delay(250);
-    this.apiKeyStatus = { configured: apiKey.trim().length > 8, connection: "untested" };
-    return { ...this.apiKeyStatus };
+    const provider = this.settings.aiProvider;
+    this.apiKeyStatuses[provider] = { configured: apiKey.trim().length > 8, connection: "untested" };
+    return this.currentKeyStatus();
   }
 
   async clearApiKey() {
-    this.apiKeyStatus = { configured: false, connection: "untested" };
-    return { ...this.apiKeyStatus };
+    this.apiKeyStatuses[this.settings.aiProvider] = { configured: false, connection: "untested" };
+    return this.currentKeyStatus();
   }
 
   async testApiKey() {
-    this.apiKeyStatus = { ...this.apiKeyStatus, connection: "testing" };
+    const provider = this.settings.aiProvider;
+    this.apiKeyStatuses[provider] = { ...this.apiKeyStatuses[provider], connection: "testing" };
     await delay(700);
-    this.apiKeyStatus = {
-      configured: this.apiKeyStatus.configured,
-      connection: this.apiKeyStatus.configured ? "connected" : "invalid",
+    this.apiKeyStatuses[provider] = {
+      configured: this.apiKeyStatuses[provider].configured,
+      connection: this.apiKeyStatuses[provider].configured ? "connected" : "invalid",
     };
-    return { ...this.apiKeyStatus };
+    return this.currentKeyStatus();
   }
 
   async startDictation() {
