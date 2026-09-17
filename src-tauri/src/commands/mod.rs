@@ -793,7 +793,7 @@ impl AppCoreError {
             Self::SelectionExpired => "The original selection is no longer available.".into(),
             Self::NoResult => "There is no result to replace the selection with.".into(),
             Self::WritingCancelled => "The writing request was cancelled.".into(),
-            Self::Gemini(error) => error.user_message().into(),
+            Self::Gemini(error) => error.user_message(),
             Self::Settings(error) => error.to_string(),
             Self::SettingsRuntime(error) => error.to_string(),
             Self::Credential(error) => error.to_string(),

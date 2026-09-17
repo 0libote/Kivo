@@ -2,12 +2,11 @@ name: CI & Build
 
 # Unified pipeline: CI checks -> code/security review -> unsigned beta build.
 #
-# - pull_request (opened/synchronize/reopened): runs CI + review, then builds
-#   Windows + macOS preview bundles for every push and posts/updates one
-#   sticky PR comment linking the run's artifacts (14-day retention) for
-#   live testing. No labels, no manual approval: pushing to the PR is the
-#   approval (same-repo PRs only, see below). Deliberately no per-PR
-#   releases are created — just the comment with download links.
+# - pull_request (opened/synchronize/reopened): runs CI + review. Windows +
+#   macOS preview bundles build only when the PR has the `preview` label, and
+#   post/update one sticky PR comment linking the run's artifacts (14-day
+#   retention) for live testing. Deliberately no per-PR releases are created
+#   — just the comment with download links.
 # - pull_request (closed): retires the sticky preview comment (artifacts
 #   expire on their own). Only `cleanup-pr-preview` runs on `closed`; every
 #   other job skips, so merging never re-runs the suite a second time.
@@ -50,7 +49,9 @@ name: CI & Build
 #   beta builds cannot starve (a workflow-level group starved them before).
 on:
   pull_request:
-    types: [opened, synchronize, reopened, closed]
+    # `labeled` so adding the `preview` label starts the opt-in PR preview
+    # builds without needing another push.
+    types: [opened, synchronize, reopened, closed, labeled]
   push:
     branches: [main]
   workflow_dispatch:
@@ -77,6 +78,7 @@ jobs:
       - run: bun typecheck
       - run: bun lint
       - run: bun run test
+      - run: bun run check:bridge
       - run: bun run build
 
   frontend-windows:
@@ -102,6 +104,7 @@ jobs:
       - run: bun run test
       - run: bun run check:packaging
       - run: bun run check:platform-parity
+      - run: bun run check:bridge
 
   packaging:
     name: Packaging + platform parity gates
@@ -124,6 +127,7 @@ jobs:
           bun-version: 1.4.2
       - run: bun run check:packaging
       - run: bun run check:platform-parity
+      - run: bun run check:bridge
 
   rust-static:
     name: Rust static (fmt, lockfile)
@@ -506,14 +510,16 @@ jobs:
 
   windows-pr:
     name: Windows PR preview
-    # Auto-builds on every PR push (opened/synchronize/reopened): pushing is
-    # the approval, no labels. Waits for the compile gates so broken code
-    # does not burn Windows minutes. Unsigned NSIS installer, same
-    # fast-release tuning as windows-beta. No secrets are used, so this is
-    # safe on forks (forks get the run artifacts page; the sticky comment
-    # with direct links is same-repo only, see `publish-pr`).
+    # Opt-in via the `preview` label: full Tauri bundle builds are the most
+    # expensive jobs here (Windows minutes per push), so they no longer run
+    # on every PR push. Add the label to build, remove it to skip.
+    # Waits for the compile gates so broken code does not burn Windows
+    # minutes. Unsigned NSIS installer, same fast-release tuning as
+    # windows-beta. No secrets are used, so this is safe on forks (forks get
+    # the run artifacts page; the sticky comment with direct links is
+    # same-repo only, see `publish-pr`).
     needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
     outputs:
       exe_name: ${{ steps.names.outputs.exe_name }}
     runs-on: windows-latest
@@ -545,6 +551,7 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
+      - run: bun run check:bridge
       - name: Build unsigned NSIS installer (PR preview)
         run: bun tauri build --bundles nsis
       - name: Record installer filename
@@ -565,12 +572,13 @@ jobs:
 
   macos-pr:
     name: macOS PR preview
-    # Auto-build mirror of `windows-pr` above (see its approval note).
-    # Without this job, macOS-only bundle breakage (icons, entitlements,
-    # Swift bridge, dmg config) merges and fails the beta on main instead
-    # of the PR. No secrets are used, so this is also safe on forks.
+    # Opt-in via the `preview` label, mirroring `windows-pr` above (see its
+    # cost note). Without this job, macOS-only bundle breakage (icons,
+    # entitlements, Swift bridge, dmg config) merges and fails the beta on
+    # main instead of the PR. No secrets are used, so this is also safe on
+    # forks.
     needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
     outputs:
       dmg_name: ${{ steps.names.outputs.dmg_name }}
       app_name: ${{ steps.names.outputs.app_name }}
@@ -605,6 +613,7 @@ jobs:
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
+      - run: bun run check:bridge
       - name: Build ad-hoc signed app bundle (PR preview)
         run: bun tauri build --target aarch64-apple-darwin
       - name: Record bundle filenames

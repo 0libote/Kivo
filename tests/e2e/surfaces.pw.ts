@@ -28,12 +28,12 @@ test("settings navigation and controls work", async ({ page }) => {
     expect(option.toLowerCase()).not.toContain("banana");
     expect(option.toLowerCase()).not.toContain("live");
   }
-  await modelSelect.selectOption("gemini-2.5-flash");
-  await expect(modelSelect).toHaveValue("gemini-2.5-flash");
+  await modelSelect.selectOption("gemini-3.6-flash");
+  await expect(modelSelect).toHaveValue("gemini-3.6-flash");
   const backupSelect = page.getByLabel("Backup AI model", { exact: true });
   await expect(backupSelect).toBeVisible();
-  await backupSelect.selectOption("gemini-2.5-flash-lite");
-  await expect(backupSelect).toHaveValue("gemini-2.5-flash-lite");
+  await backupSelect.selectOption("gemini-3.5-flash-lite");
+  await expect(backupSelect).toHaveValue("gemini-3.5-flash-lite");
   assertNoErrors();
 });
 
