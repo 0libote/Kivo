@@ -461,11 +461,13 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
 
 struct WindowsCredentialStore;
 
-impl CredentialStore for WindowsCredentialStore {
+impl WindowsCredentialStore {
     fn target_name(account: &str) -> Vec<u16> {
         wide(&format!("com.kivo.desktop/{account}"))
     }
+}
 
+impl CredentialStore for WindowsCredentialStore {
     fn save_api_key(&self, account: &str, secret: &SecretString) -> Result<(), CredentialError> {
         let mut blob = secret.expose().as_bytes().to_vec();
         let mut target = Self::target_name(account);
