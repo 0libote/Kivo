@@ -166,28 +166,33 @@ impl GeminiClient {
         parse_link_summary(interaction, &validated)
     }
 
-    /// Same single-retry rule as text generation: only a 429 on the primary
-    /// falls through to the backup.
-    pub async fn summarize_link_with_fallback(
+    /// Same ordered-failover rule as text generation: each model is tried in
+    /// turn, key/account failures abort immediately, and the last error is
+    /// returned when every model fails.
+    pub async fn summarize_link_in_order(
         &self,
         api_key: &SecretString,
-        primary: &str,
-        backup: Option<&str>,
+        models: &[String],
         source: &LinkSource,
     ) -> Result<String, GeminiError> {
-        match self.summarize_link(api_key, primary, source).await {
-            Ok(output) => Ok(output),
-            Err(error) if error.is_rate_limited() => {
-                let primary = super::normalize_model(primary);
-                let backup = backup.map(super::normalize_model);
-                match backup {
-                    Some(backup) if backup != primary => {
-                        self.summarize_link(api_key, &backup, source).await
+        let mut models = models.iter();
+        let first = models.next().map(|model| super::normalize_model(model));
+        let mut current = first.unwrap_or_else(|| super::DEFAULT_GEMINI_MODEL.to_owned());
+        loop {
+            match self.summarize_link(api_key, &current, source).await {
+                Ok(output) => return Ok(output),
+                Err(error) if error.is_failover_terminal() => return Err(error),
+                Err(error) => {
+                    let Some(next) = models.next() else {
+                        return Err(error);
+                    };
+                    let next = super::normalize_model(next);
+                    if next == current {
+                        return Err(error);
                     }
-                    _ => Err(error),
+                    current = next;
                 }
             }
-            Err(error) => Err(error),
         }
     }
 }
