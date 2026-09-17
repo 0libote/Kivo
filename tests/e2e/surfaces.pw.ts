@@ -56,9 +56,14 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   const modelSelect = page.getByLabel("Model 1 of 1", { exact: true });
   // Zen options carry their per-1M cost so the price is visible up front.
   await expect(modelSelect.locator("option", { hasText: "per 1M" }).first()).toBeAttached();
+  await providerSelect.selectOption("go");
+  await expect(modelSelect).toHaveValue("kimi-k2.7-code");
+  await expect(modelSelect.locator('option[value="gemini-3.8-flash"]')).toHaveCount(0);
   await providerSelect.selectOption("custom");
   await expect(page.getByLabel("Custom base URL")).toBeVisible();
-  await expect(page.getByLabel("Model 1 of 1", { exact: true })).toBeVisible();
+  await expect(modelSelect).toHaveValue("llama3.1");
+  await providerSelect.selectOption("gemini");
+  await expect(modelSelect).toHaveValue("gemini-3.8-flash");
   assertNoErrors();
 });
 

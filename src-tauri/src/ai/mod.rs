@@ -30,11 +30,8 @@ pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
 pub const MAX_AI_MODELS: usize = 5;
 pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
-/// ListModels / GetModel endpoint used for the model picker and the
-/// lightweight Test connection check (see
-/// https://ai.google.dev/api/models). Authenticated the same way as
-/// generate (the `x-goog-api-key` header), but a small metadata GET instead
-/// of a full model generation, so it is fast and spends no quota.
+/// ListModels endpoint used for the model picker and queue metadata checks.
+/// Listing a model does not prove it can complete an Interactions request.
 pub const GEMINI_MODELS_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /// Curated suggestions for the model picker. Validation itself is allow-all
@@ -386,6 +383,12 @@ impl GeminiClient {
     }
 
     #[cfg(test)]
+    pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.http = reqwest::Client::builder().timeout(timeout).build().unwrap();
+        self
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_endpoints(
         endpoint: String,
         models_endpoint: String,
@@ -545,7 +548,7 @@ impl GeminiClient {
     /// (auth) and unreachable hosts (transport) abort immediately: every
     /// entry shares the same key and network, so continuing could only burn
     /// quota and add latency. Anything else — rate limits, unknown model
-    /// ids, server errors, empty responses — falls through to the next
+    /// ids, server errors, generation timeouts, empty responses — falls through to the next
     /// model, and the last error is returned when all fail.
     pub async fn generate_in_order(
         &self,
@@ -807,7 +810,9 @@ impl GeminiError {
     /// unreachable, so trying the next model cannot help.
     fn is_failover_terminal(&self) -> bool {
         match self {
-            Self::InvalidApiKey | Self::Transport(_) => true,
+            Self::Api { .. } if self.is_rate_limited() => false,
+            Self::InvalidApiKey => true,
+            Self::Transport(error) => !error.is_timeout(),
             Self::Api { status, code, .. }
                 if *status == StatusCode::UNAUTHORIZED
                     || *status == StatusCode::FORBIDDEN
@@ -877,6 +882,9 @@ impl GeminiError {
             Self::InaccessibleSource => {
                 "Couldn't read that source. It may be unavailable or require sign-in. Paste the text or transcript instead.".into()
             }
+            Self::Api { .. } if self.is_rate_limited() => {
+                "Gemini is temporarily rate limited. Try again shortly.".into()
+            }
             // Invalid keys surface as HTTP 400 INVALID_ARGUMENT with an
             // API_KEY_INVALID reason (not 401/403), so the body code —
             // normalized by parse_api_error_code — is the real signal.
@@ -886,12 +894,6 @@ impl GeminiError {
                     || Self::is_auth_code(code.as_deref()) =>
             {
                 "Couldn't connect to Gemini. Check your API key.".into()
-            }
-            Self::Api { status, code, .. }
-                if *status == StatusCode::TOO_MANY_REQUESTS
-                    || matches!(code.as_deref(), Some("rate_limited" | "RESOURCE_EXHAUSTED")) =>
-            {
-                "Gemini is temporarily rate limited. Try again shortly.".into()
             }
             // Server-side 500s (Gemini "Internal error encountered.") say
             // nothing actionable: friendly retry text instead of raw detail.
@@ -912,6 +914,9 @@ impl GeminiError {
             // problems: say so explicitly instead of the generic fallback.
             Self::Api { .. } if self.is_not_found() => {
                 "That model isn't available with your API key. Choose another model under AI → Model.".into()
+            }
+            Self::Transport(error) if error.is_timeout() => {
+                "Gemini took too long to respond. Try again or choose another model.".into()
             }
             Self::Transport(_) => "Couldn't reach Gemini. Check your connection.".into(),
             _ => "Gemini couldn't complete that request.".into(),
@@ -1356,6 +1361,37 @@ mod tests {
         assert!(error.is_rate_limited());
         assert!(!error.is_not_found());
         assert_eq!(error.code(), "rate_limited");
+    }
+
+    #[test]
+    fn quota_errors_allow_failover_even_with_forbidden_status() {
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::FORBIDDEN,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+        ] {
+            let body = serde_json::json!({
+                "error": {"status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded."}
+            });
+            let error = GeminiError::Api {
+                status,
+                code: parse_api_error_code(&body),
+                detail: parse_api_error_detail(&body),
+            };
+            assert_eq!(error.code(), "rate_limited");
+            assert!(!error.is_failover_terminal());
+            assert_eq!(
+                error.user_message(),
+                "Gemini is temporarily rate limited. Try again shortly."
+            );
+        }
+        let forbidden = GeminiError::Api {
+            status: reqwest::StatusCode::FORBIDDEN,
+            code: Some("permission_denied".into()),
+            detail: None,
+        };
+        assert!(forbidden.is_failover_terminal());
+        assert_eq!(forbidden.code(), "invalid_api_key");
     }
 
     #[test]
