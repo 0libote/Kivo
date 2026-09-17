@@ -375,7 +375,9 @@ impl GeminiClient {
     pub fn new() -> Result<Self, GeminiError> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20))
+            // ponytail: 90s, not 20s — slow models (Gemma took 50s live for
+            // 3 words) must not surface as "check your connection".
+            .timeout(Duration::from_secs(90))
             .build()
             .map_err(GeminiError::Transport)?;
         Ok(Self {
@@ -395,15 +397,18 @@ impl GeminiClient {
         model: &str,
         prompt: &AiPrompt,
     ) -> Result<String, GeminiError> {
-        // ponytail: one retry for flaky 500s (seen live on Gemma); the
-        // popup's manual Retry covers anything still failing.
-        match self.generate_once(api_key, model, prompt).await {
-            Err(error) if error.is_server_error() => {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                self.generate_once(api_key, model, prompt).await
+        // ponytail: upstream retries 5xx 3x with doubling 500ms backoff; same.
+        let mut delay = Duration::from_millis(500);
+        for _ in 0..3 {
+            match self.generate_once(api_key, model, prompt).await {
+                Err(error) if error.is_server_error() => {
+                    tokio::time::sleep(delay).await;
+                    delay = (delay * 2).min(Duration::from_secs(10));
+                }
+                result => return result,
             }
-            result => result,
         }
+        self.generate_once(api_key, model, prompt).await
     }
 
     async fn generate_once(
