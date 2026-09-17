@@ -45,7 +45,7 @@ use ::windows::{
             },
         },
     },
-    core::{HRESULT, PWSTR, w},
+    core::{HRESULT, PCWSTR, PWSTR},
 };
 
 use crate::security::{CredentialError, CredentialStore, SecretString};
@@ -461,10 +461,16 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
 
 struct WindowsCredentialStore;
 
+impl WindowsCredentialStore {
+    fn target_name(account: &str) -> Vec<u16> {
+        wide(&format!("com.kivo.desktop/{account}"))
+    }
+}
+
 impl CredentialStore for WindowsCredentialStore {
-    fn save_api_key(&self, secret: &SecretString) -> Result<(), CredentialError> {
+    fn save_api_key(&self, account: &str, secret: &SecretString) -> Result<(), CredentialError> {
         let mut blob = secret.expose().as_bytes().to_vec();
-        let mut target = wide("com.kivo.desktop/gemini-api-key");
+        let mut target = Self::target_name(account);
         let mut username = wide("Kivo");
         let credential = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
@@ -480,11 +486,12 @@ impl CredentialStore for WindowsCredentialStore {
         result
     }
 
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError> {
+    fn load_api_key(&self, account: &str) -> Result<Option<SecretString>, CredentialError> {
         let mut credential = ptr::null_mut();
+        let target = Self::target_name(account);
         let result = unsafe {
             CredReadW(
-                w!("com.kivo.desktop/gemini-api-key"),
+                PCWSTR(target.as_ptr()),
                 CRED_TYPE_GENERIC,
                 None,
                 &mut credential,
@@ -511,14 +518,9 @@ impl CredentialStore for WindowsCredentialStore {
         value.and_then(SecretString::new).map(Some)
     }
 
-    fn clear_api_key(&self) -> Result<(), CredentialError> {
-        match unsafe {
-            CredDeleteW(
-                w!("com.kivo.desktop/gemini-api-key"),
-                CRED_TYPE_GENERIC,
-                None,
-            )
-        } {
+    fn clear_api_key(&self, account: &str) -> Result<(), CredentialError> {
+        let target = Self::target_name(account);
+        match unsafe { CredDeleteW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None) } {
             Ok(()) => Ok(()),
             Err(error) if error.code() == HRESULT::from_win32(ERROR_NOT_FOUND.0) => Ok(()),
             Err(_) => Err(CredentialError::Backend),

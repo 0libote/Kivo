@@ -310,35 +310,83 @@ impl WritingToolsSettings {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AiSettings {
-    pub model: String,
     #[serde(default)]
-    pub backup_model: Option<String>,
+    pub provider: crate::ai::AiProvider,
+    /// Ordered failover queue: tried top to bottom until one succeeds.
+    #[serde(default)]
+    pub models: Vec<String>,
+    /// Custom provider only: OpenAI-compatible base URL
+    /// (e.g. Ollama `http://localhost:11434/v1`). `None` means the Ollama
+    /// default. Ignored by the other providers.
+    #[serde(default)]
+    pub custom_base_url: Option<String>,
+    /// Pre-queue settings files stored a single `model` plus an optional
+    /// `backupModel`. Captured here so the first load after upgrading
+    /// migrates them into `models` instead of dropping the user's choice;
+    /// never serialized back out.
+    #[serde(default, rename = "model", skip_serializing)]
+    legacy_model: Option<String>,
+    #[serde(default, rename = "backupModel", skip_serializing)]
+    legacy_backup_model: Option<String>,
 }
 
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
-            model: crate::ai::DEFAULT_GEMINI_MODEL.to_owned(),
-            backup_model: None,
+            provider: crate::ai::AiProvider::default(),
+            models: vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()],
+            custom_base_url: None,
+            legacy_model: None,
+            legacy_backup_model: None,
         }
     }
 }
 
 impl AiSettings {
+    pub fn new(
+        provider: crate::ai::AiProvider,
+        models: Vec<String>,
+        custom_base_url: Option<String>,
+    ) -> Self {
+        Self {
+            provider,
+            models,
+            custom_base_url,
+            legacy_model: None,
+            legacy_backup_model: None,
+        }
+    }
+
     fn normalize(&mut self) {
-        self.model = crate::ai::normalize_model(&self.model);
-        self.backup_model =
-            crate::ai::normalize_backup_model(self.backup_model.as_deref(), &self.model);
+        // One-time upgrade: fold the legacy primary/backup pair into the
+        // queue. An explicit (possibly empty) `models` array always wins.
+        if self.models.is_empty() {
+            let mut migrated = Vec::new();
+            for candidate in [self.legacy_model.take(), self.legacy_backup_model.take()] {
+                if let Some(candidate) = candidate
+                    && !candidate.trim().is_empty()
+                {
+                    migrated.push(candidate);
+                }
+            }
+            self.models = migrated;
+        } else {
+            self.legacy_model = None;
+            self.legacy_backup_model = None;
+        }
+        self.models = crate::ai::normalize_model_list(self.provider, &self.models);
+        // The custom endpoint is preserved across provider switches (other
+        // providers ignore it) so switching back doesn't lose the URL.
+        self.custom_base_url = crate::ai::normalize_base_url(self.custom_base_url.as_deref());
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
-        if !crate::ai::is_usable_model(&self.model) {
-            return Err(SettingsError::InvalidAiModel);
-        }
-        if let Some(backup) = &self.backup_model
-            && (!crate::ai::is_usable_model(backup)
-                || crate::ai::canonical_model_id(backup)
-                    == crate::ai::canonical_model_id(&self.model))
+        if self.models.is_empty()
+            || self.models.len() > crate::ai::MAX_AI_MODELS
+            || self
+                .models
+                .iter()
+                .any(|model| !crate::ai::is_usable_model_for(self.provider, model))
         {
             return Err(SettingsError::InvalidAiModel);
         }
@@ -631,42 +679,42 @@ mod tests {
     fn ai_model_defaults_and_legacy_files() {
         // Default matches the frontend contract (src/types.ts DEFAULT_AI_MODEL).
         assert_eq!(
-            AppSettings::default().ai.model,
-            crate::ai::DEFAULT_GEMINI_MODEL
+            AppSettings::default().ai.models,
+            vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
         );
-        assert_eq!(AppSettings::default().ai.backup_model, None);
 
         // Supported ids survive normalization (trimmed), including new ids
         // that were never in the curated suggestion list.
         let mut settings = AppSettings::default();
-        settings.ai.model = "  gemini-2.5-flash  ".into();
+        settings.ai.models = vec![
+            "  gemini-2.5-flash  ".into(),
+            "models/gemini-4.0-flash".into(),
+        ];
         assert_eq!(
-            settings.validate_and_normalize().unwrap().ai.model,
-            "gemini-2.5-flash"
-        );
-        let mut settings = AppSettings::default();
-        settings.ai.model = "models/gemini-4.0-flash".into();
-        assert_eq!(
-            settings.validate_and_normalize().unwrap().ai.model,
-            "gemini-4.0-flash"
+            settings.validate_and_normalize().unwrap().ai.models,
+            vec!["gemini-2.5-flash", "gemini-4.0-flash"]
         );
 
-        // Unknown, TTS/image, and empty ids fall back to the default instead
-        // of bricking AI requests.
-        for model in [
-            "",
-            "has spaces!",
-            "gemini-2.5-flash-preview-tts",
-            "gemini-2.5-flash-image",
-        ] {
-            let mut settings = AppSettings::default();
-            settings.ai.model = model.into();
-            assert_eq!(
-                settings.validate_and_normalize().unwrap().ai.model,
-                crate::ai::DEFAULT_GEMINI_MODEL,
-                "model {model} should fall back"
-            );
-        }
+        // Duplicates collapse (first wins) and unknown / TTS / image ids are
+        // dropped; an emptied queue falls back to the default instead of
+        // bricking AI requests.
+        let mut settings = AppSettings::default();
+        settings.ai.models = vec![
+            "gemini-2.5-flash".into(),
+            "gemini-2.5-flash".into(),
+            "has spaces!".into(),
+            "gemini-2.5-flash-preview-tts".into(),
+        ];
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.models,
+            vec!["gemini-2.5-flash".to_owned()]
+        );
+        let mut settings = AppSettings::default();
+        settings.ai.models = vec![];
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.models,
+            vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
+        );
 
         // Files written before the ai section existed deserialize via serde
         // defaults and keep working.
@@ -681,34 +729,119 @@ mod tests {
         });
         let settings: AppSettings = serde_json::from_value(legacy).unwrap();
         let settings = settings.validate_and_normalize().unwrap();
-        assert_eq!(settings.ai.model, crate::ai::DEFAULT_GEMINI_MODEL);
-        assert_eq!(settings.ai.backup_model, None);
+        assert_eq!(
+            settings.ai.models,
+            vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
+        );
     }
 
     #[test]
-    fn ai_backup_model_normalizes_to_none_when_empty_same_or_unusable() {
-        // A distinct usable backup survives.
+    fn ai_legacy_primary_and_backup_migrate_into_the_queue() {
+        // Pre-queue files stored `model` + `backupModel`: both migrate in
+        // order, and the legacy keys are never written back out.
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "general": {},
+            "dictation": { "shortcut": { "accelerator": "Fn" } },
+            "writingTools": {
+                "shortcut": { "accelerator": "Ctrl+Shift+Space" },
+                "enabledActions": ["proofread"],
+            },
+            "ai": {
+                "provider": "zen",
+                "model": "opencode/kimi-k2.7-code",
+                "backupModel": "glm-5.3-flash",
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.models, vec!["kimi-k2.7-code", "glm-5.3-flash"]);
+        let saved = serde_json::to_value(&settings).unwrap();
+        assert!(saved["ai"].get("models").is_some());
+        assert!(saved["ai"].get("model").is_none());
+        assert!(saved["ai"].get("backupModel").is_none());
+
+        // An explicit queue always wins over stale legacy fields.
+        let mixed = serde_json::json!({
+            "schemaVersion": 1,
+            "ai": {
+                "models": ["glm-5.3-flash"],
+                "model": "gemini-2.5-flash",
+                "backupModel": "gemini-2.5-flash-lite",
+            },
+        });
+        let settings: AppSettings = serde_json::from_value(mixed).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.models, vec!["glm-5.3-flash".to_owned()]);
+    }
+
+    #[test]
+    fn ai_queues_truncate_to_the_cap() {
         let mut settings = AppSettings::default();
-        settings.ai.backup_model = Some("gemini-2.5-flash".into());
+        settings.ai.models = (0..crate::ai::MAX_AI_MODELS + 3)
+            .map(|n| format!("gemini-test-{n}-flash"))
+            .collect();
+        let models = settings.validate_and_normalize().unwrap().ai.models;
+        assert_eq!(models.len(), crate::ai::MAX_AI_MODELS);
+        assert_eq!(models[0], "gemini-test-0-flash");
+    }
+
+    #[test]
+    fn ai_provider_defaults_to_gemini_and_legacy_files_keep_working() {
+        use crate::ai::AiProvider;
+        assert_eq!(AppSettings::default().ai.provider, AiProvider::Gemini);
+        assert_eq!(AppSettings::default().ai.custom_base_url, None);
+        // Files written before the provider field existed deserialize via
+        // serde defaults to Gemini, preserving the stored Gemini key slot.
+        let legacy = serde_json::json!({
+            "schemaVersion": 1,
+            "general": {},
+            "dictation": { "shortcut": { "accelerator": "Fn" } },
+            "writingTools": {
+                "shortcut": { "accelerator": "Ctrl+Shift+Space" },
+                "enabledActions": ["proofread"],
+            },
+            "ai": { "model": "gemini-2.5-flash" },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.provider, AiProvider::Gemini);
+        assert_eq!(settings.ai.models, vec!["gemini-2.5-flash".to_owned()]);
+    }
+
+    #[test]
+    fn ai_provider_switch_falls_back_to_usable_models() {
+        use crate::ai::AiProvider;
+        // Zen keeps Gemini text ids (usable there) but drops TTS families.
+        let mut settings = AppSettings::default();
+        settings.ai.provider = AiProvider::Zen;
+        settings.ai.models = vec!["gemini-2.5-flash".into()];
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.models, vec!["gemini-2.5-flash".to_owned()]);
+        let mut settings = AppSettings::default();
+        settings.ai.provider = AiProvider::Zen;
+        settings.ai.models = vec!["gemini-2.5-flash-preview-tts".into()];
+        let settings = settings.validate_and_normalize().unwrap();
         assert_eq!(
-            settings.validate_and_normalize().unwrap().ai.backup_model,
-            Some("gemini-2.5-flash".to_owned())
+            settings.ai.models,
+            vec![AiProvider::Zen.default_model().to_owned()]
         );
-        // Empty, same-as-primary, and blocked ids collapse to None.
-        for backup in [
-            Some(""),
-            Some("  "),
-            Some("gemini-3.8-flash"),
-            Some("gemini-2.5-flash-preview-tts"),
-            Some("has spaces!"),
-        ] {
-            let mut settings = AppSettings::default();
-            settings.ai.backup_model = backup.map(str::to_owned);
-            assert_eq!(
-                settings.validate_and_normalize().unwrap().ai.backup_model,
-                None,
-                "backup {backup:?} should collapse"
-            );
-        }
+        // Custom accepts local ids and normalizes the base URL.
+        let mut settings = AppSettings::default();
+        settings.ai.provider = AiProvider::Custom;
+        settings.ai.models = vec!["  google/gemma-3n-e4b  ".into()];
+        settings.ai.custom_base_url = Some("http://127.0.0.1:1234/v1/".into());
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.models, vec!["google/gemma-3n-e4b".to_owned()]);
+        assert_eq!(
+            settings.ai.custom_base_url.as_deref(),
+            Some("http://127.0.0.1:1234/v1")
+        );
+        // Junk base URLs collapse to None (Ollama default applies).
+        let mut settings = AppSettings::default();
+        settings.ai.provider = AiProvider::Custom;
+        settings.ai.custom_base_url = Some("notaurl".into());
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.ai.custom_base_url, None);
     }
 }

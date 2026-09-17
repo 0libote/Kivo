@@ -49,6 +49,7 @@ const shellRs = read("src-tauri/src/shell.rs");
 const commandsRs = read("src-tauri/src/commands/mod.rs");
 const nativeTs = read("src/platform/native.ts");
 const aiRs = read("src-tauri/src/ai/mod.rs");
+const aiProvidersRs = read("src-tauri/src/ai/providers.rs");
 const aiModelsTs = read("src/ai/models.ts");
 
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
@@ -200,9 +201,13 @@ check(
 );
 function FALLBACK_IDS_MATCH(): boolean {
   const rustIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
-  // The TS mirror stores one model per row; match the id column (labels are
-  // capitalized "Gemini …" and never match this pattern).
-  const tsIds = [...aiModelsTs.matchAll(/"(gemini-[^"]+)"/g)].map(m => m[1]);
+  // The TS mirror stores one Gemini model per FALLBACK_ROWS row; match the id
+  // column of that block only (ZEN_FALLBACK_ROWS reuses gemini ids with Zen
+  // pricing further down the file).
+  const fallbackAnchor = aiModelsTs.indexOf("FALLBACK_ROWS");
+  const fallbackEnd = fallbackAnchor === -1 ? -1 : aiModelsTs.indexOf("];", fallbackAnchor);
+  const fallbackBlock = fallbackAnchor === -1 || fallbackEnd === -1 ? "" : aiModelsTs.slice(fallbackAnchor, fallbackEnd);
+  const tsIds = [...fallbackBlock.matchAll(/"(gemini-[^"]+)"/g)].map(m => m[1]);
   return rustIds.length > 0 && rustIds.length === tsIds.length && rustIds.every(id => tsIds.includes(id));
 }
 function blocklist(name: string, source: string): string[] {
@@ -223,19 +228,39 @@ check(
   `Rust [${rustBlocklist}] vs TS [${tsBlocklist}]; keep BLOCKED_MODEL_SUBSTRINGS and BLOCKED_AI_MODEL_PATTERNS in sync`,
 );
 check(
-  "backup model is plumbed end to end",
-  configRs.includes("backup_model") && commandsRs.includes("ai_backup_model") && typesTs.includes("aiBackupModel"),
-  "AiSettings.backup_model / FrontendSettings.ai_backup_model / AppSettings.aiBackupModel missing",
+  "model queue is plumbed end to end",
+  configRs.includes("pub models") && commandsRs.includes("ai_models") && typesTs.includes("aiModels"),
+  "AiSettings.models / FrontendSettings.ai_models / AppSettings.aiModels missing",
 );
 check(
-  "rate-limit fallback retries once on the backup",
-  aiRs.includes("generate_with_fallback") && aiRs.includes("is_rate_limited") && commandsRs.includes("summarize_link_with_fallback"),
-  "generate_with_fallback / summarize_link_with_fallback / is_rate_limited missing",
+  "ordered failover tries each queued model",
+  aiRs.includes("generate_in_order") && aiRs.includes("is_failover_terminal") && commandsRs.includes("summarize_link_in_order"),
+  "generate_in_order / summarize_link_in_order / is_failover_terminal missing",
 );
 check(
   "native bridge exposes list_ai_models",
   nativeTs.includes("listAiModels") && nativeTs.includes("list_ai_models") && commandsRs.includes("list_ai_models"),
   "NativeBridge.listAiModels / list_ai_models command missing",
+);
+check(
+  "provider choice is plumbed end to end",
+  configRs.includes("pub provider") && commandsRs.includes("ai_provider") && typesTs.includes("aiProvider"),
+  "AiSettings.provider / FrontendSettings.ai_provider / AppSettings.aiProvider missing",
+);
+check(
+  "custom endpoint is plumbed end to end",
+  configRs.includes("custom_base_url") && commandsRs.includes("ai_custom_base_url") && typesTs.includes("aiCustomBaseUrl"),
+  "AiSettings.custom_base_url / FrontendSettings.ai_custom_base_url / AppSettings.aiCustomBaseUrl missing",
+);
+check(
+  "provider metadata reaches the UI",
+  nativeTs.includes("listAiProviders") && nativeTs.includes("list_ai_providers") && commandsRs.includes("list_ai_providers"),
+  "NativeBridge.listAiProviders / list_ai_providers command missing",
+);
+check(
+  "model costs reach the picker",
+  aiProvidersRs.includes("cost_label_for") && aiModelsTs.includes("per 1M") && nativeTs.includes("AiModelInfo"),
+  "pricing (cost_label_for / per-1M fallbacks) missing from the model pipeline",
 );
 
 if (failures > 0) {

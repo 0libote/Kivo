@@ -35,20 +35,22 @@ impl PlatformCredentialStore {
 }
 
 impl CredentialStore for PlatformCredentialStore {
-    fn save_api_key(&self, secret: &SecretString) -> Result<(), CredentialError> {
-        self.platform.credential_store().save_api_key(secret)
+    fn save_api_key(&self, account: &str, secret: &SecretString) -> Result<(), CredentialError> {
+        self.platform
+            .credential_store()
+            .save_api_key(account, secret)
     }
 
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError> {
-        self.platform.credential_store().load_api_key()
+    fn load_api_key(&self, account: &str) -> Result<Option<SecretString>, CredentialError> {
+        self.platform.credential_store().load_api_key(account)
     }
 
-    fn clear_api_key(&self) -> Result<(), CredentialError> {
-        self.platform.credential_store().clear_api_key()
+    fn clear_api_key(&self, account: &str) -> Result<(), CredentialError> {
+        self.platform.credential_store().clear_api_key(account)
     }
 
-    fn status(&self) -> Result<CredentialStatus, CredentialError> {
-        self.platform.credential_store().status()
+    fn status(&self, account: &str) -> Result<CredentialStatus, CredentialError> {
+        self.platform.credential_store().status(account)
     }
 }
 

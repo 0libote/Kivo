@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { AiModelSelect } from "./AiModelSelect";
+import { ModelQueueEditor } from "./ModelQueueEditor";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { Button } from "../../components/Button";
@@ -12,6 +12,8 @@ import { nativeBridge, type UpdateResult } from "../../platform/native";
 import {
   DEFAULT_WRITING_ACTIONS,
   NativeError,
+  type AiProviderId,
+  type AiProviderInfo,
   type ApiKeyStatus,
   type AppContext,
   type AppSettings,
@@ -20,6 +22,7 @@ import {
   type PermissionStatus,
   type SpeechLanguage,
 } from "../../types";
+import { normalizeAiProvider } from "../../ai/models";
 import { writingAction } from "../writing-tools/actions";
 
 type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "permissions" | "about";
@@ -553,45 +556,104 @@ function AiSection({
   readonly settings: AppSettings;
   readonly save: SaveSettings;
 }) {
+  const [providers, setProviders] = useState<AiProviderInfo[]>(FALLBACK_AI_PROVIDERS);
+  const provider = normalizeAiProvider(settings.aiProvider);
+  const info = providers.find(candidate => candidate.id === provider) ?? FALLBACK_AI_PROVIDERS[0];
+
+  useEffect(() => {
+    let active = true;
+    void nativeBridge.listAiProviders()
+      .then(next => {
+        if (active && next.length > 0) setProviders(next);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function refreshKeyStatus() {
+    try {
+      setApiStatus(await nativeBridge.getApiKeyStatus());
+    } catch {
+      setNotice("Key status isn’t available right now.");
+    }
+  }
+
   return (
-    <SettingsContent title="AI" subtitle="Kivo sends only the text needed for your request directly to Google Gemini.">
-      <SettingsGroup header="Model">
-        <SettingRow label="Model" description="Newest text models work automatically — only speech, image, video, and agent models are hidden. Or type any model ID via Custom." stacked>
-          <AiModelSelect
+    <SettingsContent title="AI" subtitle={aiSubtitle(info)}>
+      <SettingsGroup header="Provider">
+        <SettingRow label="Provider" description="Gemini calls Google directly. Zen is OpenCode pay-as-you-go credits. Go is the $10/month OpenCode subscription. Custom talks to any OpenAI-compatible endpoint." stacked>
+          <select
+            aria-label="AI provider"
             disabled={busy !== null}
-            onChange={(aiModel) => {
-              if (aiModel == null) return;
-              void save({ aiModel })
+            onChange={(event) => {
+              const aiProvider = normalizeAiProvider(event.target.value);
+              if (aiProvider === provider) return;
+              setBusy("switch-provider");
+              setNotice(null);
+              void save({ aiProvider })
+                .then(() => refreshKeyStatus())
+                .catch(() => {})
+                .finally(() => setBusy(null));
+            }}
+            value={provider}
+          >
+            {providers.map(candidate => (
+              <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
+            ))}
+          </select>
+        </SettingRow>
+        {provider === "custom" ? (
+          <SettingRow label="Base URL" description="OpenAI-compatible endpoint — Ollama, LM Studio, or any OpenCode-style provider. Models are pulled from this server's /models list." stacked>
+            <div className="api-key-editor">
+              <input
+                aria-label="Custom base URL"
+                autoCapitalize="none"
+                autoComplete="off"
+                defaultValue={settings.aiCustomBaseUrl ?? ""}
+                key={provider}
+                onBlur={(event) => {
+                  const raw = event.target.value.trim();
+                  const aiCustomBaseUrl = raw === "" ? null : raw;
+                  if (aiCustomBaseUrl !== settings.aiCustomBaseUrl) {
+                    void save({ aiCustomBaseUrl }).catch(() => setNotice("The base URL couldn’t be saved."));
+                  }
+                }}
+                placeholder={info.defaultBaseUrl ?? "http://localhost:11434/v1"}
+                spellCheck={false}
+                type="url"
+              />
+            </div>
+          </SettingRow>
+        ) : null}
+      </SettingsGroup>
+      <SettingsGroup header="Models in order">
+        <SettingRow label="Models" description="Tried top to bottom until one succeeds — a failure moves to the next. Key or balance problems stop immediately. Each option shows its cost when known, or type any model ID via Custom." stacked>
+          <ModelQueueEditor
+            disabled={busy !== null}
+            provider={provider}
+            onChange={(aiModels) => {
+              void save({ aiModels })
                 .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
                 .catch(() => {});
             }}
-            value={settings.aiModel}
+            value={settings.aiModels}
           />
         </SettingRow>
-        <SettingRow label="Backup model" description="If the primary hits its rate limit, Kivo retries once on the backup before reporting an error." stacked>
-          <AiModelSelect
-            allowNone
-            ariaLabel="Backup AI model"
-            disabled={busy !== null}
-            excludeId={settings.aiModel}
-            onChange={(aiBackupModel) => {
-              void save({ aiBackupModel })
-                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
-                .catch(() => {});
-            }}
-            value={settings.aiBackupModel}
-          />
-        </SettingRow>
+        {!info.supportsLinkSummary ? (
+          <p className="settings-note">Summarize-link needs the Gemini provider (it reads pages and videos for you). With {info.label}, summarize pasted text instead.</p>
+        ) : null}
       </SettingsGroup>
       <SettingsGroup header="API key">
-        <SettingRow label="Google AI Studio API key" description={apiStatus.configured ? "A key is stored securely by the operating system." : "Required for writing actions and optional dictation cleanup."} stacked>
+        <SettingRow label={keyLabel(info)} description={keyDescription(info, apiStatus)} stacked>
           <div className="api-key-editor">
             <input
-              aria-label="Google AI Studio API key"
+              aria-label={keyLabel(info)}
               autoCapitalize="none"
               autoComplete="off"
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder={apiStatus.configured ? "Enter a replacement key" : "Enter API key"}
+              placeholder={apiStatus.configured ? "Enter a replacement key" : keyPlaceholder(info)}
               spellCheck={false}
               type="password"
               value={apiKey}
@@ -617,13 +679,13 @@ function AiSection({
             </Button>
           </div>
         </SettingRow>
-        <SettingRow label="Connection" description={connectionDescription(apiStatus)}>
+        <SettingRow label="Connection" description={connectionDescription(info, apiStatus)}>
           <StatusIndicator label={connectionLabel(apiStatus)} state={apiStatus.connection} />
         </SettingRow>
         <div className="settings-group__footer settings-group__footer--split">
           <Button
             compact
-            disabled={!apiStatus.configured || busy !== null}
+            disabled={(!apiStatus.configured && !info.keyOptional) || busy !== null}
             onClick={() => {
               setBusy("test-key");
               setNotice(null);
@@ -631,14 +693,14 @@ function AiSection({
               void nativeBridge.testApiKey()
                 .then((status) => {
                   setApiStatus(status);
-                  setNotice("Gemini is ready for writing requests.");
+                  setNotice(`${info.label} is ready for writing requests.`);
                 })
                 .catch((error: unknown) => {
                   // Never leave the indicator stuck at "testing": a failed
                   // test must land on a terminal connection state so the user
                   // can correct the key and retry instead of looping.
                   const code = error instanceof NativeError ? error.code : "";
-                  const message = error instanceof NativeError ? error.message : "Couldn’t connect to Gemini.";
+                  const message = error instanceof NativeError ? error.message : `Couldn’t connect to ${info.label}.`;
                   setNotice(message);
                   setApiStatus((current) => ({
                     ...current,
@@ -666,9 +728,62 @@ function AiSection({
           ) : null}
         </div>
       </SettingsGroup>
-      <button className="text-link" onClick={() => void nativeBridge.openExternal("https://aistudio.google.com/app/apikey").catch(() => setNotice("Google AI Studio couldn’t be opened."))} type="button">Get an API key from Google AI Studio</button>
+      {info.testUsesQuota ? (
+        <p className="settings-note">Test connection sends a one-token request, so it costs a fraction of a cent on pay-as-you-go credits.</p>
+      ) : null}
+      {info.keyUrl ? (
+        <button className="text-link" onClick={() => void nativeBridge.openExternal(info.keyUrl as string).catch(() => setNotice(`${info.label} couldn’t be opened.`))} type="button">{keyLinkLabel(info)}</button>
+      ) : (
+        <p className="settings-note">No key needed for a local server. Pull a model first — e.g. <code>ollama pull {info.defaultModel}</code> — then Refresh the model list.</p>
+      )}
     </SettingsContent>
   );
+}
+
+const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
+  { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: false },
+  { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
+  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "kimi-k2.7-code", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
+  { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
+];
+
+function aiSubtitle(info: AiProviderInfo): string {
+  switch (info.id as AiProviderId) {
+    case "zen":
+      return "Kivo sends only the text needed for your request to OpenCode Zen (pay-as-you-go credits).";
+    case "go":
+      return "Kivo sends only the text needed for your request to OpenCode Go (included in your $10/month subscription).";
+    case "custom":
+      return "Kivo sends only the text needed for your request to your configured endpoint — nothing goes through Kivo servers.";
+    default:
+      return "Kivo sends only the text needed for your request directly to Google Gemini.";
+  }
+}
+
+function keyLabel(info: AiProviderInfo): string {
+  if (info.id === "custom") return "Custom endpoint API key (optional)";
+  if (info.id === "zen" || info.id === "go") return "OpenCode API key";
+  return "Google AI Studio API key";
+}
+
+function keyPlaceholder(info: AiProviderInfo): string {
+  if (info.id === "custom") return "Enter API key (leave empty for local servers)";
+  if (info.id === "zen") return "Enter Zen API key";
+  if (info.id === "go") return "Enter Go API key";
+  return "Enter API key";
+}
+
+function keyDescription(info: AiProviderInfo, status: ApiKeyStatus): string {
+  if (status.configured) return "A key is stored securely by the operating system.";
+  if (info.id === "custom") return "Optional for local servers like Ollama; required for hosted endpoints.";
+  if (info.id === "zen") return "Pay-as-you-go credits from opencode.ai/auth. Required for writing actions and optional dictation cleanup.";
+  if (info.id === "go") return "Your $10/month Go subscription key from opencode.ai/auth.";
+  return "Required for writing actions and optional dictation cleanup.";
+}
+
+function keyLinkLabel(info: AiProviderInfo): string {
+  if (info.id === "zen" || info.id === "go") return "Get an API key from OpenCode (Zen credits or Go subscription)";
+  return "Get an API key from Google AI Studio";
 }
 
 function AboutSection({
@@ -805,15 +920,18 @@ export function testFailureConnection(code: string): ApiKeyStatus["connection"] 
   if (code === "model_unavailable" || code === "model_not_found") return "model";
   if (code === "rate_limited") return "rate-limited";
   if (code === "transport" || code === "invalid_response" || code === "api_error" || code === "incomplete" || code === "empty_response") return "offline";
+  // insufficient_credits (empty Zen balance) keeps the neutral state: the
+  // notice text carries the top-up guidance, not the indicator.
   return "untested";
 }
 
-function connectionDescription(status: ApiKeyStatus) {
-  if (!status.configured) return "Add a key to connect Kivo to Gemini.";
+function connectionDescription(info: AiProviderInfo, status: ApiKeyStatus) {
+  if (!status.configured && !info.keyOptional) return `Add a key to connect Kivo to ${info.label}.`;
+  if (!status.configured) return `Add a key, or leave it empty for a local server.`;
   if (status.connection === "connected") return "The selected model is ready for writing requests.";
   if (status.connection === "invalid") return "Check the key and save it again.";
-  if (status.connection === "model") return "The selected model isn’t available to this key. Pick another model above, then test again.";
-  if (status.connection === "rate-limited") return "Gemini is temporarily rate limited. Try again shortly.";
-  if (status.connection === "offline") return "Kivo couldn’t reach Gemini. Check your connection.";
+  if (status.connection === "model") return "A queued model isn’t available to this key. Pick another model above, then test again.";
+  if (status.connection === "rate-limited") return `${info.label} is temporarily rate limited. Try again shortly.`;
+  if (status.connection === "offline") return `Kivo couldn’t reach ${info.label}. Check your connection.`;
   return "Test the saved key with the selected model before using Writing Tools.";
 }

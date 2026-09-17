@@ -81,15 +81,15 @@ impl SpeechEngine for UnusedSpeech {
 struct TestCredentials;
 
 impl CredentialStore for TestCredentials {
-    fn save_api_key(&self, _: &SecretString) -> Result<(), CredentialError> {
+    fn save_api_key(&self, _account: &str, _: &SecretString) -> Result<(), CredentialError> {
         panic!("writing summaries must not change credentials")
     }
 
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError> {
+    fn load_api_key(&self, _account: &str) -> Result<Option<SecretString>, CredentialError> {
         Ok(Some(SecretString::new("test-key".into()).unwrap()))
     }
 
-    fn clear_api_key(&self) -> Result<(), CredentialError> {
+    fn clear_api_key(&self, _account: &str) -> Result<(), CredentialError> {
         panic!("writing summaries must not clear credentials")
     }
 }
@@ -114,6 +114,7 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
         settings_runtime: Arc::new(UnusedSettingsRuntime),
         credentials: Arc::new(TestCredentials),
         ai: GeminiClient::with_endpoint(endpoint.into()).unwrap(),
+        compat: crate::ai::OpenAiCompatClient::new().unwrap(),
         speech: Arc::new(UnusedSpeech),
         text: text.clone(),
         dictation: Mutex::new(DictationMachine::default()),
@@ -383,13 +384,14 @@ async fn selected_text_summary_preserves_explicit_replacement() {
 }
 
 #[tokio::test]
-async fn rate_limited_primary_retries_once_on_the_backup_model() {
+async fn rate_limited_first_model_falls_through_the_queue() {
     let mut server = HttpSequenceFixture::new(vec![
         (429, r#"{"error":{"code":"rate_limited"}}"#),
         (200, TEXT_RESPONSE),
     ]);
     let (core, text) = core(&server.endpoint, Some("Original selection"));
-    core.settings.write().unwrap().ai.backup_model = Some("gemini-2.5-flash".into());
+    core.settings.write().unwrap().ai.models =
+        vec!["gemini-3.8-flash".into(), "gemini-2.5-flash".into()];
     core.open_writing_tools().await.unwrap();
     let result = core
         .run_writing_action(
@@ -408,6 +410,30 @@ async fn rate_limited_primary_retries_once_on_the_backup_model() {
     let first = server.next_request();
     let second = server.next_request();
     assert_eq!(first["model"], "gemini-3.8-flash");
+    assert_eq!(second["model"], "gemini-2.5-flash");
+}
+
+#[tokio::test]
+async fn unknown_first_model_falls_through_to_the_next() {
+    let mut server = HttpSequenceFixture::new(vec![
+        (404, r#"{"error":{"code":404,"status":"NOT_FOUND"}}"#),
+        (200, TEXT_RESPONSE),
+    ]);
+    let (core, _) = core(&server.endpoint, Some("Original selection"));
+    core.settings.write().unwrap().ai.models =
+        vec!["gemini-1.5-flash".into(), "gemini-2.5-flash".into()];
+    core.open_writing_tools().await.unwrap();
+    core.run_writing_action(
+        WritingAction::Proofread,
+        None,
+        None,
+        WritingSourceKind::Text,
+    )
+    .await
+    .unwrap();
+    let first = server.next_request();
+    let second = server.next_request();
+    assert_eq!(first["model"], "gemini-1.5-flash");
     assert_eq!(second["model"], "gemini-2.5-flash");
 }
 
@@ -495,31 +521,66 @@ fn test_connection_flags_models_missing_from_list_models() {
             id: "gemini-3.8-flash".into(),
             label: "Gemini 3.8 Flash".into(),
             description: String::new(),
+            cost: None,
+            input_per_1m: None,
+            output_per_1m: None,
+            monthly_limit_usd: None,
+            billing: None,
         },
         crate::ai::ListedAiModel {
             id: "gemini-2.5-flash".into(),
             label: "Gemini 2.5 Flash".into(),
             description: String::new(),
+            cost: None,
+            input_per_1m: None,
+            output_per_1m: None,
+            monthly_limit_usd: None,
+            billing: None,
         },
     ];
-    // Both selected models available: no error.
+    // Every queued model available: no error.
     assert_eq!(
-        find_unavailable_model(&models, "gemini-3.8-flash", Some("gemini-2.5-flash")),
+        find_unavailable_model(
+            &models,
+            crate::ai::AiProvider::Gemini,
+            &["gemini-3.8-flash".to_owned(), "gemini-2.5-flash".to_owned()],
+        ),
         None
     );
-    // Retired primary: reported even with a healthy backup.
+    // Retired first entry: reported even with a healthy second entry.
     assert_eq!(
-        find_unavailable_model(&models, "gemini-1.5-flash", Some("gemini-2.5-flash")),
+        find_unavailable_model(
+            &models,
+            crate::ai::AiProvider::Gemini,
+            &["gemini-1.5-flash".to_owned(), "gemini-2.5-flash".to_owned()],
+        ),
         Some("gemini-1.5-flash".into())
     );
-    // Retired backup: reported by id.
+    // Retired later entry: reported by id.
     assert_eq!(
-        find_unavailable_model(&models, "gemini-3.8-flash", Some("gemini-1.5-flash")),
+        find_unavailable_model(
+            &models,
+            crate::ai::AiProvider::Gemini,
+            &["gemini-3.8-flash".to_owned(), "gemini-1.5-flash".to_owned()],
+        ),
         Some("gemini-1.5-flash".into())
     );
     // ListModels-style prefixed ids canonicalize before comparison.
     assert_eq!(
-        find_unavailable_model(&models, "models/gemini-3.8-flash", None),
+        find_unavailable_model(
+            &models,
+            crate::ai::AiProvider::Gemini,
+            &["models/gemini-3.8-flash".to_owned()],
+        ),
+        None
+    );
+    // OpenCode-style prefixed ids canonicalize too.
+    assert_eq!(
+        find_unavailable_model(
+            &models,
+            crate::ai::AiProvider::Zen,
+            &["opencode/gemini-3.8-flash".to_owned()],
+        ),
         None
     );
 }
@@ -537,11 +598,12 @@ fn body_only_quota_errors_are_recoverable_rate_limits() {
 }
 
 #[tokio::test]
-async fn non_rate_limit_errors_never_spend_backup_quota() {
+async fn auth_failures_stop_the_queue_immediately() {
     let mut server =
         HttpSequenceFixture::new(vec![(401, r#"{"error":{"code":"authentication"}}"#)]);
     let (core, _) = core(&server.endpoint, Some("Original selection"));
-    core.settings.write().unwrap().ai.backup_model = Some("gemini-2.5-flash".into());
+    core.settings.write().unwrap().ai.models =
+        vec!["gemini-3.8-flash".into(), "gemini-2.5-flash".into()];
     core.open_writing_tools().await.unwrap();
     let error = core
         .run_writing_action(

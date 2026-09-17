@@ -78,15 +78,15 @@ impl PlatformImpl {
 struct UnsupportedCredentialStore;
 
 impl CredentialStore for UnsupportedCredentialStore {
-    fn save_api_key(&self, _secret: &SecretString) -> Result<(), CredentialError> {
+    fn save_api_key(&self, _account: &str, _secret: &SecretString) -> Result<(), CredentialError> {
         Err(CredentialError::Unavailable)
     }
 
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError> {
+    fn load_api_key(&self, _account: &str) -> Result<Option<SecretString>, CredentialError> {
         Err(CredentialError::Unavailable)
     }
 
-    fn clear_api_key(&self) -> Result<(), CredentialError> {
+    fn clear_api_key(&self, _account: &str) -> Result<(), CredentialError> {
         Err(CredentialError::Unavailable)
     }
 }

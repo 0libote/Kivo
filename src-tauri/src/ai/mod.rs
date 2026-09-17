@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 use crate::security::SecretString;
 
 mod link_summary;
+pub mod providers;
 pub use link_summary::LinkSource;
+pub use providers::{
+    AiProvider, Billing, OpenAiCompatClient, OpencodeError, ProviderInfo, canonical_model_id_for,
+    curated_models_for, is_usable_model_for, normalize_base_url, provider_infos,
+};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,6 +24,10 @@ pub enum LinkSourceKind {
 pub const GEMINI_MODEL: &str = DEFAULT_GEMINI_MODEL;
 /// Default text model for writing actions and dictation cleanup.
 pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.8-flash";
+/// Maximum models in the ordered failover queue. Chains are tried in order
+/// until one succeeds, so the cap bounds both quota spend and worst-case
+/// latency on repeated timeouts.
+pub const MAX_AI_MODELS: usize = 5;
 pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
     "https://generativelanguage.googleapis.com/v1beta/interactions";
 /// ListModels / GetModel endpoint used for the model picker and the
@@ -89,11 +98,30 @@ pub fn supported_models() -> Vec<AiModelInfo> {
 /// Owned model entry returned by `list_ai_models`: either the curated
 /// fallback below or a dynamic entry mapped from the ListModels API
 /// (display name / description from Google, filtered by the blocklist).
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// The pricing fields are `None` for the Gemini provider (billed by Google)
+/// and populated for OpenCode Zen / Go so the picker can show the cost of
+/// each model before anything is sent.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ListedAiModel {
     pub id: String,
     pub label: String,
     pub description: String,
+    /// Short cost summary, e.g. `$0.95 in / $4.00 out per 1M · $60/mo incl.`
+    /// or `Free`. `None` when the cost is unknown (Gemini: billed by Google).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<String>,
+    /// Per-1M-token input price in USD, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_per_1m: Option<f64>,
+    /// Per-1M-token output price in USD, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_per_1m: Option<f64>,
+    /// Go only: monthly dollar allowance included in the subscription.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly_limit_usd: Option<f64>,
+    /// `pay_per_token` | `zen_credits` | `go_subscription` | `free` | `local`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing: Option<String>,
 }
 
 impl From<AiModelInfo> for ListedAiModel {
@@ -102,6 +130,11 @@ impl From<AiModelInfo> for ListedAiModel {
             id: model.id.to_owned(),
             label: model.label.to_owned(),
             description: model.description.to_owned(),
+            cost: None,
+            input_per_1m: None,
+            output_per_1m: None,
+            monthly_limit_usd: None,
+            billing: Some(Billing::PayPerToken.as_str().to_owned()),
         }
     }
 }
@@ -188,21 +221,12 @@ pub fn normalize_model(id: &str) -> String {
     }
 }
 
-/// Normalize an optional backup model: empty, unusable, or identical to the
-/// primary collapses to `None` (no fallback) instead of bricking requests.
-pub fn normalize_backup_model(id: Option<&str>, primary: &str) -> Option<String> {
-    let raw = id?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let canonical = canonical_model_id(raw);
-    if !is_usable_model(&canonical) {
-        return None;
-    }
-    if canonical == canonical_model_id(primary) {
-        return None;
-    }
-    Some(canonical)
+/// Normalize an ordered failover queue: canonicalize, drop unusable and
+/// duplicate ids (first occurrence wins), cap the length, and fall back to
+/// the provider default when nothing usable remains — so a queue can never
+/// brick AI requests.
+pub fn normalize_model_list(provider: AiProvider, ids: &[String]) -> Vec<String> {
+    providers::normalize_model_list_for(provider, ids)
 }
 
 /// Thinking level for a model: every `gemini-*` text model supports `"low"`,
@@ -517,29 +541,39 @@ impl GeminiClient {
         Ok(listed)
     }
 
-    /// Try the primary model, then once on the backup if the primary is
-    /// rate-limited (HTTP 429). Auth, validation, and transport errors return
-    /// immediately without spending backup quota.
-    pub async fn generate_with_fallback(
+    /// Try each model in order until one succeeds. Key/account failures
+    /// (auth) and unreachable hosts (transport) abort immediately: every
+    /// entry shares the same key and network, so continuing could only burn
+    /// quota and add latency. Anything else — rate limits, unknown model
+    /// ids, server errors, empty responses — falls through to the next
+    /// model, and the last error is returned when all fail.
+    pub async fn generate_in_order(
         &self,
         api_key: &SecretString,
-        primary: &str,
-        backup: Option<&str>,
+        models: &[String],
         prompt: &AiPrompt,
     ) -> Result<String, GeminiError> {
-        match self.generate(api_key, primary, prompt).await {
-            Ok(output) => Ok(output),
-            Err(error) if error.is_rate_limited() => {
-                let primary = normalize_model(primary);
-                let backup = backup.map(normalize_model);
-                match backup {
-                    Some(backup) if backup != primary => {
-                        self.generate(api_key, &backup, prompt).await
+        let mut models = models.iter();
+        let first = models.next().map(|model| Self::resolve_model(model));
+        let mut current = match first {
+            Some(model) => model,
+            None => Self::resolve_model(""),
+        };
+        loop {
+            match self.generate(api_key, &current, prompt).await {
+                Ok(output) => return Ok(output),
+                Err(error) if error.is_failover_terminal() => return Err(error),
+                Err(error) => {
+                    let Some(next) = models.next() else {
+                        return Err(error);
+                    };
+                    let next = Self::resolve_model(next);
+                    if next == current {
+                        return Err(error);
                     }
-                    _ => Err(error),
+                    current = next;
                 }
             }
-            Err(error) => Err(error),
         }
     }
 }
@@ -615,6 +649,11 @@ fn filter_api_models(models: Vec<ApiModel>) -> Vec<ListedAiModel> {
             id,
             label,
             description,
+            cost: None,
+            input_per_1m: None,
+            output_per_1m: None,
+            monthly_limit_usd: None,
+            billing: Some(Billing::PayPerToken.as_str().to_owned()),
         });
     }
     listed.sort_by(|a, b| {
@@ -764,6 +803,22 @@ pub enum GeminiError {
 }
 
 impl GeminiError {
+    /// Failures shared by every queue entry: the key is wrong or the host is
+    /// unreachable, so trying the next model cannot help.
+    fn is_failover_terminal(&self) -> bool {
+        match self {
+            Self::InvalidApiKey | Self::Transport(_) => true,
+            Self::Api { status, code, .. }
+                if *status == StatusCode::UNAUTHORIZED
+                    || *status == StatusCode::FORBIDDEN
+                    || Self::is_auth_code(code.as_deref()) =>
+            {
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Quota exhaustion surfaces as HTTP 429, but also as HTTP 400/403 with
     /// a `RESOURCE_EXHAUSTED` status (normalized to `rate_limited` by
     /// [`parse_api_error_code`]). Both mean "retry later / on the backup",
@@ -923,8 +978,8 @@ mod tests {
         ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig,
         InteractionRequest, InteractionResponse, WritingAction, curated_listed_models,
         dictation_cleanup_prompt, filter_api_models, is_blocked_model, is_usable_model,
-        normalize_backup_model, normalize_model, parse_api_error_code, parse_api_error_detail,
-        parse_interaction, supported_models, thinking_level_for, writing_prompt,
+        normalize_model, parse_api_error_code, parse_api_error_detail, parse_interaction,
+        supported_models, thinking_level_for, writing_prompt,
     };
 
     #[test]
@@ -1201,32 +1256,6 @@ mod tests {
         ] {
             assert!(!is_usable_model(malformed), "{malformed} must be rejected");
         }
-    }
-
-    #[test]
-    fn backup_model_normalizes_to_none_when_empty_same_or_unusable() {
-        assert_eq!(
-            normalize_backup_model(Some("gemini-2.5-flash"), "gemini-3.8-flash"),
-            Some("gemini-2.5-flash".to_owned())
-        );
-        assert_eq!(normalize_backup_model(None, "gemini-3.8-flash"), None);
-        assert_eq!(normalize_backup_model(Some("  "), "gemini-3.8-flash"), None);
-        assert_eq!(
-            normalize_backup_model(Some("gemini-3.8-flash"), "gemini-3.8-flash"),
-            None
-        );
-        assert_eq!(
-            normalize_backup_model(Some("models/gemini-2.5-flash"), "models/gemini-3.8-flash"),
-            Some("gemini-2.5-flash".to_owned())
-        );
-        assert_eq!(
-            normalize_backup_model(Some("gemini-2.5-flash-preview-tts"), "gemini-3.8-flash"),
-            None
-        );
-        assert_eq!(
-            normalize_backup_model(Some("has spaces!"), "gemini-3.8-flash"),
-            None
-        );
     }
 
     #[test]

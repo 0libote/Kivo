@@ -620,7 +620,11 @@ unsafe fn style_ns_window(window: *mut c_void, kind: OverlayKind) -> PlatformRes
 pub struct MacCredentialStore;
 
 impl CredentialStore for MacCredentialStore {
-    fn save_api_key(&self, secret: &SecretString) -> Result<(), CredentialError> {
+    fn save_api_key(
+        &self,
+        account_name: &str,
+        secret: &SecretString,
+    ) -> Result<(), CredentialError> {
         let class = unsafe { kSecClass };
         let class_generic = unsafe { kSecClassGenericPassword };
         let attr_service = unsafe { kSecAttrService };
@@ -629,7 +633,7 @@ impl CredentialStore for MacCredentialStore {
         let synchronizable = unsafe { kSecAttrSynchronizable };
         let false_value = unsafe { kCFBooleanFalse };
         let service = cf_string("com.kivo.desktop").map_err(|_| CredentialError::Backend)?;
-        let account = cf_string("gemini-api-key").map_err(|_| CredentialError::Backend)?;
+        let account = cf_string(account_name).map_err(|_| CredentialError::Backend)?;
         let data = cf_data(secret.expose().as_bytes()).map_err(|_| CredentialError::Backend)?;
 
         let query = cf_dictionary(&[
@@ -665,9 +669,9 @@ impl CredentialStore for MacCredentialStore {
         }
     }
 
-    fn load_api_key(&self) -> Result<Option<SecretString>, CredentialError> {
+    fn load_api_key(&self, account_name: &str) -> Result<Option<SecretString>, CredentialError> {
         let service = cf_string("com.kivo.desktop").map_err(|_| CredentialError::Backend)?;
-        let account = cf_string("gemini-api-key").map_err(|_| CredentialError::Backend)?;
+        let account = cf_string(account_name).map_err(|_| CredentialError::Backend)?;
         let query = cf_dictionary(&[
             (unsafe { kSecClass }, unsafe { kSecClassGenericPassword }),
             (unsafe { kSecAttrService }, service.as_ptr()),
@@ -697,9 +701,9 @@ impl CredentialStore for MacCredentialStore {
             .map_err(|_| CredentialError::Backend)
     }
 
-    fn clear_api_key(&self) -> Result<(), CredentialError> {
+    fn clear_api_key(&self, account_name: &str) -> Result<(), CredentialError> {
         let service = cf_string("com.kivo.desktop").map_err(|_| CredentialError::Backend)?;
-        let account = cf_string("gemini-api-key").map_err(|_| CredentialError::Backend)?;
+        let account = cf_string(account_name).map_err(|_| CredentialError::Backend)?;
         let query = cf_dictionary(&[
             (unsafe { kSecClass }, unsafe { kSecClassGenericPassword }),
             (unsafe { kSecAttrService }, service.as_ptr()),
