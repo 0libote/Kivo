@@ -18,7 +18,11 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.failed) {
       return (
         <main className="fatal-surface">
-          <div><strong>Kivo couldn’t open this window.</strong><span>Close it and try again.</span></div>
+          <div>
+            <strong>Kivo couldn’t open this window.</strong>
+            <span>Close it and try again.</span>
+            <button onClick={() => window.location.reload()} type="button">Reload window</button>
+          </div>
         </main>
       );
     }

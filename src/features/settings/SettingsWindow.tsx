@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { AiModelSelect } from "./AiModelSelect";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -33,9 +33,9 @@ interface SettingsWindowProps {
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
   { id: "home", label: "Home", icon: "home" },
+  { id: "general", label: "General", icon: "settings" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
-  { id: "general", label: "General", icon: "settings" },
   { id: "ai", label: "AI", icon: "connection" },
   { id: "permissions", label: "Permissions", icon: "check" },
   { id: "about", label: "About", icon: "info" },
@@ -57,6 +57,7 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
 
   useEffect(() => {
     let active = true;
+    // allSettled never rejects; each list degrades independently below.
     void Promise.allSettled([nativeBridge.listMicrophones(), nativeBridge.listSpeechLanguages(), nativeBridge.getApiKeyStatus()])
       .then(([nextMicrophones, nextLanguages, nextApiStatus]) => {
         if (!active) return;
@@ -64,8 +65,7 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
         if (nextLanguages.status === "fulfilled") setLanguages(nextLanguages.value);
         if (nextApiStatus.status === "fulfilled") setApiStatus(nextApiStatus.value);
         if ([nextMicrophones, nextLanguages, nextApiStatus].some(result => result.status === "rejected")) setNotice("Some settings could not be loaded. Reopen Settings to try again.");
-      })
-      .catch(() => active && setNotice("Some settings aren’t available right now."));
+      });
     return () => {
       active = false;
     };
@@ -96,7 +96,7 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
         </nav>
         <p className="settings-sidebar__status">Kivo <span className="settings-sidebar__version">{context.version}</span></p>
       </aside>
-      <div className="settings-main" key={section} tabIndex={-1}>
+      <SettingsMain key={section}>
         {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} onDictation={() => setSection("dictation")} /> : <SectionContent
           apiKey={apiKey}
           apiStatus={apiStatus}
@@ -115,9 +115,20 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
           updateResult={updateResult}
         />}
         {notice ? <div aria-live="polite" className="settings-notice">{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)} type="button"><Icon name="close" size={12} /></button></div> : null}
-      </div>
+      </SettingsMain>
     </main>
   );
+}
+
+function SettingsMain({ children }: { readonly children: ReactNode }) {
+  const mainRef = useRef<HTMLDivElement>(null);
+  // Move focus to the new section on navigation only (mount), so keyboard and
+  // screen-reader users land on the fresh heading. Runs once per section
+  // because the parent remounts this component via key={section}.
+  useEffect(() => {
+    mainRef.current?.focus({ preventScroll: true });
+  }, []);
+  return <div className="settings-main" ref={mainRef} tabIndex={-1}>{children}</div>;
 }
 
 interface SectionContentProps {
@@ -210,9 +221,9 @@ function PermissionsSection({
       .getPermissions()
       .then((next) => {
         setPermissions(next);
-        setLoaded(true);
       })
-      .catch(() => setNotice("Permission status isn’t available right now."));
+      .catch(() => setNotice("Permission status isn’t available right now."))
+      .finally(() => setLoaded(true));
   }, [setNotice]);
 
   useEffect(refresh, [refresh]);
@@ -221,10 +232,15 @@ function PermissionsSection({
     setBusy(kind);
     setNotice(null);
     try {
-      // Windows has no in-app prompt: open the Settings page first (mirrors
-      // onboarding), then refresh. macOS shows the native prompt directly.
-      if (context.platform === "windows") await nativeBridge.openPermissionSettings(kind);
-      setPermissions(await nativeBridge.requestPermission(kind));
+      // Windows has no in-app prompt: open the Settings page, then re-read
+      // the (possibly changed) state instead of firing a no-op request.
+      // macOS shows the native prompt directly.
+      if (context.platform === "windows") {
+        await nativeBridge.openPermissionSettings(kind);
+        setPermissions(await nativeBridge.getPermissions());
+      } else {
+        setPermissions(await nativeBridge.requestPermission(kind));
+      }
     } catch (error) {
       setNotice(error instanceof NativeError ? error.message : "Permission wasn’t granted. Try again.");
       refresh();
@@ -371,7 +387,7 @@ function DictationSection({
 }) {
   const shortcutNote =
     context.platform === "macos" && settings.dictationShortcut === "Fn"
-      ? "Fn is best-effort when macOS assigns the Globe key to another action."
+      ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
       : undefined;
   return (
     <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop.">
@@ -386,18 +402,26 @@ function DictationSection({
           <Switch checked={settings.dictationHoldEnabled} label="Hold to dictate" onChange={(value) => void save({ dictationHoldEnabled: value })} />
         </SettingRow>
         <SettingRow label="Hold threshold" description="How long (ms) a press must last to count as a hold instead of a tap.">
-          <NumberPreference label="Hold threshold" min={0} max={5000} value={settings.dictationHoldThresholdMs} onChange={(value) => save({ dictationHoldThresholdMs: value })} />
+          <NumberPreference label="Hold threshold" min={50} max={5000} value={settings.dictationHoldThresholdMs} onChange={(value) => save({ dictationHoldThresholdMs: value })} />
         </SettingRow>
         <SettingRow label="Microphone">
-          <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={settings.microphoneId ?? ""}>
-            <option value="">System Default</option>
-            {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
-          </select>
+          {microphones.length === 0 ? (
+            <span className="setting-empty">No microphones found. Check the system sound settings.</span>
+          ) : (
+            <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={microphones.some((device) => device.id === (settings.microphoneId ?? "")) || settings.microphoneId === null ? (settings.microphoneId ?? "") : ""}>
+              <option value="">System Default</option>
+              {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+            </select>
+          )}
         </SettingRow>
-        <SettingRow label="Language" description={context.platform === "windows" ? "Automatic uses the system speech language. Only installed languages can start dictation." : "Automatic follows the current input language when supported."}>
-          <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={settings.dictationLanguage}>
-            {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
-          </select>
+        <SettingRow label="Language" description={context.platform === "windows" ? "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech." : "Automatic follows the current input language when supported."}>
+          {languages.length === 0 ? (
+            <span className="setting-empty">No languages found. Reopen Settings to try again.</span>
+          ) : (
+            <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={languages.some((language) => language.code === settings.dictationLanguage) ? settings.dictationLanguage : languages[0].code}>
+              {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
+            </select>
+          )}
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup>
@@ -663,6 +687,10 @@ function AboutSection({
   readonly updateResult: UpdateResult | null;
 }) {
   const [installed, setInstalled] = useState(false);
+  // Unsigned builds (beta, local) have no trusted updater key, so in-app
+  // install always fails: remember the definitive failure and stop offering
+  // the button, leaving the manual download link as the path.
+  const [installUnsupported, setInstallUnsupported] = useState(false);
   const stableAvailable = updateResult?.available === true && updateResult.channel !== "beta";
   return (
     <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
@@ -697,7 +725,7 @@ function AboutSection({
             >{busy === "updates" ? "Checking…" : "Check now"}</Button>
           )}
         </SettingRow>
-        {stableAvailable && !installed ? (
+        {stableAvailable && !installed && !installUnsupported ? (
           <SettingRow label="Install update" description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}>
             <Button
               compact
@@ -710,7 +738,13 @@ function AboutSection({
                     setInstalled(true);
                     setNotice("Update installed. Restart Kivo to finish.");
                   })
-                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead."))
+                  .catch((error: unknown) => {
+                    const code = error instanceof NativeError ? error.code : "";
+                    // No installable update on this build (unsigned/beta):
+                    // drop the button instead of looping on the same error.
+                    if (code === "update_install_unavailable" || code === "update_not_available") setInstallUnsupported(true);
+                    setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead.");
+                  })
                   .finally(() => setBusy(null));
               }}
               tone="primary"
@@ -757,18 +791,20 @@ function SettingRow({ label, description, children, stacked = false }: { readonl
 function connectionLabel(status: ApiKeyStatus) {
   if (!status.configured) return "Not configured";
   const labels: Record<ApiKeyStatus["connection"], string> = {
-    untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline",
+    untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline", model: "Model unavailable",
   };
   return labels[status.connection];
 }
 
 /** Map a failed Test connection to a terminal indicator state so the UI
  * never sticks at "testing". Mirrors the native CommandError codes
- * (see GeminiError::code in src-tauri/src/ai/mod.rs). */
-function testFailureConnection(code: string): ApiKeyStatus["connection"] {
-  if (code === "invalid_api_key") return "invalid";
+ * (see GeminiError::code in src-tauri/src/ai/mod.rs and AppCoreError::code
+ * in src-tauri/src/commands/mod.rs). Exported for unit tests. */
+export function testFailureConnection(code: string): ApiKeyStatus["connection"] {
+  if (code === "invalid_api_key" || code === "credential" || code === "ai_not_configured") return "invalid";
+  if (code === "model_unavailable" || code === "model_not_found") return "model";
   if (code === "rate_limited") return "rate-limited";
-  if (code === "transport" || code === "invalid_response") return "offline";
+  if (code === "transport" || code === "invalid_response" || code === "api_error" || code === "incomplete" || code === "empty_response") return "offline";
   return "untested";
 }
 
@@ -776,6 +812,7 @@ function connectionDescription(status: ApiKeyStatus) {
   if (!status.configured) return "Add a key to connect Kivo to Gemini.";
   if (status.connection === "connected") return "The selected model is ready for writing requests.";
   if (status.connection === "invalid") return "Check the key and save it again.";
+  if (status.connection === "model") return "The selected model isn’t available to this key. Pick another model above, then test again.";
   if (status.connection === "rate-limited") return "Gemini is temporarily rate limited. Try again shortly.";
   if (status.connection === "offline") return "Kivo couldn’t reach Gemini. Check your connection.";
   return "Test the saved key with the selected model before using Writing Tools.";

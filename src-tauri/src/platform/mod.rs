@@ -30,6 +30,10 @@ pub enum PlatformErrorKind {
     NotFound,
     InvalidState,
     ShortcutConflict,
+    // Constructed only by the cfg-gated macOS/Windows speech backends; kept on
+    // all targets so error mapping in shell.rs stays portable. The Linux-only
+    // dead-code warning is expected.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
     Speech,
     Os,
 }

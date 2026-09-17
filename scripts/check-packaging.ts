@@ -56,8 +56,8 @@ check(
 );
 check(
   "updater endpoints include the rolling beta manifest",
-  tauriConf.plugins.updater.endpoints.some((endpoint) => endpoint.includes("continuous")),
-  "continuous latest.json endpoint missing; beta updates break",
+  tauriConf.plugins.updater.endpoints.some((endpoint) => endpoint.includes("continuous/continuous.json")),
+  "continuous.json endpoint missing or misnamed; beta updates break",
 );
 
 // --- Windows MSIX manifest ---------------------------------------------------

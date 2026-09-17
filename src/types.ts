@@ -76,7 +76,7 @@ export interface SpeechLanguage {
 
 export interface ApiKeyStatus {
   configured: boolean;
-  connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline";
+  connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline" | "model";
 }
 
 export interface AiModelInfo {

@@ -213,8 +213,21 @@ impl PlatformImpl {
             PermissionKind::Accessibility | PermissionKind::InputMonitoring => {
                 PermissionStatus::Unavailable
             }
-            PermissionKind::Microphone | PermissionKind::SpeechRecognition => {
-                PermissionStatus::NotDetermined
+            // Desktop Windows has no in-app consent prompt for these: SAPI
+            // and WASAPI capture just work or fail at use time with an
+            // actionable error (see windows_speech::start). Reporting
+            // NotDetermined here left the UI on an Allow button that could
+            // never resolve, so report the checkable state instead: the
+            // microphone is assumed available until capture fails, while
+            // speech recognition reflects whether a desktop recognizer is
+            // actually installed.
+            PermissionKind::Microphone => PermissionStatus::Granted,
+            PermissionKind::SpeechRecognition => {
+                if super::windows_speech::languages().is_empty() {
+                    PermissionStatus::Denied
+                } else {
+                    PermissionStatus::Granted
+                }
             }
         })
     }
@@ -415,8 +428,21 @@ fn focused_identity() -> PlatformResult<(Vec<i32>, u32)> {
                         )
                         .is_ok()
                     {
-                        identity.push(before.GetText(-1).map(|v| v.len() as i32).unwrap_or(-1));
-                        identity.push(selected.GetText(-1).map(|v| v.len() as i32).unwrap_or(-1));
+                        // Hash (not length) the text: a same-length edit in
+                        // the same control must invalidate the snapshot, or
+                        // replacement could land on changed text.
+                        identity.push(
+                            before
+                                .GetText(-1)
+                                .map(|v| text_identity(&v.to_string()))
+                                .unwrap_or(-1),
+                        );
+                        identity.push(
+                            selected
+                                .GetText(-1)
+                                .map(|v| text_identity(&v.to_string()))
+                                .unwrap_or(-1),
+                        );
                     }
                 }
                 Ok((identity, process_id.max(0) as u32))
@@ -565,19 +591,29 @@ fn selected_text() -> PlatformResult<(String, u32, Option<ScreenRect>)> {
 fn capture_selected_text_fallback(window: HWND) -> PlatformResult<String> {
     let _apartment = AutomationApartment::new();
     let snapshot = unsafe { OleGetClipboard().ok() };
-    clear_clipboard(window, "get_selected_text")?;
-    let cleared_sequence = unsafe { GetClipboardSequenceNumber() };
-    if let Err(error) = send_control_shortcut(VK_C, "get_selected_text") {
-        restore_clipboard_if_unchanged(snapshot.as_ref(), cleared_sequence);
-        return Err(error);
-    }
-    let mut captured_sequence = cleared_sequence;
+    // Never clear the clipboard before asking the target to copy: clearing
+    // first destroys non-text formats, and if the target then ignores Ctrl+C
+    // (or another app writes in between) the restore is skipped and the
+    // user's original clipboard is lost. Instead, record the sequence and
+    // treat only a change as a fresh copy — a real copy always bumps the
+    // sequence, even when the bytes are identical.
+    let before_sequence = unsafe { GetClipboardSequenceNumber() };
+    send_control_shortcut(VK_C, "get_selected_text")?;
+    let mut captured_sequence = before_sequence;
     for _ in 0..150 {
         captured_sequence = unsafe { GetClipboardSequenceNumber() };
-        if captured_sequence != cleared_sequence {
+        if captured_sequence != before_sequence {
             break;
         }
         thread::sleep(std::time::Duration::from_millis(10));
+    }
+    if captured_sequence == before_sequence {
+        // The target ignored the copy; the clipboard was never touched.
+        return Err(PlatformError::new(
+            PlatformErrorKind::Unsupported,
+            "get_selected_text",
+            "The selection could not be read in this application.",
+        ));
     }
     let text = read_clipboard_text(window, "get_selected_text");
     restore_clipboard_if_unchanged(snapshot.as_ref(), captured_sequence);
@@ -605,16 +641,6 @@ fn paste_text_fallback(window: HWND, text: &str, operation: &'static str) -> Pla
     thread::sleep(std::time::Duration::from_millis(350));
     restore_clipboard_if_unchanged(snapshot.as_ref(), written_sequence);
     Ok(())
-}
-
-fn clear_clipboard(window: HWND, operation: &'static str) -> PlatformResult<()> {
-    unsafe {
-        OpenClipboard(Some(window)).map_err(|_| os_error(operation, "The clipboard is busy."))?;
-        let result = EmptyClipboard()
-            .map_err(|_| os_error(operation, "The clipboard could not be cleared."));
-        let _ = CloseClipboard();
-        result
-    }
 }
 
 fn write_clipboard_text(window: HWND, value: &str, operation: &'static str) -> PlatformResult<()> {
@@ -857,6 +883,28 @@ fn wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(Some(0)).collect()
 }
 
+/// Identity hash of surrounding text for selection snapshots. Lengths alone
+/// would let a same-length edit in the same control compare equal.
+fn text_identity(text: &str) -> i32 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    hasher.finish() as i32
+}
+
 fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformError {
     PlatformError::new(PlatformErrorKind::Os, operation, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::text_identity;
+
+    #[test]
+    fn text_identity_distinguishes_same_length_edits() {
+        assert_eq!(text_identity("hello"), text_identity("hello"));
+        assert_ne!(text_identity("hello"), text_identity("hallo"));
+        assert_ne!(text_identity(""), text_identity(" "));
+    }
 }

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { FALLBACK_AI_MODELS } from "../ai/models";
 import {
   type AiModelInfo,
   type ApiKeyStatus,
@@ -189,11 +190,15 @@ class MockBridge implements NativeBridge {
     this.settings = stored
       ? { ...defaultSettings(this.platform), ...(JSON.parse(stored) as Partial<AppSettings>) }
       : defaultSettings(this.platform);
+    // Mirror the native side: Windows has no in-app consent prompt, so the
+    // microphone reads granted and speech recognition reads granted (engines
+    // assumed present) instead of looping on an ungrantable Allow button.
+    const windows = this.platform === "windows";
     this.permissions = [
       { kind: "accessibility", state: "not-determined", required: true },
       { kind: "input-monitoring", state: this.platform === "macos" ? "not-determined" : "unavailable", required: false },
-      { kind: "microphone", state: "not-determined", required: true },
-      { kind: "speech-recognition", state: "not-determined", required: this.platform === "macos" },
+      { kind: "microphone", state: windows ? "granted" : "not-determined", required: true },
+      { kind: "speech-recognition", state: windows ? "granted" : "not-determined", required: this.platform === "macos" },
     ];
   }
 
@@ -228,7 +233,11 @@ class MockBridge implements NativeBridge {
   async requestPermission(kind: PermissionKind) {
     await delay(350);
     this.permissions = this.permissions.map((permission) =>
-      permission.kind === kind ? { ...permission, state: "granted" } : permission,
+      // Mirror the native side: kinds the OS has no prompt for stay as they
+      // are instead of flipping to granted.
+      permission.kind === kind && permission.state === "not-determined"
+        ? { ...permission, state: "granted" }
+        : permission,
     );
     this.emit("permission-status-changed", structuredClone(this.permissions));
     return structuredClone(this.permissions);
@@ -255,7 +264,9 @@ class MockBridge implements NativeBridge {
   }
 
   async listAiModels(): Promise<AiModelInfo[]> {
-    const { FALLBACK_AI_MODELS } = await import("../ai/models");
+    // Static import (not dynamic) so Vite keeps a single chunk — this module
+    // is also statically imported by AiModelSelect, and a dynamic import here
+    // produced an INEFFECTIVE_DYNAMIC_IMPORT warning without any benefit.
     return structuredClone(FALLBACK_AI_MODELS);
   }
 
@@ -315,10 +326,19 @@ class MockBridge implements NativeBridge {
   async runWritingAction(request: WritingRequest): Promise<WritingResponse> {
     await delay(850);
     if (request.action === "summarize" && request.sourceKind === "link") {
+      const text = (request.text ?? "").trim();
+      let kind: "website" | "youtube" = "website";
+      try {
+        if (new URL(text).hostname.includes("youtu")) kind = "youtube";
+      } catch {
+        // Invalid URLs never reach the mock in production (the popup blocks
+        // them); fall through with the default kind rather than throwing a
+        // raw TypeError the real backend would never produce.
+      }
       return {
         kind: "result",
         text: "This preview demonstrates the summary layout. Link content is retrieved only in the native app.",
-        source: { kind: new URL(request.text!).hostname.includes("youtu") ? "youtube" : "website", url: request.text! },
+        source: { kind, url: request.text! },
         canReplace: false,
       };
     }
