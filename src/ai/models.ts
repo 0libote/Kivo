@@ -220,7 +220,9 @@ export function providerDefaultModel(provider: AiProviderId): string {
 
 /** Mirrors `normalize_base_url` (None = Ollama default applies). */
 export function normalizeAiBaseUrl(raw: string | null | undefined): string | null {
-  const trimmed = (raw ?? "").trim().replace(/\/+$/, "");
+  let trimmed = (raw ?? "").trim();
+  // Strip trailing slashes without a regex (avoids backtracking hotspots).
+  while (trimmed.endsWith("/")) trimmed = trimmed.slice(0, -1);
   if (trimmed === "" || trimmed.length > 512) return null;
   if (/\s/.test(trimmed)) return null;
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;

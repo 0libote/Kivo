@@ -60,6 +60,12 @@ export function ModelQueueEditor({
 
   const candidate = addCandidate();
   const canAdd = !disabled && !refreshing && queue.length < MAX_AI_MODELS && candidate != null;
+  let addText = "+ Add model";
+  if (refreshing) {
+    addText = "Refreshing…";
+  } else if (queue.length >= MAX_AI_MODELS) {
+    addText = `Up to ${MAX_AI_MODELS} models`;
+  }
 
   return (
     <div className="ai-model-queue">
@@ -166,7 +172,7 @@ export function ModelQueueEditor({
             if (candidate != null) commit([...queue, candidate]);
           }}
         >
-          {refreshing ? "Refreshing…" : queue.length >= MAX_AI_MODELS ? `Up to ${MAX_AI_MODELS} models` : "+ Add model"}
+          {addText}
         </Button>
         <Button
           aria-label="Refresh model list from the API"

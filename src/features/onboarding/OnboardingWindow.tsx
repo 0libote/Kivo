@@ -7,7 +7,7 @@ import { formatShortcut } from "../../components/ShortcutRecorder";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { normalizeAiProvider, providerDefaultModel } from "../../ai/models";
 import { nativeBridge } from "../../platform/native";
-import type { ApiKeyStatus, AppContext, AppSettings, PermissionKind, PermissionStatus } from "../../types";
+import type { AiProviderId, ApiKeyStatus, AppContext, AppSettings, PermissionKind, PermissionStatus } from "../../types";
 
 interface OnboardingWindowProps {
   readonly context: AppContext;
@@ -241,7 +241,7 @@ interface ApiKeyStepProps {
 function ApiKeyStep(props: ApiKeyStepProps) {
   const { apiKey, apiStatus, platform, savingKey, setApiKey, setApiStatus, setMessage, setSavingKey, settings, updateSettings } = props;
   const provider = normalizeAiProvider(settings.aiProvider);
-  const keyLabel = provider === "custom" ? "API key (optional for local servers)" : provider === "gemini" ? "Google AI Studio API key" : "OpenCode API key";
+  const keyLabel = onboardingKeyLabel(provider);
   return (
     <div className="onboarding-step">
       <div className="onboarding-step__icon"><Icon name="spark" size={24} /></div>
@@ -318,6 +318,12 @@ function apiConnectionLabel(connection: ApiKeyStatus["connection"]): string {
     case "offline": return "Offline — key saved but not verified";
     case "untested": return "API key saved — use Test connection in Settings → AI to verify";
   }
+}
+
+function onboardingKeyLabel(provider: AiProviderId): string {
+  if (provider === "custom") return "API key (optional for local servers)";
+  if (provider === "gemini") return "Google AI Studio API key";
+  return "OpenCode API key";
 }
 
 function OnboardingFooter({ step, prev, next, finish, busy, finishing }: { readonly step: number; readonly prev: () => void; readonly next: () => void; readonly finish: () => void; readonly busy: boolean; readonly finishing: boolean }) {
