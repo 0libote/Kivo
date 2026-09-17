@@ -111,6 +111,22 @@ impl GeminiClient {
         model: &str,
         source: &LinkSource,
     ) -> Result<String, GeminiError> {
+        // Same single retry as text generation: 500s are transient.
+        match self.summarize_link_once(api_key, model, source).await {
+            Err(error) if error.is_server_error() => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                self.summarize_link_once(api_key, model, source).await
+            }
+            result => result,
+        }
+    }
+
+    async fn summarize_link_once(
+        &self,
+        api_key: &SecretString,
+        model: &str,
+        source: &LinkSource,
+    ) -> Result<String, GeminiError> {
         // Revalidate even if a caller constructed/deserialized LinkSource directly.
         let validated = LinkSource::parse(&source.url)?;
         if validated.kind != source.kind {

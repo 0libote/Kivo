@@ -395,6 +395,23 @@ impl GeminiClient {
         model: &str,
         prompt: &AiPrompt,
     ) -> Result<String, GeminiError> {
+        // ponytail: one retry for flaky 500s (seen live on Gemma); the
+        // popup's manual Retry covers anything still failing.
+        match self.generate_once(api_key, model, prompt).await {
+            Err(error) if error.is_server_error() => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                self.generate_once(api_key, model, prompt).await
+            }
+            result => result,
+        }
+    }
+
+    async fn generate_once(
+        &self,
+        api_key: &SecretString,
+        model: &str,
+        prompt: &AiPrompt,
+    ) -> Result<String, GeminiError> {
         let api_key =
             HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
         let model = Self::resolve_model(model);
