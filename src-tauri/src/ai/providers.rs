@@ -575,30 +575,6 @@ pub fn normalize_model_list_for(provider: AiProvider, ids: &[String]) -> Vec<Str
     models
 }
 
-pub fn normalize_backup_model_for(
-    provider: AiProvider,
-    id: Option<&str>,
-    primary: &str,
-) -> Option<String> {
-    match provider {
-        AiProvider::Gemini => super::normalize_backup_model(id, primary),
-        AiProvider::Zen | AiProvider::Go | AiProvider::Custom => {
-            let raw = id?.trim();
-            if raw.is_empty() {
-                return None;
-            }
-            let canonical = canonical_model_id_for(provider, raw);
-            if !is_usable_model_for(provider, &canonical) {
-                return None;
-            }
-            if canonical == canonical_model_id_for(provider, primary) {
-                return None;
-            }
-            Some(canonical)
-        }
-    }
-}
-
 /// Normalize a custom base URL: trim, drop trailing slashes, require an
 /// `http(s)` scheme. Returns `None` when empty so callers fall back to the
 /// Ollama default.
@@ -1211,7 +1187,7 @@ impl OpenAiCompatClient {
                     content: &prompt.input,
                 },
             ],
-            max_tokens: prompt.max_output_tokens,
+            max_tokens: None,
             temperature: 0.2,
         };
         let mut call = self.http.post(chat_url).json(&request);
@@ -1258,7 +1234,7 @@ impl OpenAiCompatClient {
                 role: "user",
                 content: "ok",
             }],
-            max_tokens: 1,
+            max_tokens: Some(1),
             temperature: 0.0,
         };
         let mut call = self
@@ -1319,7 +1295,11 @@ impl OpenAiCompatClient {
 struct ChatCompletionRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage<'a>],
-    max_tokens: u32,
+    // No output cap on writing requests: prompt budgets were dropped alongside
+    // the Gemini `max_output_tokens` (same reasoning — small sources produce
+    // small outputs). Only the connection probe caps to one token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
     temperature: f32,
 }
 
@@ -1567,14 +1547,6 @@ mod tests {
         assert_eq!(
             normalize_model_for(AiProvider::Go, "bogus!!"),
             "kimi-k2.7-code"
-        );
-        assert_eq!(
-            normalize_backup_model_for(AiProvider::Zen, Some("kimi-k3"), "kimi-k2.7-code"),
-            Some("kimi-k3".into())
-        );
-        assert_eq!(
-            normalize_backup_model_for(AiProvider::Zen, Some("kimi-k2.7-code"), "kimi-k2.7-code"),
-            None
         );
     }
 

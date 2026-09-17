@@ -77,18 +77,6 @@ export function normalizeAiModel(id: string | null | undefined): string {
   return isUsableAiModelId(canonical) ? canonical : DEFAULT_AI_MODEL;
 }
 
-export function normalizeBackupAiModel(
-  id: string | null | undefined,
-  primary: string,
-): string | null {
-  if (id == null) return null;
-  const canonical = canonicalAiModelId(id);
-  if (canonical === "") return null;
-  if (!isUsableAiModelId(canonical)) return null;
-  if (canonical === canonicalAiModelId(primary)) return null;
-  return canonical;
-}
-
 export function aiModelLabel(id: string, models: AiModelInfo[] = FALLBACK_AI_MODELS): string {
   return models.find(model => model.id === canonicalAiModelId(id))?.label ?? canonicalAiModelId(id);
 }
@@ -171,19 +159,6 @@ export function normalizeAiModelFor(provider: AiProviderId, id: string | null | 
   const canonical = canonicalAiModelIdFor(provider, id ?? "");
   if (isUsableAiModelIdFor(provider, canonical)) return canonical;
   return providerDefaultModel(provider);
-}
-
-export function normalizeBackupAiModelFor(
-  provider: AiProviderId,
-  id: string | null | undefined,
-  primary: string,
-): string | null {
-  if (id == null) return null;
-  const canonical = canonicalAiModelIdFor(provider, id);
-  if (canonical === "") return null;
-  if (!isUsableAiModelIdFor(provider, canonical)) return null;
-  if (canonical === canonicalAiModelIdFor(provider, primary)) return null;
-  return canonical;
 }
 
 /** Mirrors `MAX_AI_MODELS` in `src-tauri/src/ai/mod.rs`. */

@@ -229,23 +229,6 @@ pub fn normalize_model_list(provider: AiProvider, ids: &[String]) -> Vec<String>
     providers::normalize_model_list_for(provider, ids)
 }
 
-/// Normalize an optional backup model: empty, unusable, or identical to the
-/// primary collapses to `None` (no fallback) instead of bricking requests.
-pub fn normalize_backup_model(id: Option<&str>, primary: &str) -> Option<String> {
-    let raw = id?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let canonical = canonical_model_id(raw);
-    if !is_usable_model(&canonical) {
-        return None;
-    }
-    if canonical == canonical_model_id(primary) {
-        return None;
-    }
-    Some(canonical)
-}
-
 /// Thinking level for a model: every `gemini-*` text model supports `"low"`,
 /// but other families (e.g. Gemma supports only `minimal`/`high`) reject it
 /// with HTTP 400 `invalid_request`. Omit the field there and take the model
@@ -825,7 +808,7 @@ impl GeminiError {
     fn is_failover_terminal(&self) -> bool {
         match self {
             Self::InvalidApiKey | Self::Transport(_) => true,
-            Self::Api { status, code }
+            Self::Api { status, code, .. }
                 if *status == StatusCode::UNAUTHORIZED
                     || *status == StatusCode::FORBIDDEN
                     || Self::is_auth_code(code.as_deref()) =>
@@ -995,8 +978,8 @@ mod tests {
         ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig,
         InteractionRequest, InteractionResponse, WritingAction, curated_listed_models,
         dictation_cleanup_prompt, filter_api_models, is_blocked_model, is_usable_model,
-        normalize_backup_model, normalize_model, parse_api_error_code, parse_api_error_detail,
-        parse_interaction, supported_models, thinking_level_for, writing_prompt,
+        normalize_model, parse_api_error_code, parse_api_error_detail, parse_interaction,
+        supported_models, thinking_level_for, writing_prompt,
     };
 
     #[test]
@@ -1273,32 +1256,6 @@ mod tests {
         ] {
             assert!(!is_usable_model(malformed), "{malformed} must be rejected");
         }
-    }
-
-    #[test]
-    fn backup_model_normalizes_to_none_when_empty_same_or_unusable() {
-        assert_eq!(
-            normalize_backup_model(Some("gemini-2.5-flash"), "gemini-3.8-flash"),
-            Some("gemini-2.5-flash".to_owned())
-        );
-        assert_eq!(normalize_backup_model(None, "gemini-3.8-flash"), None);
-        assert_eq!(normalize_backup_model(Some("  "), "gemini-3.8-flash"), None);
-        assert_eq!(
-            normalize_backup_model(Some("gemini-3.8-flash"), "gemini-3.8-flash"),
-            None
-        );
-        assert_eq!(
-            normalize_backup_model(Some("models/gemini-2.5-flash"), "models/gemini-3.8-flash"),
-            Some("gemini-2.5-flash".to_owned())
-        );
-        assert_eq!(
-            normalize_backup_model(Some("gemini-2.5-flash-preview-tts"), "gemini-3.8-flash"),
-            None
-        );
-        assert_eq!(
-            normalize_backup_model(Some("has spaces!"), "gemini-3.8-flash"),
-            None
-        );
     }
 
     #[test]

@@ -17,8 +17,6 @@ import {
   normalizeAiModelFor,
   normalizeAiModelList,
   normalizeAiProvider,
-  normalizeBackupAiModel,
-  normalizeBackupAiModelFor,
   providerDefaultModel,
 } from "./ai/models";
 import { formatShortcut } from "./components/ShortcutRecorder";
@@ -95,11 +93,6 @@ describe("platform defaults parity", () => {
     expect(isUsableAiModelId("gemini-2.5-flash-preview-tts")).toBe(false);
     expect(isUsableAiModelId("has spaces!")).toBe(false);
     expect(isUsableAiModelId("gemini")).toBe(false);
-    expect(normalizeBackupAiModel("gemini-2.5-flash", "gemini-3.8-flash")).toBe("gemini-2.5-flash");
-    expect(normalizeBackupAiModel(null, "gemini-3.8-flash")).toBeNull();
-    expect(normalizeBackupAiModel("", "gemini-3.8-flash")).toBeNull();
-    expect(normalizeBackupAiModel("gemini-3.8-flash", "gemini-3.8-flash")).toBeNull();
-    expect(normalizeBackupAiModel("gemini-2.5-flash-preview-tts", "gemini-3.8-flash")).toBeNull();
   });
 
   it("parses provider ids with a Gemini fallback", () => {
@@ -129,8 +122,6 @@ describe("platform defaults parity", () => {
     expect(isUsableOpenCodeModelId("has spaces!")).toBe(false);
     expect(normalizeAiModelFor("zen", "opencode/gpt-5.5")).toBe("gpt-5.5");
     expect(normalizeAiModelFor("go", "bogus!!")).toBe("kimi-k2.7-code");
-    expect(normalizeBackupAiModelFor("zen", "kimi-k3", "kimi-k2.7-code")).toBe("kimi-k3");
-    expect(normalizeBackupAiModelFor("zen", "kimi-k2.7-code", "kimi-k2.7-code")).toBeNull();
   });
 
   it("validates custom ids like local servers do", () => {
