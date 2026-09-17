@@ -21,15 +21,11 @@ import { DEFAULT_AI_MODEL } from "../types";
  */
 const FALLBACK_ROWS: Array<[id: string, label: string, description: string]> = [
   ["gemini-3.8-flash", "Gemini 3.8 Flash", "Default. Fastest frontier text model, tuned for low-latency edits."],
-  ["gemini-3.7-flash", "Gemini 3.7 Flash", "Frontier speed and quality for everyday writing tasks."],
   ["gemini-3.6-flash", "Gemini 3.6 Flash", "Previous-generation Flash balancing speed and multimodal ability."],
   ["gemini-3.5-flash", "Gemini 3.5 Flash", "Stable frontier model for agentic and coding-adjacent rewrites."],
   ["gemini-3.5-flash-lite", "Gemini 3.5 Flash-Lite", "Cost-efficient stable model for high-volume simple tasks."],
   ["gemini-3-flash-preview", "Gemini 3 Flash Preview", "Preview of the Gemini 3 Flash line. May change without notice."],
   ["gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "Strongest reasoning in the list. Slower, best for hard rewrites."],
-  ["gemini-2.5-pro", "Gemini 2.5 Pro", "Deep reasoning over long or complex selections."],
-  ["gemini-2.5-flash", "Gemini 2.5 Flash", "Best price-performance for high-volume, low-latency edits."],
-  ["gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite", "Smallest and cheapest. Good for quick cleanup and short text."],
   ["gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "Cost-efficient text model for high-volume simple tasks."],
 ];
 

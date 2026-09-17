@@ -465,6 +465,7 @@ fn body_only_quota_errors_are_recoverable_rate_limits() {
     let error = AppCoreError::Gemini(GeminiError::Api {
         status: reqwest::StatusCode::BAD_REQUEST,
         code: Some("rate_limited".into()),
+        detail: None,
     });
     let command = CommandError::from(error);
     assert_eq!(command.code, "rate_limited");

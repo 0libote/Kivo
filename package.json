@@ -15,12 +15,13 @@
     "test:ui": "playwright test",
     "test:ui:smoke": "playwright test tests/e2e/windows-branches.pw.ts tests/e2e/surfaces.pw.ts",
     "check:bridge": "bun scripts/check-bridge.ts",
-    "ai-check": "bun typecheck && bun lint && bun run test && bun run check:packaging && bun run check:platform-parity && bun run check:bridge && cargo test --locked --manifest-path src-tauri/Cargo.toml",
+    "ai-check": "bun typecheck && bun lint && bun run format:rust && bun run lint:rust && bun run test && bun run check:packaging && bun run check:platform-parity && bun run check:bridge && cargo test --locked --manifest-path src-tauri/Cargo.toml",
     "ai-check:full": "bun run ai-check && bun run build && bun run test:ui:smoke",
     "prepare:release": "bun scripts/prepare-release-config.ts",
     "check:packaging": "bun scripts/check-packaging.ts",
     "check:platform-parity": "bun scripts/check-platform-parity.ts",
     "format:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "lint:rust": "cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets"
   },
   "dependencies": {
