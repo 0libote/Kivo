@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DeveloperSurfaceMenu } from "./components/DeveloperSurfaceMenu";
 import { FlowBar } from "./features/dictation/FlowBar";
+import { GalleryWindow } from "./features/gallery/GalleryWindow";
 import { OnboardingWindow } from "./features/onboarding/OnboardingWindow";
 import { SettingsWindow } from "./features/settings/SettingsWindow";
 import { WritingToolsPopup } from "./features/writing-tools/WritingToolsPopup";
@@ -69,6 +70,9 @@ export function App() {
       break;
     case "settings":
       surface = <SettingsWindow context={context} loading={loading} settings={settings} updateSettings={update} />;
+      break;
+    case "gallery":
+      surface = <GalleryWindow context={context} settings={settings} />;
       break;
   }
 

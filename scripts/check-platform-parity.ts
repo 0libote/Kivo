@@ -15,6 +15,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  extractGenerated,
+  renderGeneratedAiModels,
+} from "./ai-model-codegen.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 let failures = 0;
@@ -53,33 +57,43 @@ const aiProvidersRs = read("src-tauri/src/ai/providers.rs");
 const aiModelsTs = read("src/ai/models.ts");
 
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
-function rustDefault(fnName: string, host: "Macos" | "Windows"): string | null {
+function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): string | null {
   const match = new RegExp(
-    String.raw`${fnName}[\s\S]*?HostPlatform::${host} => ShortcutBinding::new\("([^"]+)"\)`,
+    // Arms may share alternatives (`HostPlatform::Linux | ... => ...`) and
+    // may break across lines, so allow anything up to the constructor.
+    String.raw`${fnName}[\s\S]*?HostPlatform::${host}\b[^;]*?ShortcutBinding::new\("([^"]+)"\)`,
   ).exec(configRs);
   return match?.[1] ?? null;
 }
 
-/** `key: platform === "macos" ? "a" : "b"` inside defaultSettings. */
-function tsDefault(key: "dictationShortcut" | "writingShortcut"): [string, string] | null {
-  const match = new RegExp(
-    String.raw`${key}: platform === "macos" \? "([^"]+)" : "([^"]+)"`,
-  ).exec(typesTs);
-  return match ? [match[1], match[2]] : null;
+/** Per-platform defaults out of the `*_SHORTCUTS` records in src/types.ts. */
+function tsDefault(key: "DICTATION_SHORTCUTS" | "WRITING_SHORTCUTS"): [macos: string, windows: string, linux: string] | null {
+  const anchor = typesTs.indexOf(`const ${key}`);
+  if (anchor === -1) return null;
+  const tail = typesTs.slice(anchor, anchor + 400);
+  const value = (platform: "macos" | "windows" | "linux"): string | null =>
+    new RegExp(`${platform}: "([^"]+)"`).exec(tail)?.[1] ?? null;
+  const macos = value("macos");
+  const windows = value("windows");
+  const linux = value("linux");
+  if (!macos || !windows || !linux) return null;
+  return [macos, windows, linux];
 }
 
 // --- 1. Shortcut defaults agree on both sides --------------------------------
 const rustDictationMacos = rustDefault("dictation_default_for", "Macos");
 const rustDictationWindows = rustDefault("dictation_default_for", "Windows");
+const rustDictationLinux = rustDefault("dictation_default_for", "Linux");
 const rustWritingMacos = rustDefault("writing_tools_default_for", "Macos");
 const rustWritingWindows = rustDefault("writing_tools_default_for", "Windows");
-const tsDictation = tsDefault("dictationShortcut");
-const tsWriting = tsDefault("writingShortcut");
+const rustWritingLinux = rustDefault("writing_tools_default_for", "Linux");
+const tsDictation = tsDefault("DICTATION_SHORTCUTS");
+const tsWriting = tsDefault("WRITING_SHORTCUTS");
 
-check("Rust dictation defaults parse", rustDictationMacos !== null && rustDictationWindows !== null, "dictation_default_for arms not found in config/mod.rs");
-check("Rust writing defaults parse", rustWritingMacos !== null && rustWritingWindows !== null, "writing_tools_default_for arms not found in config/mod.rs");
-check("TS dictation default parses", tsDictation !== null, "defaultSettings dictationShortcut not found in src/types.ts");
-check("TS writing default parses", tsWriting !== null, "defaultSettings writingShortcut not found in src/types.ts");
+check("Rust dictation defaults parse", rustDictationMacos !== null && rustDictationWindows !== null && rustDictationLinux !== null, "dictation_default_for arms not found in config/mod.rs");
+check("Rust writing defaults parse", rustWritingMacos !== null && rustWritingWindows !== null && rustWritingLinux !== null, "writing_tools_default_for arms not found in config/mod.rs");
+check("TS dictation default parses", tsDictation !== null, "DICTATION_SHORTCUTS record not found in src/types.ts");
+check("TS writing default parses", tsWriting !== null, "WRITING_SHORTCUTS record not found in src/types.ts");
 
 if (tsDictation) {
   check(
@@ -91,6 +105,11 @@ if (tsDictation) {
     "dictation default matches on Windows",
     rustDictationWindows === tsDictation[1],
     `Rust "${rustDictationWindows}" vs TS "${tsDictation[1]}"`,
+  );
+  check(
+    "dictation default matches on Linux",
+    rustDictationLinux === tsDictation[2],
+    `Rust "${rustDictationLinux}" vs TS "${tsDictation[2]}"`,
   );
 }
 if (tsWriting) {
@@ -104,7 +123,17 @@ if (tsWriting) {
     rustWritingWindows === tsWriting[1],
     `Rust "${rustWritingWindows}" vs TS "${tsWriting[1]}"`,
   );
+  check(
+    "writing default matches on Linux",
+    rustWritingLinux === tsWriting[2],
+    `Rust "${rustWritingLinux}" vs TS "${tsWriting[2]}"`,
+  );
 }
+check(
+  "Linux dictation and writing defaults differ",
+  rustDictationLinux !== rustWritingLinux && tsDictation?.[2] !== tsWriting?.[2],
+  "Linux dictation and writing shortcuts must not share one accelerator",
+);
 
 // --- 2. Foreign-default migration covers both spellings -----------------------
 const migration = fnBody(configRs, "foreign_default_replacement");
@@ -159,6 +188,11 @@ check(
   "native.ts must keep deriving its platform from navigator.userAgent so e2e UA spoofing covers both branches",
 );
 check(
+  "harness detects the Linux bench instead of mislabeling it macOS",
+  nativeTs.includes('"linux"') && /Linux\|X11/.test(nativeTs),
+  'native.ts detectedPlatform must return "linux" for Linux user agents',
+);
+check(
   "harness marks input-monitoring unavailable off macOS",
   nativeTs.includes('this.platform === "macos" ? "not-determined" : "unavailable"'),
   "MockBridge input-monitoring availability drifted",
@@ -196,37 +230,26 @@ for (const excluded of ["tts", "live", "audio", "-image", "banana", "transcribe"
 }
 check(
   "frontend suggestions mirror backend suggestions",
-  aiModelsTs.includes(rustDefaultModel ?? "gemini-3.8-flash") && FALLBACK_IDS_MATCH(),
-  "src/ai/models.ts FALLBACK_AI_MODELS drifted from SUPPORTED_GEMINI_MODELS",
+  generatedCatalogIsFresh().fallback,
+  "src/ai/models.ts FALLBACK_ROWS drifted from SUPPORTED_GEMINI_MODELS; run `bun run generate:models`",
 );
-function FALLBACK_IDS_MATCH(): boolean {
-  const rustIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]).filter(id => id.startsWith("gemini-"));
-  // The TS mirror stores one Gemini model per FALLBACK_ROWS row; match the id
-  // column of that block only (ZEN_FALLBACK_ROWS reuses gemini ids with Zen
-  // pricing further down the file).
-  const fallbackAnchor = aiModelsTs.indexOf("FALLBACK_ROWS");
-  const fallbackEnd = fallbackAnchor === -1 ? -1 : aiModelsTs.indexOf("];", fallbackAnchor);
-  const fallbackBlock = fallbackAnchor === -1 || fallbackEnd === -1 ? "" : aiModelsTs.slice(fallbackAnchor, fallbackEnd);
-  const tsIds = [...fallbackBlock.matchAll(/"(gemini-[^"]+)"/g)].map(m => m[1]);
-  return rustIds.length > 0 && rustIds.length === tsIds.length && rustIds.every(id => tsIds.includes(id));
-}
-function blocklist(name: string, source: string): string[] {
-  const anchor = source.indexOf(`const ${name}`);
-  if (anchor === -1) return [];
-  const tail = source.slice(anchor);
-  const endBracket = tail.search(/\]\s*(as const)?\s*;/);
-  if (endBracket === -1) return [];
-  return [...tail.slice(0, endBracket).matchAll(/"([^"]+)"/g)].map(m => m[1]);
-}
-const rustBlocklist = blocklist("BLOCKED_MODEL_SUBSTRINGS", aiRs);
-const tsBlocklist = blocklist("BLOCKED_AI_MODEL_PATTERNS", aiModelsTs);
-check("Rust blocklist parses", rustBlocklist.length > 0, "BLOCKED_MODEL_SUBSTRINGS not found in ai/mod.rs");
-check("TS blocklist parses", tsBlocklist.length > 0, "BLOCKED_AI_MODEL_PATTERNS not found in src/ai/models.ts");
 check(
-  "blocklists match",
-  rustBlocklist.length === tsBlocklist.length && rustBlocklist.every(p => tsBlocklist.includes(p)),
-  `Rust [${rustBlocklist}] vs TS [${tsBlocklist}]; keep BLOCKED_MODEL_SUBSTRINGS and BLOCKED_AI_MODEL_PATTERNS in sync`,
+  "frontend blocklist mirrors backend blocklist",
+  generatedCatalogIsFresh().blocked,
+  "src/ai/models.ts BLOCKED_AI_MODEL_PATTERNS drifted from BLOCKED_MODEL_SUBSTRINGS; run `bun run generate:models`",
 );
+/** Compare the checked-in mirror against a fresh render of the Rust source. */
+function generatedCatalogIsFresh(): { fallback: boolean; blocked: boolean } {
+  try {
+    const generated = renderGeneratedAiModels(aiRs);
+    return {
+      fallback: extractGenerated(aiModelsTs, 0) === generated.fallbackRows,
+      blocked: extractGenerated(aiModelsTs, 1) === generated.blockedPatterns,
+    };
+  } catch {
+    return { fallback: false, blocked: false };
+  }
+}
 check(
   "model queue is plumbed end to end",
   configRs.includes("pub models") && commandsRs.includes("ai_models") && typesTs.includes("aiModels"),

@@ -20,12 +20,15 @@
     "prepare:release": "bun scripts/prepare-release-config.ts",
     "check:packaging": "bun scripts/check-packaging.ts",
     "check:platform-parity": "bun scripts/check-platform-parity.ts",
+    "generate:models": "bun scripts/generate-ai-models.ts",
     "format:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
     "lint:rust": "cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings",
     "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml --all-targets"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

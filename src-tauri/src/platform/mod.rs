@@ -6,18 +6,22 @@ use crate::{security::CredentialStore, text::TextAccessStrategy};
 
 pub(crate) mod adapters;
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
 pub(crate) mod windows_speech;
 
+#[cfg(target_os = "linux")]
+use linux::PlatformImpl;
 #[cfg(target_os = "macos")]
 use macos::PlatformImpl;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 use unsupported::PlatformImpl;
 #[cfg(target_os = "windows")]
 use windows::PlatformImpl;
@@ -146,10 +150,12 @@ pub enum PermissionStatus {
 pub enum ModifierKey {
     #[cfg(target_os = "macos")]
     Function,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     Control,
     #[cfg(target_os = "windows")]
     Meta,
+    #[cfg(target_os = "linux")]
+    Alt,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -176,7 +182,18 @@ impl HoldShortcut {
             suppress: true,
         };
 
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        // Linux has no native hold monitor: dictation always goes through the
+        // portable global-shortcut plugin. This default is only constructed
+        // when unit tests exercise the native path explicitly; the runtime
+        // `is_native_dictation_shortcut_for` never selects it on Linux.
+        #[cfg(target_os = "linux")]
+        return Self {
+            modifiers: vec![ModifierKey::Control, ModifierKey::Alt],
+            key_code: None,
+            suppress: false,
+        };
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         Self {
             modifiers: Vec::new(),
             key_code: None,

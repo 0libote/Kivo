@@ -418,8 +418,8 @@ jobs:
     permissions:
       contents: read
     env:
-      # Same beta-only fast release tuning as macos-beta above. Single NSIS
-      # build only (no second MSIX cargo invocation).
+      # Same beta-only fast release tuning as macos-beta above. NSIS is the
+      # only Windows route: a single bundle build, no second packaging pass.
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
@@ -438,9 +438,7 @@ jobs:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
       # No signing keys: the NSIS .exe installs with a bypassable
-      # SmartScreen warning ("More info" -> "Run anyway"). NSIS only: no
-      # second MSIX cargo build (previously `build-msix.ps1` re-ran
-      # `tauri build --no-bundle`, paying the LTO link twice).
+      # SmartScreen warning ("More info" -> "Run anyway").
       - name: Build unsigned NSIS installer (beta, untrusted)
         run: bun tauri build --bundles nsis
       - name: Upload installer for the publish job

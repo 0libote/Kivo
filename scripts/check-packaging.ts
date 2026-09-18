@@ -29,7 +29,7 @@ const version: string = packageJson.version;
 check(
   "package.json version is numeric X.Y.Z",
   /^\d+\.\d+\.\d+$/.test(version),
-  `got "${version}"; the MSIX identity needs a numeric 4-part version and the NSIS artifact names embed this string`,
+  `got "${version}"; the NSIS artifact names embed this string`,
 );
 
 const windowsConf = JSON.parse(readFileSync(join(root, "src-tauri/tauri.windows.conf.json"), "utf8")) as { bundle: { targets: string[]; windows: { nsis: { installMode: string; installerHooks: string } } } };
@@ -52,7 +52,7 @@ check("tauri.conf identifier is set", typeof tauriConf.identifier === "string" &
 check(
   "bundle targets cover both desktops",
   tauriConf.bundle.targets === "all",
-  `targets is ${JSON.stringify(tauriConf.bundle.targets)}; "all" builds dmg/app on macOS and nsis/msi on Windows`,
+  `targets is ${JSON.stringify(tauriConf.bundle.targets)}; "all" builds dmg/app on macOS and nsis on Windows (narrowed by tauri.windows.conf.json)`,
 );
 check(
   "updater endpoints include the rolling beta manifest",
@@ -60,34 +60,15 @@ check(
   "continuous.json endpoint missing or misnamed; beta updates break",
 );
 
-// --- Windows MSIX manifest ---------------------------------------------------
-const MSIX_FLOOR = "10.0.26100.0"; // Windows 11 24H2: supported floor.
-const manifestPath = join(root, "packaging", "windows", "AppxManifest.xml");
-const manifest = readFileSync(manifestPath, "utf8");
-const identity = /<Identity\s+Name="([^"]+)"\s+Publisher="([^"]+)"\s+Version="([^"]+)"/.exec(manifest);
-check("AppxManifest Identity parses", identity !== null, "Identity element not found or malformed");
-if (identity) {
-  check("AppxManifest Name matches the Tauri identifier", identity[1] === tauriConf.identifier, `"${identity[1]}" vs "${tauriConf.identifier}"`);
-  check(
-    "AppxManifest Version matches package.json",
-    identity[3] === `${version}.0`,
-    `"${identity[3]}" vs "${version}.0"; build-msix.ps1 stamps this, keep the placeholder in sync`,
-  );
-}
-const minVersion = /MinVersion="([^"]+)"/.exec(manifest)?.[1];
-check(
-  `AppxManifest MinVersion stays at the supported floor (${MSIX_FLOOR})`,
-  minVersion === MSIX_FLOOR,
-  `got "${minVersion}"; raising it drops installed users, lowering it claims untested support`,
-);
+// --- Windows floor: single NSIS installer --------------------------------------
+// NSIS is the only Windows route (the legacy MSIX manifest/script were
+// removed): one floor constant, enforced by the installer hooks.
+const WINDOWS_FLOOR_BUILD = "26100"; // Windows 11 24H2: supported floor.
 
 // --- Icons (both bundlers fail late when these are missing) ------------------
 for (const icon of [
   "src-tauri/icons/icon.ico", // NSIS/Windows
   "src-tauri/icons/icon.icns", // dmg/macOS
-  "src-tauri/icons/StoreLogo.png", // MSIX
-  "src-tauri/icons/Square44x44Logo.png", // MSIX
-  "src-tauri/icons/Square150x150Logo.png", // MSIX
 ]) {
   check(`icon exists: ${icon}`, existsSync(join(root, icon)), "missing file breaks the corresponding bundle");
 }
@@ -132,11 +113,10 @@ check("macOS installer script exists", existsSync(join(root, "scripts/install-ma
 // --- Windows floor consistency --------------------------------------------------
 const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");
 const hookBuild = /\$\{AtLeastBuild\}\s*(\d+)/.exec(hooksSource)?.[1];
-const manifestBuild = /MinVersion="10\.0\.(\d+)\.0"/.exec(manifest)?.[1];
 check(
-  "NSIS floor matches the MSIX MinVersion build",
-  hookBuild !== undefined && hookBuild === manifestBuild,
-  `hooks.nsh enforces build ${hookBuild} but AppxManifest MinVersion is build ${manifestBuild}; installers would disagree about the supported floor`,
+  "NSIS installer enforces the supported floor",
+  hookBuild === WINDOWS_FLOOR_BUILD,
+  `hooks.nsh enforces build ${hookBuild}, expected ${WINDOWS_FLOOR_BUILD} (Windows 11 24H2); raising it drops installed users, lowering it claims untested support`,
 );
 
 // --- Windows overlay config stays an overlay ------------------------------------
@@ -157,7 +137,6 @@ check(
 
 // --- Artifact name parity (what CI uploads vs. what releases expect) ---------
 console.info(`info - expected NSIS artifact: src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe`);
-console.info(`info - optional legacy MSIX artifact: src-tauri/target/release/bundle/msix/Kivo_${version}_x64.msix`);
 
 if (failures > 0) {
   console.error(`\n${failures} packaging check(s) failed.`);

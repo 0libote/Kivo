@@ -1,0 +1,4 @@
+# Enforce at the VCS layer what .editorconfig already declares
+# (end_of_line = lf): every text checkout uses LF on every OS, so scripts
+# that compare file content never see CRLF ghosts on Windows runners.
+* text=auto eol=lf

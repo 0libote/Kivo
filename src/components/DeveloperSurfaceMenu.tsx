@@ -1,6 +1,7 @@
 import type { Surface } from "../types";
 
 const surfaces: Array<{ id: Surface; label: string }> = [
+  { id: "gallery", label: "Bench" },
   { id: "flow-bar", label: "Flow Bar" },
   { id: "writing-tools", label: "Writing Tools" },
   { id: "settings", label: "Settings" },
