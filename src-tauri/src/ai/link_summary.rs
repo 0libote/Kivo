@@ -144,6 +144,7 @@ impl GeminiClient {
             .http
             .post(&self.endpoint)
             .header("x-goog-api-key", api_key)
+            .header("Api-Revision", "2026-05-20")
             .json(&request)
             .send()
             .await

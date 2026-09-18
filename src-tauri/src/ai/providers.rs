@@ -1230,6 +1230,15 @@ impl OpenAiCompatClient {
             let header =
                 HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
             call = call.header("x-api-key", header);
+        } else if protocol == CompletionProtocol::Google
+            && let Some(key) = api_key
+        {
+            // OpenCode's Zen Google adapter follows the Google SDK contract
+            // and expects the key in x-goog-api-key, unlike its OpenAI and
+            // Anthropic adapters.
+            let header =
+                HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
+            call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
         let status = response.status();
@@ -1286,6 +1295,12 @@ impl OpenAiCompatClient {
             let header =
                 HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
             call = call.header("x-api-key", header);
+        } else if protocol == CompletionProtocol::Google
+            && let Some(key) = api_key
+        {
+            let header =
+                HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
+            call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
         let status = response.status();
@@ -1338,13 +1353,21 @@ enum CompletionProtocol {
     Chat,
     Messages,
     Responses,
+    Google,
 }
 
 fn completion_protocol(provider: AiProvider, model: &str) -> CompletionProtocol {
-    // Go publishes model-specific protocols. Custom endpoints retain their
-    // explicitly configured OpenAI chat-completions contract.
-    if provider == AiProvider::Go {
-        if model.starts_with("minimax-") || model.starts_with("qwen") || model == "union-alpha" {
+    // Zen and Go publish model-specific protocols. Custom endpoints retain
+    // their explicitly configured OpenAI chat-completions contract.
+    if matches!(provider, AiProvider::Zen | AiProvider::Go) {
+        if provider == AiProvider::Zen && model.starts_with("gemini-") {
+            return CompletionProtocol::Google;
+        }
+        if model.starts_with("claude-")
+            || model.starts_with("qwen")
+            || (provider == AiProvider::Go
+                && (model.starts_with("minimax-") || model == "union-alpha"))
+        {
             return CompletionProtocol::Messages;
         }
         if model.starts_with("gpt-") || model.starts_with("grok-") || model.starts_with("muse-") {
@@ -1403,6 +1426,38 @@ fn completion_request(
             }
             (format!("{base}/responses"), body)
         }
+        CompletionProtocol::Google => {
+            let system = request
+                .messages
+                .iter()
+                .filter(|message| message.role == "system")
+                .map(|message| serde_json::json!({"text": message.content}))
+                .collect::<Vec<_>>();
+            let contents = request
+                .messages
+                .iter()
+                .filter(|message| message.role != "system")
+                .map(|message| {
+                    serde_json::json!({
+                        "role": "user",
+                        "parts": [{"text": message.content}],
+                    })
+                })
+                .collect::<Vec<_>>();
+            let mut body = serde_json::json!({
+                "contents": contents,
+            });
+            if !system.is_empty() {
+                body["systemInstruction"] = serde_json::json!({"parts": system});
+            }
+            if let Some(limit) = request.max_tokens {
+                body["generationConfig"] = serde_json::json!({"maxOutputTokens": limit});
+            }
+            (
+                format!("{base}/models/{}:generateContent", request.model),
+                body,
+            )
+        }
     }
 }
 
@@ -1423,6 +1478,11 @@ fn parse_completion(
             choices
                 .iter()
                 .any(|choice| choice["finish_reason"] == "length")
+        }),
+        CompletionProtocol::Google => body["candidates"].as_array().is_some_and(|candidates| {
+            candidates
+                .iter()
+                .any(|candidate| matches!(candidate["finishReason"].as_str(), Some("MAX_TOKENS")))
         }),
     };
     if incomplete {
@@ -1454,6 +1514,21 @@ fn parse_completion(
                     .flatten()
             })
             .filter(|part| part["type"] == "output_text")
+            .collect(),
+        CompletionProtocol::Google => body
+            .get("candidates")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .flat_map(|candidate| {
+                candidate
+                    .get("content")
+                    .and_then(|content| content.get("parts"))
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+            })
+            .filter(|part| part.get("text").is_some())
             .collect(),
         CompletionProtocol::Chat => unreachable!(),
     };
@@ -1946,24 +2021,50 @@ mod tests {
     }
 
     #[test]
-    fn go_models_use_their_required_protocol_without_changing_custom_servers() {
+    fn hosted_models_use_their_required_protocol_without_changing_custom_servers() {
         for model in ["minimax-m2.7", "qwen3.5-plus", "union-alpha"] {
             assert_eq!(
                 completion_protocol(AiProvider::Go, model),
                 CompletionProtocol::Messages
             );
             assert_eq!(
+                completion_protocol(AiProvider::Zen, model),
+                if model.starts_with("qwen") {
+                    CompletionProtocol::Messages
+                } else {
+                    CompletionProtocol::Chat
+                }
+            );
+            assert_eq!(
                 completion_protocol(AiProvider::Custom, model),
                 CompletionProtocol::Chat
             );
         }
+        assert_eq!(
+            completion_protocol(AiProvider::Zen, "claude-sonnet-4-6"),
+            CompletionProtocol::Messages
+        );
         for model in ["gpt-5.6-luna", "grok-4.5", "muse-spark"] {
             assert_eq!(
                 completion_protocol(AiProvider::Go, model),
                 CompletionProtocol::Responses
             );
             assert_eq!(
+                completion_protocol(AiProvider::Zen, model),
+                CompletionProtocol::Responses
+            );
+            assert_eq!(
                 completion_protocol(AiProvider::Custom, model),
+                CompletionProtocol::Chat
+            );
+        }
+        for model in ["gemini-3.8-flash", "gemini-3.5-flash"] {
+            assert_eq!(
+                completion_protocol(AiProvider::Zen, model),
+                CompletionProtocol::Google
+            );
+            assert_eq!(
+                completion_protocol(AiProvider::Go, model),
                 CompletionProtocol::Chat
             );
         }
@@ -2062,6 +2163,53 @@ mod tests {
         );
         assert_eq!(body["max_output_tokens"], 16);
         assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn google_requests_use_the_zen_generate_content_shape() {
+        let messages = [
+            ChatMessage {
+                role: "system",
+                content: "Preserve meaning.",
+            },
+            ChatMessage {
+                role: "user",
+                content: "helo world",
+            },
+        ];
+        let request = ChatCompletionRequest {
+            model: "gemini-3.8-flash",
+            messages: &messages,
+            max_tokens: Some(1),
+        };
+        let (url, body) = completion_request(
+            CompletionProtocol::Google,
+            "https://opencode.ai/zen/v1/chat/completions",
+            &request,
+        );
+        assert_eq!(
+            url,
+            "https://opencode.ai/zen/v1/models/gemini-3.8-flash:generateContent"
+        );
+        assert_eq!(
+            body["systemInstruction"],
+            serde_json::json!({"parts":[{"text":"Preserve meaning."}]})
+        );
+        assert_eq!(
+            body["contents"],
+            serde_json::json!([{"role":"user","parts":[{"text":"helo world"}]}])
+        );
+        assert_eq!(body["generationConfig"]["maxOutputTokens"], 1);
+        let response = serde_json::json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "hello world"}]},
+                "finishReason": "STOP"
+            }]
+        });
+        assert_eq!(
+            parse_completion(CompletionProtocol::Google, response).unwrap(),
+            "hello world"
+        );
     }
 
     #[test]

@@ -460,6 +460,10 @@ impl GeminiClient {
             .http
             .post(&self.endpoint)
             .header("x-goog-api-key", api_key)
+            // The Interactions API changed its response envelope in May 2026.
+            // Pin the current steps schema instead of depending on Google's
+            // rolling v1beta default.
+            .header("Api-Revision", "2026-05-20")
             .json(&request)
             .send()
             .await
