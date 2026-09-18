@@ -57,8 +57,8 @@ export function GalleryWindow({
           `configured=${key.configured ? "yes" : "no"} connection=${key.connection}`,
         );
         setRecovery(rec);
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "The probe failed.");
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "The probe failed.");
       }
     })();
   }, []);
@@ -79,8 +79,8 @@ export function GalleryWindow({
           ? "Replaced the text in place."
           : (response.text ?? "(empty result)"),
       );
-    } catch (caught) {
-      setWriting(caught instanceof Error ? `Failed: ${caught.message}` : "Failed.");
+    } catch (error) {
+      setWriting(error instanceof Error ? `Failed: ${error.message}` : "Failed.");
     }
   }
 
@@ -96,8 +96,8 @@ export function GalleryWindow({
           : "Round trip mismatch: restore did not persist.",
       );
       refresh();
-    } catch (caught) {
-      setRoundTrip(caught instanceof Error ? `Failed: ${caught.message}` : "Failed.");
+    } catch (error) {
+      setRoundTrip(error instanceof Error ? `Failed: ${error.message}` : "Failed.");
       refresh();
     }
   }
@@ -198,21 +198,21 @@ export function GalleryWindow({
             <div className="settings-group__footer settings-group__footer--split">
               <button
                 className="button button--compact"
-                onClick={() => void nativeBridge.startDictation().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "start failed"))}
+                onClick={() => void nativeBridge.startDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "start failed"))}
                 type="button"
               >
                 Start
               </button>
               <button
                 className="button button--compact"
-                onClick={() => void nativeBridge.stopDictation().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "stop failed"))}
+                onClick={() => void nativeBridge.stopDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "stop failed"))}
                 type="button"
               >
                 Stop
               </button>
               <button
                 className="button button--compact"
-                onClick={() => void nativeBridge.cancelDictation().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : "cancel failed"))}
+                onClick={() => void nativeBridge.cancelDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "cancel failed"))}
                 type="button"
               >
                 Cancel

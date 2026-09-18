@@ -300,12 +300,14 @@ function PermissionsSection({
     }
   }
 
-  const subtitle =
-    context.platform === "macos"
-      ? "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it."
-      : context.platform === "windows"
-        ? "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows."
-        : "Linux test bench: microphone and speech are simulated, text access needs no extra prompt.";
+  let subtitle: string;
+  if (context.platform === "macos") {
+    subtitle = "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it.";
+  } else if (context.platform === "windows") {
+    subtitle = "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows.";
+  } else {
+    subtitle = "Linux test bench: microphone and speech are simulated, text access needs no extra prompt.";
+  }
   const order: PermissionKind[] = ["accessibility", "input-monitoring", "microphone", "speech-recognition"];
   const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
 

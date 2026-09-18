@@ -380,15 +380,14 @@ class MockBridge implements NativeBridge {
   }
 
   async getWritingContext() {
-    const applicationName =
-      this.platform === "macos"
-        ? "TextEdit"
-        : this.platform === "windows"
-          ? "Notepad"
-          : "Text Editor";
+    const applicationNames: Record<Platform, string> = {
+      macos: "TextEdit",
+      windows: "Notepad",
+      linux: "Text Editor",
+    };
     return {
       hasSelection: true,
-      applicationName,
+      applicationName: applicationNames[this.platform],
       canReplace: true,
       bounds: { x: 480, y: 320, width: 164, height: 22 },
       initialText: "Hello, how are you?",

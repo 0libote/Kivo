@@ -95,7 +95,12 @@ export function extractGenerated(tsSource: string, occurrence: number): string {
   }
   const to = tsSource.indexOf(GENERATED_END, from);
   if (to === -1) throw new Error(`generated end marker #${occurrence} missing`);
-  return tsSource.slice(from + GENERATED_START.length, to).trim();
+  // Line-ending agnostic: Windows checkouts may carry CRLF, while the
+  // renderer always emits LF. Compare canonical LF on both sides.
+  return tsSource
+    .slice(from + GENERATED_START.length, to)
+    .replaceAll("\r\n", "\n")
+    .trim();
 }
 
 /** Splice fresh content into the generated region at index. */

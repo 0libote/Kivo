@@ -66,19 +66,18 @@ function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): strin
   return match?.[1] ?? null;
 }
 
-/** Per-platform defaults out of `defaultSettings` in src/types.ts. */
-function tsDefault(key: "dictationShortcut" | "writingShortcut"): [macos: string, windows: string, linux: string] | null {
-  const body = typesTs.slice(typesTs.indexOf("function defaultSettings"));
-  const anchor = body.indexOf(key);
+/** Per-platform defaults out of the `*_SHORTCUTS` records in src/types.ts. */
+function tsDefault(key: "DICTATION_SHORTCUTS" | "WRITING_SHORTCUTS"): [macos: string, windows: string, linux: string] | null {
+  const anchor = typesTs.indexOf(`const ${key}`);
   if (anchor === -1) return null;
-  const tail = body.slice(anchor, anchor + 500);
-  const macos = /platform === "macos" \? "([^"]+)"/.exec(tail)?.[1] ?? null;
-  const windows = /platform === "windows" \? "([^"]+)"/.exec(tail)?.[1] ?? null;
-  // Trailing `: "...";` after the last ternary is the shared/Linux fallback:
-  // with a Windows ternary it is the Linux default, otherwise it covers both.
-  const fallback = /: "([^"]+)"\s*;/.exec(tail)?.[1] ?? null;
-  if (!macos || !fallback) return null;
-  return [macos, windows ?? fallback, fallback];
+  const tail = typesTs.slice(anchor, anchor + 400);
+  const value = (platform: "macos" | "windows" | "linux"): string | null =>
+    new RegExp(`${platform}: "([^"]+)"`).exec(tail)?.[1] ?? null;
+  const macos = value("macos");
+  const windows = value("windows");
+  const linux = value("linux");
+  if (!macos || !windows || !linux) return null;
+  return [macos, windows, linux];
 }
 
 // --- 1. Shortcut defaults agree on both sides --------------------------------
@@ -88,13 +87,13 @@ const rustDictationLinux = rustDefault("dictation_default_for", "Linux");
 const rustWritingMacos = rustDefault("writing_tools_default_for", "Macos");
 const rustWritingWindows = rustDefault("writing_tools_default_for", "Windows");
 const rustWritingLinux = rustDefault("writing_tools_default_for", "Linux");
-const tsDictation = tsDefault("dictationShortcut");
-const tsWriting = tsDefault("writingShortcut");
+const tsDictation = tsDefault("DICTATION_SHORTCUTS");
+const tsWriting = tsDefault("WRITING_SHORTCUTS");
 
 check("Rust dictation defaults parse", rustDictationMacos !== null && rustDictationWindows !== null && rustDictationLinux !== null, "dictation_default_for arms not found in config/mod.rs");
 check("Rust writing defaults parse", rustWritingMacos !== null && rustWritingWindows !== null && rustWritingLinux !== null, "writing_tools_default_for arms not found in config/mod.rs");
-check("TS dictation default parses", tsDictation !== null, "defaultSettings dictationShortcut not found in src/types.ts");
-check("TS writing default parses", tsWriting !== null, "defaultSettings writingShortcut not found in src/types.ts");
+check("TS dictation default parses", tsDictation !== null, "DICTATION_SHORTCUTS record not found in src/types.ts");
+check("TS writing default parses", tsWriting !== null, "WRITING_SHORTCUTS record not found in src/types.ts");
 
 if (tsDictation) {
   check(

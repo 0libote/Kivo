@@ -18,7 +18,12 @@ const rustPath = join(root, "src-tauri/src/ai/mod.rs");
 const tsPath = join(root, "src/ai/models.ts");
 
 const rustSource = readFileSync(rustPath, "utf8");
-const tsSource = readFileSync(tsPath, "utf8");
+const tsRaw = readFileSync(tsPath, "utf8");
+// Compare canonical LF, but write back in the file's own convention so a
+// CRLF checkout is never rewritten with mixed endings.
+const crlf = tsRaw.includes("\r\n");
+const tsSource = crlf ? tsRaw.replaceAll("\r\n", "\n") : tsRaw;
+const toFile = (text: string): string => (crlf ? text.replaceAll("\n", "\r\n") : text);
 const generated = renderGeneratedAiModels(rustSource);
 
 let updated = tsSource;
@@ -40,7 +45,7 @@ if (currentBlocked !== generated.blockedPatterns) {
 }
 
 if (updated !== tsSource) {
-  writeFileSync(tsPath, updated);
+  writeFileSync(tsPath, toFile(updated));
   console.info("wrote src/ai/models.ts");
 } else {
   console.info("src/ai/models.ts is up to date");

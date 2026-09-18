@@ -28,7 +28,10 @@ const kivoMarked = new Marked({
 kivoMarked.use({
   renderer: {
     heading({ tokens, depth }: Tokens.Heading): string {
-      const tag = depth <= 1 ? "h2" : depth === 2 ? "h3" : "h4";
+      // The result card owns the h1, so body headings start at h2.
+      let tag = "h4";
+      if (depth <= 1) tag = "h2";
+      else if (depth === 2) tag = "h3";
       return `<${tag}>${this.parser.parseInline(tokens)}</${tag}>`;
     },
     link(token: Tokens.Link): string {

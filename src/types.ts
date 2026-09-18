@@ -190,15 +190,30 @@ export const DEFAULT_WRITING_ACTIONS: WritingActionId[] = [
 export const DEFAULT_AI_MODEL = "gemini-3.8-flash";
 export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 
+/**
+ * Per-platform defaults. Mirrors `dictation_default_for` /
+ * `writing_tools_default_for` in `src-tauri/src/config/mod.rs` (checked by
+ * `scripts/check-platform-parity.ts`). Linux uses the portable
+ * Control+Alt+Space dictation hold (no native Fn / Ctrl+Win monitor there)
+ * and shares the Windows writing shortcut so writing behavior matches the
+ * bench. Kept as data, not branches, so adding a platform is a compiler
+ * error until its defaults are chosen.
+ */
+const DICTATION_SHORTCUTS: Record<Platform, string> = {
+  macos: "Fn",
+  windows: "Ctrl+Meta",
+  linux: "Control+Alt+Space",
+};
+
+const WRITING_SHORTCUTS: Record<Platform, string> = {
+  macos: "Ctrl+Shift+Space",
+  windows: "Ctrl+Space",
+  linux: "Ctrl+Space",
+};
+
 export function defaultSettings(platform: Platform): AppSettings {
-  // Mirrors ShortcutBinding::dictation_default / writing_tools_default in
-  // src-tauri/src/config/mod.rs. Linux uses the portable Control+Alt+Space
-  // dictation hold (no native Fn / Ctrl+Win monitor there) and shares the
-  // Windows writing shortcut so writing behavior matches the bench.
-  const dictationShortcut =
-    platform === "macos" ? "Fn" : platform === "windows" ? "Ctrl+Meta" : "Control+Alt+Space";
-  const writingShortcut =
-    platform === "macos" ? "Ctrl+Shift+Space" : "Ctrl+Space";
+  const dictationShortcut = DICTATION_SHORTCUTS[platform];
+  const writingShortcut = WRITING_SHORTCUTS[platform];
   return {
     launchAtLogin: false,
     theme: "system",
