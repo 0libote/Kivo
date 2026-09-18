@@ -2,8 +2,9 @@ import type { AiModelInfo, AiProviderId } from "../types";
 import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER } from "../types";
 
 /**
- * Curated suggestions mirroring `SUPPORTED_GEMINI_MODELS` in
- * `src-tauri/src/ai/mod.rs`. The native `list_ai_models` command is the
+ * Curated suggestions GENERATED from `SUPPORTED_GEMINI_MODELS` in
+ * `src-tauri/src/ai/mod.rs` — do not edit by hand, run
+ * `bun run generate:models`. The native `list_ai_models` command is the
  * source of truth (dynamic ListModels filtered by the blocklist only); this
  * list is only used in the browser harness and while the native list is
  * loading, so the selector never appears empty.
@@ -17,8 +18,9 @@ import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER } from "../types";
  *
  * Stored as compact rows (one model per line) rather than repeated object
  * literals so the intentional mirror doesn't trip duplication gates; the
- * parity script compares the id column against the Rust table.
+ * parity script verifies this section is freshly generated.
  */
+// @generated ai-models start
 const FALLBACK_ROWS: Array<[id: string, label: string, description: string]> = [
   ["gemini-3.8-flash", "Gemini 3.8 Flash", "Default. Fastest frontier text model, tuned for low-latency edits."],
   ["gemini-3.6-flash", "Gemini 3.6 Flash", "Previous-generation Flash balancing speed and multimodal ability."],
@@ -28,12 +30,14 @@ const FALLBACK_ROWS: Array<[id: string, label: string, description: string]> = [
   ["gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "Strongest reasoning in the list. Slower, best for hard rewrites."],
   ["gemini-3.1-flash-lite", "Gemini 3.1 Flash-Lite", "Cost-efficient text model for high-volume simple tasks."],
 ];
+// @generated ai-models end
 
 export const FALLBACK_AI_MODELS: AiModelInfo[] = FALLBACK_ROWS.map(
   ([id, label, description]) => ({ id, label, description }),
 );
 
-/** Mirrors `BLOCKED_MODEL_SUBSTRINGS` in `src-tauri/src/ai/mod.rs`. */
+/** GENERATED from `BLOCKED_MODEL_SUBSTRINGS` in `src-tauri/src/ai/mod.rs` — do not edit by hand. */
+// @generated ai-models start
 export const BLOCKED_AI_MODEL_PATTERNS = [
   "tts",
   "-live",
@@ -49,6 +53,7 @@ export const BLOCKED_AI_MODEL_PATTERNS = [
   "robotics",
   "deep-research",
 ] as const;
+// @generated ai-models end
 
 export function canonicalAiModelId(id: string): string {
   const trimmed = id.trim();

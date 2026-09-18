@@ -1,5 +1,17 @@
-export type Platform = "macos" | "windows";
-export type Surface = "flow-bar" | "writing-tools" | "settings" | "onboarding";
+/**
+ * Every OS runs one shared AppCore; only a thin adapter differs per host.
+ * `linux` is the dev/test bench (simulated speech + file vault) so the full
+ * app is exercisable on Linux even though only macOS/Windows ship. If a flow
+ * works on one platform it works on all three unless the adapter says
+ * otherwise — and the adapter surface is ~6 methods, all unit-tested.
+ */
+export type Platform = "macos" | "windows" | "linux";
+/**
+ * Native windows plus `gallery`: a frontend-only dev bench (never a Tauri
+ * window, never an IPC surface) that renders every bit inline for Linux
+ * verification and screenshots.
+ */
+export type Surface = "flow-bar" | "writing-tools" | "settings" | "onboarding" | "gallery";
 export type ThemePreference = "system" | "light" | "dark";
 export type PermissionKind =
   | "accessibility"
@@ -179,12 +191,20 @@ export const DEFAULT_AI_MODEL = "gemini-3.8-flash";
 export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 
 export function defaultSettings(platform: Platform): AppSettings {
+  // Mirrors ShortcutBinding::dictation_default / writing_tools_default in
+  // src-tauri/src/config/mod.rs. Linux uses the portable Control+Alt+Space
+  // dictation hold (no native Fn / Ctrl+Win monitor there) and shares the
+  // Windows writing shortcut so writing behavior matches the bench.
+  const dictationShortcut =
+    platform === "macos" ? "Fn" : platform === "windows" ? "Ctrl+Meta" : "Control+Alt+Space";
+  const writingShortcut =
+    platform === "macos" ? "Ctrl+Shift+Space" : "Ctrl+Space";
   return {
     launchAtLogin: false,
     theme: "system",
     showIdleFlowBar: false,
     startInBackground: true,
-    dictationShortcut: platform === "macos" ? "Fn" : "Ctrl+Meta",
+    dictationShortcut,
     microphoneId: null,
     improveDictationWithAi: true,
     dictationLanguage: "auto",
@@ -192,7 +212,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationTapEnabled: true,
     dictationHoldEnabled: true,
     dictationHoldThresholdMs: 350,
-    writingShortcut: platform === "macos" ? "Ctrl+Shift+Space" : "Ctrl+Space",
+    writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
     writingPopupAnchor: "cursor",
     writingPopupX: 480,

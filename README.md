@@ -45,6 +45,20 @@ The Vite-only preview includes a safe local harness for inspecting all four surf
 bun dev
 ```
 
+Open `http://127.0.0.1:1420/?surface=gallery&harness=1` for the test bench: one screen that probes permissions, microphones, languages, models, key status, dictation start/stop/cancel, a writing smoke test, and a settings write/restore round trip over the active bridge.
+
+### Linux test bench
+
+Linux runs the full app against a simulated adapter, so the shared core (state machines, IPC, settings, AI failover) is exercised exactly as on macOS and Windows. Only macOS and Windows ship; Linux exists so every flow is verifiable without those machines.
+
+```sh
+# Tauri system prerequisites for your distro, then:
+bun install
+bun tauri dev
+```
+
+Linux behavior: dictation uses a simulated engine (override the transcript with `KIVO_LINUX_DICTATION_TEXT`, the captured text with `KIVO_LINUX_TEST_TEXT`), API keys persist to a dev-only file vault (`~/.config/kivo/linux-credentials.json`, override with `KIVO_LINUX_CREDENTIAL_FILE` in tests — never a shipping credential store), and Copy uses `wl-copy`/`xclip` when present. Dictation holds `Control+Alt+Space`; Writing Tools uses `Ctrl+Space`.
+
 Useful checks:
 
 ```sh
@@ -69,7 +83,7 @@ Pick a provider under Settings → AI (or during onboarding), save its key, then
 
 Go requests use each model's supported API: Chat Completions for Kimi, Messages for MiniMax/Qwen/Union, and Responses for GPT/Grok/Muse. Kivo identifies itself with its app version and sends a separate OpenCode session header for each stateless request. Sampling parameters use the model defaults so models that reject custom temperature values can work.
 
-The native client defaults to `gemini-3.8-flash` with low thinking for latency-sensitive edits. Requests explicitly set `store: false`. Any well-formed text model id works, so newest models keep working without a Kivo update — only speech/audio, image, video, music, computer-use, and agent families are blocked. Settings files from before the queue store a single `model` plus an optional `backupModel`; they migrate into the queue automatically on first load. Update the curated fallback, blocklist, pricing, or endpoint in `src-tauri/src/ai/mod.rs` and `src-tauri/src/ai/providers.rs` (mirrored in `src/ai/models.ts`) and update fixtures at the same time.
+The native client defaults to `gemini-3.8-flash` with low thinking for latency-sensitive edits. Requests explicitly set `store: false`. Any well-formed text model id works, so newest models keep working without a Kivo update — only speech/audio, image, video, music, computer-use, and agent families are blocked. Settings files from before the queue store a single `model` plus an optional `backupModel`; they migrate into the queue automatically on first load. To change the Gemini suggestions or blocklist, edit `src-tauri/src/ai/mod.rs` then run `bun run generate:models` (CI fails otherwise); pricing lives in `src-tauri/src/ai/providers.rs` with its offline fallback rows in `src/ai/models.ts`.
 
 Link summaries (webpages via URL context, YouTube via video input) need the Gemini provider. With Zen, Go, or Custom, summarize pasted text instead — the app says so when a link is used there.
 
@@ -179,7 +193,7 @@ bun run tauri build --bundles nsis
 
 The installer is written to `src-tauri/target/release/bundle/nsis/Kivo_<version>_x64-setup.exe`. It installs for the current user, appears in Start and Installed apps, and enforces Windows 11 24H2 or later. WebView2 is bootstrapped if missing. Host the installer as a public GitHub Release asset: downloading needs no account or payment.
 
-Unsigned builds work but may receive SmartScreen warnings; free hosting does not provide trusted publisher signing. The stable workflow signs the installer when an Authenticode certificate is configured. The older MSIX script remains an optional packaging route and is not used by beta or stable release jobs.
+Unsigned builds work but may receive SmartScreen warnings; free hosting does not provide trusted publisher signing. The stable workflow signs the installer when an Authenticode certificate is configured. NSIS is the only Windows packaging route.
 
 ### GitHub Releases and updates
 

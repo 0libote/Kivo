@@ -33,11 +33,15 @@ describe("detectedPlatform", () => {
     expect(detectedPlatform()).toBe("windows");
   });
 
-  it("defaults to macOS for macOS and Linux agents", () => {
-    setUserAgent(MACOS_UA);
-    expect(detectedPlatform()).toBe("macos");
-    // Linux WebViews do not exist; the dev-server fallback is the macOS UI.
+  it("detects Linux from the user agent", () => {
+    // Linux is the dev/test bench: the full app runs under Tauri there, so
+    // the harness must take the Linux branches, not the macOS fallback.
     setUserAgent(LINUX_UA);
+    expect(detectedPlatform()).toBe("linux");
+  });
+
+  it("defaults to macOS for macOS agents", () => {
+    setUserAgent(MACOS_UA);
     expect(detectedPlatform()).toBe("macos");
   });
 });
@@ -53,6 +57,11 @@ describe("surfaceFromLabel", () => {
       window.history.replaceState({}, "", "/");
       expect(surfaceFromLabel(surface)).toBe(surface);
     }
+  });
+
+  it("maps the frontend-only bench surface from the query string", () => {
+    window.history.replaceState({}, "", "/?surface=gallery");
+    expect(surfaceFromLabel(undefined)).toBe("gallery");
   });
 
   it("prefers the query surface and falls back to settings", () => {
@@ -88,6 +97,17 @@ describe("shortcut labels cover both platforms", () => {
     );
     expect(defaultSettings("macos").writingShortcut).not.toBe(
       defaultSettings("windows").writingShortcut,
+    );
+  });
+
+  it("gives Linux a portable dictation hold distinct from its writing shortcut", () => {
+    // Linux has no native hold monitor: dictation goes through the portable
+    // global-shortcut plugin, and sharing one accelerator twice would
+    // register the same shortcut for two actions.
+    expect(defaultSettings("linux").dictationShortcut).toBe("Control+Alt+Space");
+    expect(defaultSettings("linux").writingShortcut).toBe("Ctrl+Space");
+    expect(defaultSettings("linux").dictationShortcut).not.toBe(
+      defaultSettings("linux").writingShortcut,
     );
   });
 });

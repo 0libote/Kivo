@@ -420,6 +420,10 @@ fn is_native_dictation_shortcut(shortcut: &str) -> bool {
 /// Host-parameterized native-shortcut check so one test run covers both
 /// platforms. The stored default is "Ctrl+Meta" but shell.rs normalizes
 /// Ctrl→Control / Meta→Super before this check, hence "Control+Super".
+/// Linux never uses the native monitor: every accelerator (including the
+/// macOS/Windows native spellings) goes through the portable global-shortcut
+/// plugin, so the Linux test bench exercises the same registration path as
+/// a custom shortcut on the shipping targets.
 fn is_native_dictation_shortcut_for(shortcut: &str, host: HostPlatform) -> bool {
     matches!(
         (host, shortcut),
@@ -1451,9 +1455,41 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
-        let _ = (app, text);
+        let _ = app;
+        // Linux test bench: prefer Wayland then X11 clipboard tools. Only an
+        // explicit Copy action reaches here (never a background fallback), so
+        // a missing tool is an actionable error, not silent data loss.
+        for (program, args) in [
+            ("wl-copy", Vec::new()),
+            ("xclip", vec!["-selection", "clipboard"]),
+        ] {
+            if try_linux_copy(program, &args, text) {
+                return Ok(());
+            }
+        }
         Err(clipboard_error())
     }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn try_linux_copy(program: &str, args: &[&str], text: &str) -> bool {
+    use std::{io::Write, process::Stdio};
+    let mut child = match Command::new(program)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    let wrote = child
+        .stdin
+        .take()
+        .map(|mut stdin| stdin.write_all(text.as_bytes()).is_ok())
+        .unwrap_or(false);
+    child.wait().map(|status| status.success()).unwrap_or(false) && wrote
 }
 
 fn clipboard_error() -> PlatformError {
@@ -1765,11 +1801,19 @@ mod tests {
         for host in [
             HostPlatform::Macos,
             HostPlatform::Windows,
+            HostPlatform::Linux,
             HostPlatform::Other,
         ] {
             assert!(!is_native_dictation_shortcut_for("Ctrl+Alt+D", host));
             assert!(!is_native_dictation_shortcut_for("Control+Space", host));
         }
+        // Linux never selects the native monitor, even for the macOS/Windows
+        // native spellings: the bench always uses the portable path.
+        assert!(!is_native_dictation_shortcut_for("Fn", HostPlatform::Linux));
+        assert!(!is_native_dictation_shortcut_for(
+            "Control+Super",
+            HostPlatform::Linux
+        ));
     }
 
     #[test]

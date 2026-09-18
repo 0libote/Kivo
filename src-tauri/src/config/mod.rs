@@ -95,6 +95,7 @@ pub enum ThemePreference {
 pub(crate) enum HostPlatform {
     Macos,
     Windows,
+    Linux,
     Other,
 }
 
@@ -104,7 +105,9 @@ impl HostPlatform {
         return Self::Macos;
         #[cfg(target_os = "windows")]
         return Self::Windows;
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        return Self::Linux;
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         return Self::Other;
     }
 }
@@ -112,21 +115,29 @@ impl HostPlatform {
 /// Native hold shortcut per host, parameterized so every CI platform can
 /// assert every other platform's default (a `#[cfg]`-gated test only ever
 /// exercises its own host and lets the other default drift silently).
+///
+/// Linux is the dev/test bench: it uses a portable global-shortcut
+/// accelerator (`Control+Alt+Space`) that never collides with the macOS Fn
+/// hold or the Windows Ctrl+Win hold, so the same AppCore path is exercised
+/// on all three hosts.
 pub(crate) fn dictation_default_for(host: HostPlatform) -> ShortcutBinding {
     match host {
         HostPlatform::Macos => ShortcutBinding::new("Fn"),
         HostPlatform::Windows => ShortcutBinding::new("Ctrl+Meta"),
-        HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
+        HostPlatform::Linux | HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
     }
 }
 
 /// Portable Writing Tools shortcut per host. Same cross-host testability
-/// rationale as [`dictation_default_for`].
+/// rationale as [`dictation_default_for`]. Linux reuses the Windows
+/// accelerator so writing-tools behavior matches between the test bench and
+/// the Windows target.
 pub(crate) fn writing_tools_default_for(host: HostPlatform) -> ShortcutBinding {
     match host {
         HostPlatform::Macos => ShortcutBinding::new("Ctrl+Shift+Space"),
-        HostPlatform::Windows => ShortcutBinding::new("Ctrl+Space"),
-        HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
+        HostPlatform::Windows | HostPlatform::Linux | HostPlatform::Other => {
+            ShortcutBinding::new("Ctrl+Space")
+        }
     }
 }
 
@@ -137,6 +148,17 @@ fn foreign_default_replacement(accelerator: &str, host: HostPlatform) -> Option<
     match host {
         HostPlatform::Windows if accelerator == "Fn" => Some(dictation_default_for(host)),
         HostPlatform::Macos if accelerator == "Ctrl+Meta" || accelerator == "Control+Super" => {
+            Some(dictation_default_for(host))
+        }
+        // The Linux test bench has no native hold monitor: a carried-over
+        // Fn / Ctrl+Win default would fail global-shortcut registration, so
+        // migrate it to the portable Linux default instead of leaving
+        // dictation silently dead.
+        HostPlatform::Linux | HostPlatform::Other
+            if accelerator == "Fn"
+                || accelerator == "Ctrl+Meta"
+                || accelerator == "Control+Super" =>
+        {
             Some(dictation_default_for(host))
         }
         _ => None,
@@ -592,6 +614,24 @@ mod tests {
         );
         assert_eq!(foreign_default_replacement("Fn", HostPlatform::Macos), None);
 
+        // Linux host: both native defaults migrate to the portable default.
+        assert_eq!(
+            foreign_default_replacement("Fn", HostPlatform::Linux),
+            Some(ShortcutBinding::new("Control+Alt+Space"))
+        );
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Meta", HostPlatform::Linux),
+            Some(ShortcutBinding::new("Control+Alt+Space"))
+        );
+        assert_eq!(
+            foreign_default_replacement("Control+Super", HostPlatform::Linux),
+            Some(ShortcutBinding::new("Control+Alt+Space"))
+        );
+        assert_eq!(
+            foreign_default_replacement("Ctrl+Alt+D", HostPlatform::Linux),
+            None
+        );
+
         // End-to-end through normalization on the current host: the host's
         // own default survives while custom shortcuts pass through untouched.
         let mut settings = AppSettings::default();
@@ -618,12 +658,26 @@ mod tests {
             ShortcutBinding::new("Ctrl+Meta")
         );
         assert_eq!(
+            dictation_default_for(HostPlatform::Linux),
+            ShortcutBinding::new("Control+Alt+Space")
+        );
+        assert_eq!(
             writing_tools_default_for(HostPlatform::Macos),
             ShortcutBinding::new("Ctrl+Shift+Space")
         );
         assert_eq!(
             writing_tools_default_for(HostPlatform::Windows),
             ShortcutBinding::new("Ctrl+Space")
+        );
+        assert_eq!(
+            writing_tools_default_for(HostPlatform::Linux),
+            ShortcutBinding::new("Ctrl+Space")
+        );
+        // Linux dictation and writing defaults must differ: sharing one
+        // accelerator would register the same global shortcut twice.
+        assert_ne!(
+            dictation_default_for(HostPlatform::Linux),
+            writing_tools_default_for(HostPlatform::Linux)
         );
     }
 

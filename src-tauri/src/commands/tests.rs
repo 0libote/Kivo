@@ -827,6 +827,25 @@ fn permission_requirements_match_each_desktop() {
         PermissionKind::SpeechRecognition,
         HostPlatform::Windows
     ));
+    // Linux test bench: same matrix as Windows. The simulated speech engine
+    // needs no consent prompt and input monitoring does not exist, so only
+    // accessibility and microphone gate the shared AppCore paths.
+    assert!(permission_required_for(
+        PermissionKind::Accessibility,
+        HostPlatform::Linux
+    ));
+    assert!(!permission_required_for(
+        PermissionKind::InputMonitoring,
+        HostPlatform::Linux
+    ));
+    assert!(permission_required_for(
+        PermissionKind::Microphone,
+        HostPlatform::Linux
+    ));
+    assert!(!permission_required_for(
+        PermissionKind::SpeechRecognition,
+        HostPlatform::Linux
+    ));
 }
 
 #[cfg(target_os = "windows")]

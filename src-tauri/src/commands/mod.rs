@@ -1387,6 +1387,8 @@ pub fn get_app_context(app: AppHandle, shell: State<'_, crate::shell::ShellState
     AppContext {
         platform: if cfg!(target_os = "windows") {
             "windows"
+        } else if cfg!(target_os = "linux") {
+            "linux"
         } else {
             "macos"
         },
@@ -1530,6 +1532,9 @@ pub fn list_speech_languages() -> Vec<SpeechLanguage> {
     if let Some(languages) = windows_speech_languages() {
         return languages;
     }
+    // macOS enumerates the OS voices elsewhere; Linux uses the simulated
+    // test-bench engine. Same shape on every host so the picker never
+    // appears empty and selection code paths stay identical.
     vec![
         SpeechLanguage {
             code: "auto".into(),
@@ -1861,7 +1866,9 @@ fn selection_context(context: WritingPopupContext) -> SelectionContext {
 /// Whether a permission gates core functionality on `host`. Pure over the
 /// host so every CI platform tests both requirement matrices: input
 /// monitoring (Fn-hold detection) and OS speech recognition only exist on
-/// macOS, while accessibility and microphone gate both desktops.
+/// macOS, while accessibility and microphone gate every desktop. Linux is
+/// the dev/test bench: its fake speech engine needs no consent prompt, so
+/// speech recognition is not required there (like Windows SAPI).
 pub(crate) fn permission_required_for(
     permission: crate::platform::PermissionKind,
     host: crate::config::HostPlatform,
@@ -1882,8 +1889,14 @@ fn permission_statuses(
     let host = crate::config::HostPlatform::current();
     // Windows has no OS consent prompt for SAPI: the row reflects installed
     // engines instead, so the explanation points at the language packs.
+    // Linux runs the simulated test-bench engine: always present, no prompt.
     let speech_explanation = if matches!(host, crate::config::HostPlatform::Windows) {
         "Needs an installed Windows desktop speech language."
+    } else if matches!(
+        host,
+        crate::config::HostPlatform::Linux | crate::config::HostPlatform::Other
+    ) {
+        "Simulated speech engine for development and testing."
     } else {
         "Transcribe speech using the operating system."
     };

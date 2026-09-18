@@ -92,6 +92,7 @@ export interface NativeBridge {
 
 export function detectedPlatform(): Platform {
   if (/Windows/i.test(navigator.userAgent)) return "windows";
+  if (/Linux|X11/i.test(navigator.userAgent)) return "linux";
   return "macos";
 }
 
@@ -103,6 +104,7 @@ function surfaceFromLabel(label: string | undefined): Surface {
     case "writing-tools":
     case "settings":
     case "onboarding":
+    case "gallery":
       return candidate;
     default:
       return "settings";
@@ -214,15 +216,17 @@ class MockBridge implements NativeBridge {
       this.settings.aiProvider,
       migrateAiModels(parsed),
     );
-    // Mirror the native side: Windows has no in-app consent prompt, so the
-    // microphone reads granted and speech recognition reads granted (engines
-    // assumed present) instead of looping on an ungrantable Allow button.
-    const windows = this.platform === "windows";
+    // Mirror the native side: only macOS has an in-app consent prompt, so
+    // everywhere else the microphone/speech rows read granted (engines
+    // assumed present) and input monitoring reads unavailable instead of
+    // looping on an ungrantable Allow button. Linux uses the simulated
+    // speech engine, which is always present.
+    const portable = this.platform !== "macos";
     this.permissions = [
       { kind: "accessibility", state: "not-determined", required: true },
       { kind: "input-monitoring", state: this.platform === "macos" ? "not-determined" : "unavailable", required: false },
-      { kind: "microphone", state: windows ? "granted" : "not-determined", required: true },
-      { kind: "speech-recognition", state: windows ? "granted" : "not-determined", required: this.platform === "macos" },
+      { kind: "microphone", state: portable ? "granted" : "not-determined", required: true },
+      { kind: "speech-recognition", state: portable ? "granted" : "not-determined", required: this.platform === "macos" },
     ];
   }
 
@@ -376,9 +380,15 @@ class MockBridge implements NativeBridge {
   }
 
   async getWritingContext() {
+    const applicationName =
+      this.platform === "macos"
+        ? "TextEdit"
+        : this.platform === "windows"
+          ? "Notepad"
+          : "Text Editor";
     return {
       hasSelection: true,
-      applicationName: this.platform === "macos" ? "TextEdit" : "Notepad",
+      applicationName,
       canReplace: true,
       bounds: { x: 480, y: 320, width: 164, height: 22 },
       initialText: "Hello, how are you?",
