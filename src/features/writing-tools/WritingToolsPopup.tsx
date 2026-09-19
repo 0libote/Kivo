@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type Dispatch } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
 import { Spinner } from "../../components/Spinner";
@@ -227,7 +227,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   });
 
   return (
-    <main className="writing-stage" data-platform={platform} style={{ "--writing-max-height": `${Math.min(settings.writingPopupHeight, window.screen.availHeight - 32)}px` } as CSSProperties}>
+    <main className="writing-stage" data-platform={platform}>
       <dialog
         aria-label="Writing Tools"
         className="writing-popup"
@@ -236,7 +236,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         open
         ref={popup}
       >
-        <PopupContent state={state} actions={actions} settings={settings} close={close} dispatch={dispatch} runAction={runAction} summarizeEnabled={summarizeEnabled} />
+        <PopupContent state={state} actions={actions} close={close} dispatch={dispatch} runAction={runAction} />
       </dialog>
     </main>
   );
@@ -245,14 +245,12 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 interface PopupContentProps {
   readonly state: WritingToolsState;
   readonly actions: typeof WRITING_ACTIONS;
-  readonly settings: AppSettings;
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
-  readonly summarizeEnabled: boolean;
 }
 
-function PopupContent({ state, actions, settings, close, dispatch, runAction, summarizeEnabled }: PopupContentProps) {
+function PopupContent({ state, actions, close, dispatch, runAction }: PopupContentProps) {
   const activeDefinition = getActiveDefinition(state.activeAction);
   switch (state.mode) {
     case "closed":
@@ -261,22 +259,19 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
       return (
         <MenuView
           actions={actions}
-          allowManualText={settings.writingAllowManualText}
           applicationName={state.context?.applicationName}
           close={close}
           dispatch={dispatch}
           runAction={runAction}
           selectedIndex={state.selectedIndex}
-          sourceText={state.sourceText}
-          summarizeEnabled={summarizeEnabled}
         />
       );
     case "summary":
-      return <SummaryView close={close} dispatch={dispatch} runAction={runAction} kind={state.summaryKind} input={state.summaryInput} enabled={summarizeEnabled} hasSelection={state.context?.hasSelection ?? false} />;
+      return <LinkSummaryView close={close} dispatch={dispatch} runAction={runAction} url={state.sourceText.trim()} />;
     case "custom":
       return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
     case "processing":
-      return <ProcessingView close={close} label={state.usesSummaryInput && state.summaryKind === "link" ? "Retrieving and summarizing…" : activeDefinition?.label} hint={state.usesSummaryInput && state.summaryKind === "link" ? "Links can take up to a minute. Closing cancels the request." : undefined} />;
+      return <ProcessingView close={close} label={state.isLinkSummary ? "Summarizing link" : activeDefinition?.label} hint={state.isLinkSummary ? "Retrieving the page content…" : undefined} />;
     case "result":
       return (
         <ResultView
@@ -295,10 +290,7 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
           canRetry={state.canRetry}
           close={close}
           dispatch={dispatch}
-          // Back only leads somewhere when a selection exists (menu) or the
-          // summarize entry is available; otherwise offer Close.
-          hasContext={state.context !== null && (state.context.hasSelection || summarizeEnabled)}
-          showTextFallback={state.usesSummaryInput && state.summaryKind === "link"}
+          hasContext={state.context?.hasSelection ?? false}
           message={state.error ?? ""}
           runAction={runAction}
         />
@@ -310,18 +302,15 @@ function PopupContent({ state, actions, settings, close, dispatch, runAction, su
 
 interface MenuViewProps {
   readonly actions: typeof WRITING_ACTIONS;
-  readonly allowManualText: boolean;
   readonly applicationName: string | undefined;
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
   readonly selectedIndex: number;
-  readonly sourceText: string;
-  readonly summarizeEnabled: boolean;
 }
 
 function MenuView(props: MenuViewProps) {
-  const { actions, allowManualText, applicationName, close, dispatch, runAction, selectedIndex, sourceText, summarizeEnabled } = props;
+  const { actions, applicationName, close, dispatch, runAction, selectedIndex } = props;
   const more = useRef<HTMLDetailsElement>(null);
   useEffect(() => { if (selectedIndex >= 3 && more.current) more.current.open = true; }, [selectedIndex]);
   const renderAction = (action: typeof actions[number], index: number) => <button
@@ -348,21 +337,6 @@ function MenuView(props: MenuViewProps) {
         {actions.slice(0, 3).map((action, index) => renderAction(action, index))}
         {actions.length > 3 ? <details className="writing-more" ref={more}><summary>More actions</summary><div role="group" aria-label="More writing actions">{actions.slice(3).map((action, index) => renderAction(action, index + 3))}</div></details> : null}
       </div>
-      {summarizeEnabled ? <SummaryActions dispatch={dispatch} includeText={false} /> : null}
-      {allowManualText ? (
-        <div className="writing-source">
-          <label htmlFor="writing-source-text">
-            Text to improve
-          </label>
-          <textarea
-            id="writing-source-text"
-            onChange={(event) => dispatch({ type: "SET_SOURCE", value: event.target.value })}
-            rows={3}
-            spellCheck
-            value={sourceText}
-          />
-        </div>
-      ) : null}
       <p className="writing-hint">↑↓ to choose · ↵ to run · Esc to close</p>
     </div>
   );
@@ -514,12 +488,11 @@ interface ErrorViewProps {
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly hasContext: boolean;
-  readonly showTextFallback: boolean;
   readonly message: string;
   readonly runAction: RunAction;
 }
 
-function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, showTextFallback, message, runAction }: ErrorViewProps) {
+function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, message, runAction }: ErrorViewProps) {
   const canShowRetry = canRetry && activeAction !== null;
   return (
     <div aria-live="assertive" className="writing-error">
@@ -534,7 +507,6 @@ function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, showTe
             Retry
           </Button>
         ) : null}
-        {showTextFallback ? <Button compact onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })}>Paste text instead</Button> : null}
         <Button compact onClick={hasContext ? () => dispatch({ type: "BACK" }) : close}>
           {hasContext ? "Back" : "Close"}
         </Button>
@@ -556,58 +528,28 @@ function failureForError(error: unknown): WritingToolsEvent {
   };
 }
 
-function SummaryActions({ dispatch, includeText }: { readonly dispatch: PopupDispatch; readonly includeText: boolean }) {
-  return (
-    <div className="writing-summary-actions">
-      {includeText ? <button className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })} type="button">Summarize text…</button> : null}
-      <button className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "link" })} type="button">Summarize link…</button>
-    </div>
-  );
-}
-
-interface SummaryViewProps {
+interface LinkSummaryViewProps {
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
-  readonly kind: "text" | "link";
-  readonly input: string;
-  readonly enabled: boolean;
-  /** False when the popup opened with nothing selected: there is no menu to
-   * go back to, so Back is hidden and a text/link toggle is shown instead. */
-  readonly hasSelection: boolean;
+  readonly url: string;
 }
 
-function SummaryView({ close, dispatch, runAction, kind, input, enabled, hasSelection }: SummaryViewProps) {
-  const summaryInputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
-  useEffect(() => {
-    summaryInputRef.current?.focus();
-  }, []);
+function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewProps) {
+  const hostname = new URL(url).hostname.replace(/^www\./u, "");
   return (
     <form className="writing-summary" onSubmit={(event) => { event.preventDefault(); void runAction("summarize"); }}>
       <header className="writing-popup__header" data-tauri-drag-region>
-        <span>{kind === "link" ? "Summarize link" : "Summarize text"}</span>
+        <span>Summarize link</span>
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
       </header>
-      {!hasSelection ? (
-        <fieldset className="writing-summary__kind">
-          <legend>Source</legend>
-          <button aria-pressed={kind === "text"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "text" })} type="button">Text</button>
-          <button aria-pressed={kind === "link"} className="writing-text-action" onClick={() => dispatch({ type: "OPEN_SUMMARY", kind: "link" })} type="button">Link</button>
-        </fieldset>
-      ) : null}
-      <div className="writing-summary__input">
-        <label htmlFor="summary-input">{kind === "link" ? "Webpage or YouTube URL" : "Webpage text or video transcript"}</label>
-        {kind === "link" ? (
-          <input id="summary-input" type="url" autoComplete="off" spellCheck={false} placeholder="https://…" required ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
-        ) : (
-          <textarea id="summary-input" rows={5} placeholder="Paste text to summarize…" ref={(element) => { summaryInputRef.current = element; }} value={input} onChange={(event) => dispatch({ type: "SET_SUMMARY_INPUT", value: event.target.value })} />
-        )}
-        {kind === "link" ? <p>Public pages and YouTube videos. The link is sent to Gemini to retrieve and summarize its content.</p> : null}
-        {kind === "link" && input.trim() !== "" && !isWebUrl(input.trim()) ? <p className="writing-summary__error" role="alert">Enter a public webpage or YouTube URL starting with http(s)://.</p> : null}
+      <div className="writing-summary__link">
+        <Icon name="connection" size={17} />
+        <span><strong>{hostname}</strong><small title={url}>{url}</small></span>
       </div>
       <footer className="writing-summary__footer">
-        {hasSelection ? <Button compact onClick={() => dispatch({ type: "BACK" })}>Back</Button> : <span />}
-        <Button compact tone="primary" type="submit" disabled={!enabled || !input.trim() || (kind === "link" && !isWebUrl(input.trim()))}>Summarize</Button>
+        <Button compact onClick={() => dispatch({ type: "BACK" })}>Other actions</Button>
+        <Button compact tone="primary" type="submit">Summarize</Button>
       </footer>
     </form>
   );
@@ -615,23 +557,12 @@ function SummaryView({ close, dispatch, runAction, kind, input, enabled, hasSele
 
 function prepareWritingRequest(state: WritingToolsState, action: WritingActionId): WritingRequest | undefined {
   if (action === "custom" && !state.customInstruction.trim()) return undefined;
-  const text = (state.usesSummaryInput ? state.summaryInput : state.sourceText).trim();
-  if (state.usesSummaryInput && !text) return undefined;
-  if (state.usesSummaryInput && state.summaryKind === "link" && !isWebUrl(text)) return undefined;
-  const sourceKind = state.usesSummaryInput ? state.summaryKind : "text";
+  const text = state.sourceText.trim();
+  if (!text) return undefined;
   return {
     action,
     instruction: action === "custom" ? state.customInstruction.trim() : undefined,
     text,
-    sourceKind: action === "summarize" ? sourceKind : undefined,
+    sourceKind: action === "summarize" ? (state.isLinkSummary ? "link" : "text") : undefined,
   };
-}
-
-function isWebUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
-  } catch {
-    return false;
-  }
 }

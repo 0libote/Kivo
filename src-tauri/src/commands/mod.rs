@@ -1100,12 +1100,6 @@ pub struct FrontendSettings {
     pub dictation_hold_threshold_ms: u64,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
-    pub writing_popup_anchor: String,
-    pub writing_popup_x: f64,
-    pub writing_popup_y: f64,
-    pub writing_popup_width: f64,
-    pub writing_popup_height: f64,
-    pub writing_allow_manual_text: bool,
     #[serde(default = "default_ai_provider")]
     pub ai_provider: String,
     #[serde(default = "default_ai_models")]
@@ -1167,17 +1161,6 @@ impl From<AppSettings> for FrontendSettings {
                 .map(action_id)
                 .map(str::to_owned)
                 .collect(),
-            writing_popup_anchor: match settings.writing_tools.popup_anchor {
-                crate::config::PopupAnchor::Cursor => "cursor",
-                crate::config::PopupAnchor::Selection => "selection",
-                crate::config::PopupAnchor::Fixed => "fixed",
-            }
-            .into(),
-            writing_popup_x: settings.writing_tools.popup_fixed_x,
-            writing_popup_y: settings.writing_tools.popup_fixed_y,
-            writing_popup_width: settings.writing_tools.popup_width,
-            writing_popup_height: settings.writing_tools.popup_height,
-            writing_allow_manual_text: settings.writing_tools.allow_manual_text,
             ai_provider: settings.ai.provider.as_str().into(),
             ai_models: settings.ai.models,
             ai_reasoning_mode: settings.ai.reasoning_mode.as_str().into(),
@@ -1204,11 +1187,6 @@ impl TryFrom<FrontendSettings> for AppSettings {
             .iter()
             .map(|action| parse_action(action))
             .collect::<Result<Vec<_>, _>>()?;
-        let popup_anchor = match settings.writing_popup_anchor.as_str() {
-            "selection" => crate::config::PopupAnchor::Selection,
-            "fixed" => crate::config::PopupAnchor::Fixed,
-            _ => crate::config::PopupAnchor::Cursor,
-        };
         // The queue normalizes itself (dedupe, drop unusable, cap, fall
         // back to the provider default) so old settings files and
         // forward-compat payloads never break AI requests. Pre-queue
@@ -1260,12 +1238,6 @@ impl TryFrom<FrontendSettings> for AppSettings {
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
                 enabled_actions,
-                popup_anchor,
-                popup_fixed_x: settings.writing_popup_x,
-                popup_fixed_y: settings.writing_popup_y,
-                popup_width: settings.writing_popup_width,
-                popup_height: settings.writing_popup_height,
-                allow_manual_text: settings.writing_allow_manual_text,
             },
             ai: crate::config::AiSettings::new(
                 ai_provider,
@@ -1294,12 +1266,6 @@ pub struct SettingsPatch {
     dictation_hold_threshold_ms: Option<u64>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
-    writing_popup_anchor: Option<String>,
-    writing_popup_x: Option<f64>,
-    writing_popup_y: Option<f64>,
-    writing_popup_width: Option<f64>,
-    writing_popup_height: Option<f64>,
-    writing_allow_manual_text: Option<bool>,
     ai_provider: Option<String>,
     ai_models: Option<Vec<String>>,
     ai_reasoning_mode: Option<String>,
@@ -1339,12 +1305,6 @@ impl SettingsPatch {
         assign!(dictation_hold_threshold_ms);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
-        assign!(writing_popup_anchor);
-        assign!(writing_popup_x);
-        assign!(writing_popup_y);
-        assign!(writing_popup_width);
-        assign!(writing_popup_height);
-        assign!(writing_allow_manual_text);
         assign!(ai_provider);
         assign!(ai_models);
         assign!(ai_reasoning_mode);
@@ -1818,6 +1778,9 @@ pub fn close_surface(
         let _ = core.dismiss_writing_tools();
     }
     crate::shell::hide_surface(&app, &surface);
+    if surface == "writing-tools" {
+        crate::shell::sync_idle_flow_bar(&app);
+    }
     Ok(())
 }
 

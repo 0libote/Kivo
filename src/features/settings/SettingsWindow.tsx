@@ -536,35 +536,7 @@ function WritingSection({
         <SettingRow label="Shortcut">
           <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
         </SettingRow>
-        <SettingRow label="Open beside" description="Choose where Writing Tools appears.">
-          <SegmentedControl
-            ariaLabel="Popup placement"
-            onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
-            options={[{ label: "Cursor", value: "cursor" }, { label: "Selection", value: "selection" }, { label: "Fixed", value: "fixed" }]}
-            value={settings.writingPopupAnchor}
-          />
-        </SettingRow>
       </SettingsGroup>
-      <details className="settings-advanced"><summary>Popup appearance</summary><SettingsGroup>
-        {settings.writingPopupAnchor === "fixed" ? (
-          <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
-            <div className="popup-geometry">
-              <label>X<NumberPreference label="Fixed popup X" min={0} max={4000} value={settings.writingPopupX} onChange={value => save({ writingPopupX: value })} /></label>
-              <label>Y<NumberPreference label="Fixed popup Y" min={0} max={4000} value={settings.writingPopupY} onChange={value => save({ writingPopupY: value })} /></label>
-            </div>
-          </SettingRow>
-        ) : null}
-        <SettingRow label="Popup size" description="Width and maximum height. The window fits its content.">
-          <div className="popup-geometry">
-            <label>W<NumberPreference label="Popup width" min={280} max={800} value={settings.writingPopupWidth} onChange={value => save({ writingPopupWidth: value })} /></label>
-            <label>H<NumberPreference label="Popup height" min={200} max={800} value={settings.writingPopupHeight} onChange={value => save({ writingPopupHeight: value })} /></label>
-          </div>
-        </SettingRow>
-        <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
-          <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
-        </SettingRow>
-      </SettingsGroup>
-      </details>
       <SettingsGroup header="Actions">
         <div className="writing-preferences-actions">{DEFAULT_WRITING_ACTIONS.map((id) => {
           const action = writingAction(id);

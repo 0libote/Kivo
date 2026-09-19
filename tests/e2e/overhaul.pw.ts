@@ -12,9 +12,8 @@ for (const platform of ["windows", "macos"] as const) {
     await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Change Writing Tools shortcut", exact: true }).click();
-    await expect(page.getByLabel("Popup width")).not.toBeVisible();
-    await page.getByText("Popup appearance", { exact: true }).click();
-    await expect(page.getByLabel("Popup width")).toBeVisible();
+    await expect(page.getByLabel("Popup width")).toHaveCount(0);
+    await expect(page.getByLabel("Editable selected text")).toHaveCount(0);
     await page.getByRole("button", { name: "Home", exact: true }).click();
     await page.getByRole("button", { name: "Try dictation" }).click();
     await expect(page.getByLabel("Dictation practice")).toBeFocused();
@@ -102,28 +101,13 @@ test("Writing Tools requests its content height and can expand after shrinking",
   await expect.poll(async () => Number(await page.locator("html").getAttribute("data-requested-height"))).toBeGreaterThan(compact);
 });
 
-test("popup dimensions commit complete edits and settings navigation resets scroll", async ({ page }, testInfo) => {
+test("writing settings stay focused on actions and navigation resets scroll", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 900, height: 650 });
   await page.goto("/?surface=settings");
   await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reset actions", exact: true })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("writing-settings.png") });
-  await page.getByText("Popup appearance", { exact: true }).click();
-  const width = page.getByLabel("Popup width", { exact: true });
-  await width.fill("");
-  await width.pressSequentially("640", { delay: 60 });
-  await expect(width).toHaveValue("640");
-  await width.press("Enter");
-  await expect(width).toHaveValue("640");
-  await width.fill("500");
-  await width.press("Escape");
-  await expect(width).toHaveValue("640");
-  await width.fill("");
-  await width.press("Tab");
-  await expect(width).toHaveValue("640");
-  await width.fill("900");
-  await width.press("Enter");
-  await expect(width).toHaveValue("800");
+  await expect(page.getByText("Popup appearance", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 620, height: 500 });
   await page.getByRole("button", { name: "Reset actions", exact: true }).scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "AI", exact: true }).click();

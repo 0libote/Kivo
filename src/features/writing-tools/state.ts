@@ -9,11 +9,8 @@ export interface WritingToolsState {
   selectedIndex: number;
   activeAction: WritingActionId | null;
   customInstruction: string;
-  /** Editable text-box content: the captured highlight. */
   sourceText: string;
-  summaryKind: "text" | "link";
-  summaryInput: string;
-  usesSummaryInput: boolean;
+  isLinkSummary: boolean;
   resultSource?: SummarySource;
   resultCanReplace: boolean;
   resultText: string;
@@ -26,10 +23,7 @@ export type WritingToolsEvent =
   | { type: "MOVE"; delta: number }
   | { type: "SELECT"; index: number }
   | { type: "OPEN_CUSTOM"; initialValue?: string }
-  | { type: "OPEN_SUMMARY"; kind: "text" | "link" }
-  | { type: "SET_SUMMARY_INPUT"; value: string }
   | { type: "SET_CUSTOM"; value: string }
-  | { type: "SET_SOURCE"; value: string }
   | { type: "RUN"; action: WritingActionId }
   | { type: "RESULT"; text: string; source?: SummarySource; canReplace?: boolean }
   | { type: "REPLACED" }
@@ -45,136 +39,57 @@ export const initialWritingToolsState: WritingToolsState = {
   activeAction: null,
   customInstruction: "",
   sourceText: "",
-  summaryKind: "text",
-  summaryInput: "",
-  usesSummaryInput: false,
+  isLinkSummary: false,
   resultCanReplace: false,
   resultText: "",
   error: null,
   canRetry: false,
 };
 
+export function isWebUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
+
 function openState(event: Extract<WritingToolsEvent, { type: "OPEN" }>): WritingToolsState {
-  // With nothing selected there is no menu to show: land directly on the
-  // summarize entry (text or link can be pasted) so writing assistance stays
-  // available. General Q&A is intentionally not offered.
-  if (!event.context.hasSelection && !event.enabledActions.includes("summarize")) {
+  const sourceText = event.context.initialText ?? "";
+  if (!event.context.hasSelection || !sourceText.trim()) {
     return {
       ...initialWritingToolsState,
       mode: "error",
       context: event.context,
       enabledActions: event.enabledActions,
-      sourceText: event.context.initialText ?? "",
       error: "Select some text first.",
     };
   }
+  const isLinkSummary = event.enabledActions.includes("summarize") && isWebUrl(sourceText);
   return {
     ...initialWritingToolsState,
-    mode: event.context.hasSelection ? "menu" : "summary",
+    mode: isLinkSummary ? "summary" : "menu",
     context: event.context,
     enabledActions: event.enabledActions,
-    sourceText: event.context.initialText ?? "",
-    activeAction: event.context.hasSelection ? null : "summarize",
-    summaryKind: "text",
-    summaryInput: "",
-    usesSummaryInput: !event.context.hasSelection,
+    sourceText,
+    activeAction: isLinkSummary ? "summarize" : null,
+    isLinkSummary,
   };
 }
 
-function moveState(state: WritingToolsState, delta: number): WritingToolsState {
-  if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
-  const length = state.enabledActions.length;
-  return { ...state, selectedIndex: (state.selectedIndex + delta + length) % length };
-}
-
-function selectState(state: WritingToolsState, index: number): WritingToolsState {
-  if (state.mode !== "menu") return state;
-  const maxIndex = Math.max(0, state.enabledActions.length - 1);
-  return { ...state, selectedIndex: Math.min(Math.max(0, index), maxIndex) };
-}
-
-function runState(state: WritingToolsState, action: WritingActionId): WritingToolsState {
-  if (!["menu", "custom", "summary", "error"].includes(state.mode)) return state;
-  if ((state.mode === "menu" || state.mode === "custom") && !state.context) return state;
-  return { ...state, mode: "processing", activeAction: action, error: null, canRetry: false };
-}
-
 function backState(state: WritingToolsState): WritingToolsState {
-  if (state.mode === "error" && state.usesSummaryInput) {
-    return { ...state, mode: "summary", error: null, canRetry: false };
-  }
-  if (!["custom", "summary", "error", "result"].includes(state.mode)) return state;
-  // With no selection there is no menu to return to: land on the summarize
-  // entry, keeping any typed input so it can be adjusted and retried. When
-  // Summarize itself is disabled there is nowhere to go, so stay put and let
-  // the error view offer Close instead of a dead-end Back.
-  if (!state.context?.hasSelection) {
-    if (!state.enabledActions.includes("summarize")) return state;
-    return {
-      ...state,
-      mode: "summary",
-      activeAction: "summarize",
-      usesSummaryInput: true,
-      resultSource: undefined,
-      resultCanReplace: false,
-      error: null,
-      canRetry: false,
-      resultText: "",
-    };
-  }
+  if (!state.context?.hasSelection) return state;
   return {
     ...state,
     mode: "menu",
     activeAction: null,
-    usesSummaryInput: false,
+    isLinkSummary: false,
     resultSource: undefined,
     resultCanReplace: false,
+    resultText: "",
     error: null,
     canRetry: false,
-    resultText: "",
-  };
-}
-
-function setSourceState(state: WritingToolsState, value: string): WritingToolsState {
-  if (state.mode !== "menu") return state;
-  return { ...state, sourceText: value };
-}
-
-function summaryInputFor(state: WritingToolsState, kind: "text" | "link"): string {
-  if (kind === "text") return state.sourceText;
-  const candidate = state.sourceText.trim();
-  if (/\s/u.test(candidate)) return "";
-  try {
-    const url = new URL(candidate);
-    return url.protocol === "https:" || url.protocol === "http:" ? candidate : "";
-  } catch {
-    return "";
-  }
-}
-
-function openSummaryState(state: WritingToolsState, kind: "text" | "link"): WritingToolsState {
-  if (!state.enabledActions.includes("summarize")) return state;
-  return {
-    ...state,
-    mode: "summary",
-    activeAction: "summarize",
-    summaryKind: kind,
-    summaryInput: summaryInputFor(state, kind),
-    usesSummaryInput: true,
-    error: null,
-  };
-}
-
-function resultState(state: WritingToolsState, event: Extract<WritingToolsEvent, { type: "RESULT" }>): WritingToolsState {
-  if (state.mode !== "processing") return state;
-  const isLink = state.usesSummaryInput && state.summaryKind === "link";
-  return {
-    ...state,
-    mode: "result",
-    resultText: event.text,
-    resultSource: event.source,
-    resultCanReplace: !isLink && (event.canReplace ?? state.context?.canReplace ?? false),
-    error: null,
   };
 }
 
@@ -182,37 +97,42 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
   switch (event.type) {
     case "OPEN":
       return openState(event);
-    case "MOVE":
-      return moveState(state, event.delta);
+    case "MOVE": {
+      if (state.mode !== "menu" || state.enabledActions.length === 0) return state;
+      const length = state.enabledActions.length;
+      return { ...state, selectedIndex: (state.selectedIndex + event.delta + length) % length };
+    }
     case "SELECT":
-      return selectState(state, event.index);
+      return state.mode === "menu"
+        ? { ...state, selectedIndex: Math.min(Math.max(0, event.index), Math.max(0, state.enabledActions.length - 1)) }
+        : state;
     case "OPEN_CUSTOM":
-      return {
-        ...state,
-        mode: "custom",
-        activeAction: "custom",
-        customInstruction: event.initialValue ?? state.customInstruction,
-        error: null,
-      };
-    case "OPEN_SUMMARY":
-      return openSummaryState(state, event.kind);
-    case "SET_SUMMARY_INPUT":
-      return state.mode === "summary" ? { ...state, summaryInput: event.value } : state;
+      return state.context?.hasSelection
+        ? { ...state, mode: "custom", activeAction: "custom", customInstruction: event.initialValue ?? state.customInstruction, error: null }
+        : state;
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
-    case "SET_SOURCE":
-      return setSourceState(state, event.value);
     case "RUN":
-      return runState(state, event.action);
+      return ["menu", "custom", "summary", "error"].includes(state.mode) && state.context?.hasSelection
+        ? { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false }
+        : state;
     case "RESULT":
-      return resultState(state, event);
+      return state.mode === "processing"
+        ? {
+            ...state,
+            mode: "result",
+            resultText: event.text,
+            resultSource: event.source,
+            resultCanReplace: !state.isLinkSummary && (event.canReplace ?? state.context?.canReplace ?? false),
+            error: null,
+          }
+        : state;
     case "REPLACED":
+    case "CLOSE":
       return initialWritingToolsState;
     case "FAIL":
       return { ...state, mode: "error", error: event.message, canRetry: event.canRetry ?? false };
     case "BACK":
       return backState(state);
-    case "CLOSE":
-      return initialWritingToolsState;
   }
 }
