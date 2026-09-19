@@ -267,15 +267,27 @@ pub fn normalize_model_list(provider: AiProvider, ids: &[String]) -> Vec<String>
     providers::normalize_model_list_for(provider, ids)
 }
 
-/// Thinking level for a model: every `gemini-*` text model supports `"low"`,
-/// but other families (e.g. Gemma supports only `minimal`/`high`) reject it
-/// with HTTP 400 `invalid_request`. Omit the field there and take the model
-/// default instead of failing the request.
+/// Thinking level for a model. Keep this allowlist conservative: Google adds
+/// models with different supported levels, so an unknown Gemini id must use
+/// its server default rather than receiving a guessed value and a 400.
 fn thinking_level_for(model: &str, reasoning_mode: AiReasoningMode) -> Option<&'static str> {
-    if canonical_model_id(model).starts_with("gemini-") {
-        Some(reasoning_mode.gemini_level())
-    } else {
-        None
+    let model = canonical_model_id(model).to_ascii_lowercase();
+    match model.as_str() {
+        "gemini-3-pro-preview" => Some(match reasoning_mode {
+            AiReasoningMode::Fast | AiReasoningMode::Balanced => "low",
+            AiReasoningMode::Deep => "high",
+        }),
+        "gemini-3.8-flash"
+        | "gemini-3.7-flash"
+        | "gemini-3.6-flash"
+        | "gemini-3.5-flash-lite"
+        | "gemini-3.1-pro-preview"
+        | "gemini-3-flash-preview"
+        | "gemini-3.5-flash"
+        | "gemini-2.5-pro"
+        | "gemini-2.5-flash"
+        | "gemini-2.5-flash-lite" => Some(reasoning_mode.gemini_level()),
+        _ => None,
     }
 }
 
@@ -1117,9 +1129,10 @@ mod tests {
     }
 
     #[test]
-    fn non_gemini_models_omit_thinking_level() {
+    fn unsupported_or_variant_models_omit_thinking_level() {
         // Gemma rejects thinking_level "low" with HTTP 400 invalid_request,
-        // so it must not be sent where the family doesn't support it.
+        // and future/variant Gemini models may support a different set of
+        // levels, so both must use the provider default.
         assert_eq!(
             thinking_level_for("gemini-3.8-flash", AiReasoningMode::Fast),
             Some("low")
@@ -1131,6 +1144,14 @@ mod tests {
         assert_eq!(
             thinking_level_for("gemini-3.8-flash", AiReasoningMode::Deep),
             Some("high")
+        );
+        assert_eq!(
+            thinking_level_for("gemini-3-pro-preview", AiReasoningMode::Balanced),
+            Some("low")
+        );
+        assert_eq!(
+            thinking_level_for("gemini-4-flash", AiReasoningMode::Fast),
+            None
         );
         assert_eq!(
             thinking_level_for("gemma-4-31b-it", AiReasoningMode::Fast),
