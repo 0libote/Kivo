@@ -302,7 +302,7 @@ function ApiKeyStep(props: ApiKeyStepProps) {
         )}
       </div>
       <div className="onboarding-model">
-        <span className="onboarding-model__label" id="onboarding-ai-models-label">Models in order</span>
+        <span className="onboarding-model__label" id="onboarding-ai-models-label">Main model + fallbacks</span>
         <ModelQueueEditor
           provider={provider}
           onChange={(aiModels) => {
@@ -310,7 +310,7 @@ function ApiKeyStep(props: ApiKeyStepProps) {
           }}
           value={settings.aiModels}
         />
-        <p className="onboarding-copy onboarding-model__note">Tried top to bottom until one succeeds — the first row is your main model{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}.</p>
+        <p className="onboarding-copy onboarding-model__note">The first row handles normal requests; fallbacks are tried only if it fails{provider === "custom" ? " — pull a model first (e.g. `ollama pull " + providerDefaultModel(provider) + "`)" : ""}.</p>
       </div>
       <div className="shortcut-demo">
         <ShortcutSummary label="Dictate" platform={platform} shortcut={settings.dictationShortcut} />

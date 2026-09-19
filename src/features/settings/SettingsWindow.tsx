@@ -675,8 +675,8 @@ function AiSection({
           </SettingRow>
         ) : null}
       </SettingsGroup>
-      <SettingsGroup header="Models in order">
-        <SettingRow label="Models" description="Tried top to bottom until one succeeds — the first row is your main model, the rest are fallbacks. Key or balance problems stop immediately. Pick Custom model ID in a row to type any ID." stacked>
+      <SettingsGroup header="Main model + fallbacks">
+        <SettingRow label="Model priority" description="The first row handles every request. Fallbacks are tried only if the previous model fails; put a fast model first for everyday edits. Pick Custom model ID to type any ID." stacked>
           <ModelQueueEditor
             disabled={busy !== null}
             provider={provider}
@@ -792,7 +792,7 @@ function providerBlurb(info: AiProviderInfo): string {
     case "zen":
       return "Pay-as-you-go credits from OpenCode. Works with any model below; each row shows its price.";
     case "go":
-      return "Included in the $10/month OpenCode Go subscription. Usage counts against your plan allowance.";
+      return "Included in the $10/month OpenCode Go subscription. GLM-5.3 Flash is the recommended fast choice for short writing tasks; coding models can take longer.";
     case "custom":
       return "Any OpenAI-compatible endpoint — Ollama or LM Studio on your machine, or a hosted provider.";
     default:
@@ -803,7 +803,7 @@ function providerBlurb(info: AiProviderInfo): string {
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
   { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
   { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "kimi-k2.7-code", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
+  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
   { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
 ];
 

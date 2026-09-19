@@ -411,11 +411,20 @@ function OpeningView() {
 }
 
 function ProcessingView({ close, label, hint }: { readonly close: () => void; readonly label: string | undefined; readonly hint?: string }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const status = `${label ?? "Working"}${elapsed > 0 ? ` · ${elapsed}s` : ""}`;
   return (
     <div aria-live="polite" className="writing-processing">
       <Spinner label={`Running ${label ?? "writing action"}`} />
-      <span>{label ?? "Working"}</span>
-      {hint ? <span className="writing-processing__hint">{hint}</span> : null}
+      <span>{status}</span>
+      {hint || elapsed >= 4 ? <span className="writing-processing__hint">{hint ?? "Still working. Closing cancels the request."}</span> : null}
       <button aria-label="Cancel" className="icon-button" onClick={close} type="button">
         <Icon name="close" size={14} />
       </button>

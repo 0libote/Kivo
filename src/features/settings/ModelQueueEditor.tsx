@@ -75,7 +75,7 @@ export function ModelQueueEditor({
           const selected: AiModelInfo | null = byId.get(id) ?? null;
           const inList = selected != null;
           const others = new Set(queue.filter((_, other) => other !== index));
-          const priority = index === 0 ? "first choice" : `fallback ${index}`;
+          const priority = index === 0 ? "main model" : `fallback ${index}`;
           return (
             <li className="ai-model-queue__row" key={`${index}:${id}`}>
               <span aria-hidden className="ai-model-queue__position" data-first={index === 0}>{index + 1}</span>

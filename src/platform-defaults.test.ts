@@ -110,7 +110,7 @@ describe("platform defaults parity", () => {
     expect(normalizeAiProvider("unknown")).toBe("gemini");
     expect(providerDefaultModel("gemini")).toBe(DEFAULT_AI_MODEL);
     expect(providerDefaultModel("zen")).toBe(DEFAULT_AI_MODEL);
-    expect(providerDefaultModel("go")).toBe("kimi-k2.7-code");
+    expect(providerDefaultModel("go")).toBe("glm-5.3-flash");
     expect(providerDefaultModel("custom")).toBe("llama3.1");
   });
 
@@ -125,7 +125,7 @@ describe("platform defaults parity", () => {
     expect(isUsableOpenCodeModelId("gpt")).toBe(false);
     expect(isUsableOpenCodeModelId("has spaces!")).toBe(false);
     expect(normalizeAiModelFor("zen", "opencode/gpt-5.5")).toBe("gpt-5.5");
-    expect(normalizeAiModelFor("go", "bogus!!")).toBe("kimi-k2.7-code");
+    expect(normalizeAiModelFor("go", "bogus!!")).toBe("glm-5.3-flash");
   });
 
   it("validates custom ids like local servers do", () => {
@@ -196,6 +196,6 @@ describe("platform defaults parity", () => {
       expect(rows.some(model => model.id === providerDefaultModel(provider))).toBe(true);
     }
     expect(ZEN_FALLBACK_MODELS.find(model => model.id === "glm-5.3-flash")?.cost).toBe("$0.15 in / $0.50 out per 1M");
-    expect(GO_FALLBACK_MODELS.find(model => model.id === "kimi-k2.7-code")?.cost).toBe("$0.95 in / $4.00 out per 1M · $60/mo incl.");
+    expect(GO_FALLBACK_MODELS.find(model => model.id === "glm-5.3-flash")?.cost).toBe("$0.15 in / $0.50 out per 1M · $60/mo incl.");
   });
 });

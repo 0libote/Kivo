@@ -29,6 +29,8 @@ use crate::{
 };
 
 const DICTATION_AI_DEADLINE: Duration = Duration::from_secs(4);
+const WRITING_AI_DEADLINE: Duration = Duration::from_secs(20);
+const LINK_SUMMARY_AI_DEADLINE: Duration = Duration::from_secs(60);
 
 pub struct AppCore {
     settings: RwLock<AppSettings>,
@@ -634,6 +636,11 @@ impl AppCore {
                     .clone(),
             )
         };
+        let ai_deadline = if source_kind == WritingSourceKind::Link {
+            LINK_SUMMARY_AI_DEADLINE
+        } else {
+            WRITING_AI_DEADLINE
+        };
         let generate = async {
             let source_text = source_override
                 .as_deref()
@@ -678,7 +685,10 @@ impl AppCore {
         let generated = tokio::select! {
             biased;
             _ = cancellation.changed() => return Err(AppCoreError::WritingCancelled),
-            result = generate => result,
+            result = tokio::time::timeout(ai_deadline, generate) => match result {
+                Ok(result) => result,
+                Err(_) => Err(AppCoreError::AiTimeout),
+            },
         };
         let (result, source) = {
             let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
@@ -907,6 +917,7 @@ pub enum AppCoreError {
     SelectionExpired,
     NoResult,
     WritingCancelled,
+    AiTimeout,
     Settings(SettingsError),
     SettingsRuntime(SettingsRuntimeError),
     Credential(CredentialError),
@@ -953,6 +964,7 @@ impl AppCoreError {
             Self::SelectionExpired => "selection_expired",
             Self::NoResult => "no_result",
             Self::WritingCancelled => "writing_cancelled",
+            Self::AiTimeout => "ai_timeout",
             Self::Settings(_) => "settings",
             Self::SettingsRuntime(_) => "settings_runtime",
             Self::Credential(_) => "credential",
@@ -983,6 +995,9 @@ impl AppCoreError {
             Self::SelectionExpired => "The original selection is no longer available.".into(),
             Self::NoResult => "There is no result to replace the selection with.".into(),
             Self::WritingCancelled => "The writing request was cancelled.".into(),
+            Self::AiTimeout => {
+                "The AI took too long to respond. Try again or choose a faster model.".into()
+            }
             Self::Gemini(error) => error.user_message(),
             Self::Opencode(error) => error.user_message().into(),
             Self::Settings(error) => error.to_string(),
@@ -1038,6 +1053,7 @@ impl From<AppCoreError> for CommandError {
             | AppCoreError::Speech(SpeechError::NoSpeechDetected)
             | AppCoreError::Speech(SpeechError::RecognitionUnavailable)
             | AppCoreError::Speech(SpeechError::Backend) => true,
+            AppCoreError::AiTimeout => true,
             AppCoreError::Gemini(error) if error.is_rate_limited() => true,
             AppCoreError::Opencode(error) if error.is_rate_limited() => true,
             AppCoreError::Gemini(error) if error.is_server_error() => true,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::WritingAction;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -38,6 +38,10 @@ impl AppSettings {
         if self.schema_version > SETTINGS_SCHEMA_VERSION {
             return Err(SettingsError::UnsupportedVersion(self.schema_version));
         }
+        let old_schema_version = self.schema_version;
+        if old_schema_version < 2 {
+            self.migrate_v2_defaults();
+        }
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self.general.validate()?;
         self.dictation.migrate_foreign_default();
@@ -47,6 +51,18 @@ impl AppSettings {
         self.ai.normalize();
         self.ai.validate()?;
         Ok(self)
+    }
+
+    fn migrate_v2_defaults(&mut self) {
+        // Kivo previously put a coding model first for Go. Move only that
+        // exact old default; an explicit model choice saved under v2 stays
+        // untouched.
+        if self.ai.provider == crate::ai::AiProvider::Go
+            && self.ai.models.len() == 1
+            && self.ai.models[0].trim() == "kimi-k2.7-code"
+        {
+            self.ai.models = vec![self.ai.provider.default_model().to_owned()];
+        }
     }
 }
 
@@ -787,6 +803,28 @@ mod tests {
             settings.ai.models,
             vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
         );
+    }
+
+    #[test]
+    fn go_default_upgrade_prefers_the_fast_model_without_overwriting_new_choices() {
+        let old = AppSettings {
+            schema_version: 1,
+            ai: super::AiSettings {
+                provider: crate::ai::AiProvider::Go,
+                models: vec!["kimi-k2.7-code".into()],
+                ..super::AiSettings::default()
+            },
+            ..AppSettings::default()
+        };
+        let old = old.validate_and_normalize().unwrap();
+        assert_eq!(old.schema_version, super::SETTINGS_SCHEMA_VERSION);
+        assert_eq!(old.ai.models, vec!["glm-5.3-flash"]);
+
+        let mut explicit = AppSettings::default();
+        explicit.ai.provider = crate::ai::AiProvider::Go;
+        explicit.ai.models = vec!["kimi-k2.7-code".into()];
+        let explicit = explicit.validate_and_normalize().unwrap();
+        assert_eq!(explicit.ai.models, vec!["kimi-k2.7-code"]);
     }
 
     #[test]

@@ -109,8 +109,8 @@ impl AiProvider {
     pub const fn default_model(self) -> &'static str {
         match self {
             Self::Gemini | Self::Zen => super::DEFAULT_GEMINI_MODEL,
-            // Good coding quality with the largest Go monthly allowance.
-            Self::Go => "kimi-k2.7-code",
+            // Fast, high-throughput model for short writing requests.
+            Self::Go => "glm-5.3-flash",
             // Ollama's most common default; the user can type any pulled id.
             Self::Custom => "llama3.1",
         }
@@ -672,14 +672,24 @@ const ZEN_CURATED: &[(&str, &str, &str)] = &[
 
 const GO_CURATED: &[(&str, &str, &str)] = &[
     (
-        "kimi-k2.7-code",
-        "Kimi K2.7 Code",
-        "Default. Strong open coding model.",
-    ),
-    (
         "glm-5.3-flash",
         "GLM 5.3 Flash",
-        "Cheapest usage against the allowance.",
+        "Recommended. Fast, high-throughput model for short writing tasks.",
+    ),
+    (
+        "qwen3.8-flash",
+        "Qwen 3.8 Flash",
+        "Fast alternative with a low monthly usage cost.",
+    ),
+    (
+        "deepseek-v4.1-flash",
+        "DeepSeek V4.1 Flash",
+        "Fast budget alternative for everyday edits.",
+    ),
+    (
+        "kimi-k2.7-code",
+        "Kimi K2.7 Code",
+        "Strong coding model; prose edits may take longer.",
     ),
     (
         "deepseek-v4-flash",
@@ -1869,7 +1879,7 @@ mod tests {
         );
         assert_eq!(
             normalize_model_for(AiProvider::Go, "bogus!!"),
-            "kimi-k2.7-code"
+            "glm-5.3-flash"
         );
     }
 
