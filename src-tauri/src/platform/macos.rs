@@ -136,36 +136,37 @@ impl PlatformImpl {
         replacement: &str,
     ) -> PlatformResult<()> {
         ensure_accessibility("replace_selected_text")?;
-        activate_process(snapshot.owner.process_id, "replace_selected_text")?;
         let selection = self
             .selection
             .lock()
             .map_err(|_| os_error("replace_selected_text", "Selection state unavailable."))?;
-        if !selection
+        let target = selection
             .as_ref()
-            .is_some_and(|(token, target)| *token == snapshot.native_token && target.is_current())
-        {
+            .and_then(|(token, target)| (*token == snapshot.native_token).then_some(target))
+            .ok_or_else(|| {
+                PlatformError::new(
+                    PlatformErrorKind::InvalidState,
+                    "replace_selected_text",
+                    "The original text field or selection changed.",
+                )
+            })?;
+        if !target.selection_is_current() {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
                 "replace_selected_text",
                 "The original text field or selection changed.",
             ));
         }
-        let (application, element) = focused_ax_elements("replace_selected_text")?;
-        let pid = ax_process_id(application.as_ptr(), "replace_selected_text")?;
-        if pid != snapshot.owner.process_id {
-            return Err(PlatformError::new(
-                PlatformErrorKind::InvalidState,
-                "replace_selected_text",
-                "The original application is no longer focused.",
-            ));
-        }
-
         let current = if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback {
+            activate_process(snapshot.owner.process_id, "replace_selected_text")?;
             capture_selected_text_fallback()?
         } else {
-            copy_ax_attribute(element.as_ptr(), "AXSelectedText", "replace_selected_text")
-                .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))?
+            copy_ax_attribute(
+                target.element.as_ptr(),
+                "AXSelectedText",
+                "replace_selected_text",
+            )
+            .and_then(|value| cf_string_to_string(value.as_ptr(), "replace_selected_text"))?
         };
         if current != snapshot.text {
             return Err(PlatformError::new(
@@ -175,17 +176,28 @@ impl PlatformImpl {
             ));
         }
 
+        if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback {
+            return paste_text_fallback(replacement, "replace_selected_text");
+        }
+
         match set_ax_string_attribute(
-            element.as_ptr(),
+            target.element.as_ptr(),
             "AXSelectedText",
             replacement,
             "replace_selected_text",
         ) {
             Ok(()) => Ok(()),
-            Err(error) if error.kind == PlatformErrorKind::Unsupported => {
+            // Some editors expose AXSelectedText but reject the write with a
+            // transient AX error rather than AXErrorAttributeUnsupported.
+            // The clipboard transaction is the same fallback used for
+            // editors without a settable accessibility attribute, and is the
+            // reliable path for those applications.
+            Err(_) => {
+                // Only editors without a usable native text setter need the
+                // clipboard path, which necessarily requires foreground focus.
+                activate_process(snapshot.owner.process_id, "replace_selected_text")?;
                 paste_text_fallback(replacement, "replace_selected_text")
             }
-            Err(error) => Err(error),
         }
     }
 
@@ -981,16 +993,10 @@ struct MacTextTarget {
 unsafe impl Send for MacTextTarget {}
 
 impl MacTextTarget {
-    fn is_current(&self) -> bool {
-        let Ok((_, current)) = focused_ax_elements("validate_text_target") else {
-            return false;
-        };
-        if unsafe { !CFEqual(current.as_ptr(), self.element.as_ptr()) } {
-            return false;
-        }
+    fn selection_is_current(&self) -> bool {
         match &self.range {
             Some(expected) => copy_ax_attribute(
-                current.as_ptr(),
+                self.element.as_ptr(),
                 "AXSelectedTextRange",
                 "validate_text_target",
             )
@@ -998,7 +1004,15 @@ impl MacTextTarget {
             None => true,
         }
     }
+
+    fn is_current(&self) -> bool {
+        let Ok((_, current)) = focused_ax_elements("validate_text_target") else {
+            return false;
+        };
+        unsafe { CFEqual(current.as_ptr(), self.element.as_ptr()) && self.selection_is_current() }
+    }
 }
+
 impl crate::text::InsertionTarget for MacTextTarget {
     fn insert(&self, text: &str) -> Result<(), crate::text::TextError> {
         if !self.is_current() {

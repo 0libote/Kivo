@@ -5,7 +5,7 @@ use std::sync::{
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     ai::{
@@ -710,12 +710,16 @@ impl AppCore {
                     .lock()
                     .map_err(|_| AppCoreError::Unavailable)? = Some(StoredWritingResult {
                     text: Arc::from(result.as_str()),
-                    can_replace: false,
+                    // Keep the captured selection available for an explicit
+                    // retry. Automatic replacement can fail for an editor's
+                    // native text interface; making the result copy-only
+                    // strands the user in a manual copy/paste flow.
+                    can_replace: selection.is_some(),
                 });
                 return Ok(WritingOutcome::Result {
                     markdown: result,
                     source: None,
-                    can_replace: false,
+                    can_replace: selection.is_some(),
                 });
             }
             machine.complete_replacement()?;
@@ -1680,9 +1684,6 @@ pub async fn get_writing_context(
             .map_err(CommandError::from)?
     };
     crate::shell::position_writing_surface(&app, context.cursor, context.anchor);
-    let _ = app
-        .get_webview_window("writing-tools")
-        .and_then(|window| window.set_focus().ok().map(|_| window));
     Ok(selection_context(context))
 }
 
@@ -1816,6 +1817,7 @@ pub fn set_surface_mode(
             recoverable: false,
         });
     }
+    crate::shell::set_writing_surface_focusability(&app, &mode).map_err(platform_command_error)?;
     crate::shell::size_writing_surface(&app, &mode, height).map_err(platform_command_error)?;
     Ok(())
 }

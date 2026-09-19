@@ -1040,7 +1040,7 @@ async fn changed_dictation_target_preserves_recovery_and_next_session_works() {
 }
 
 #[tokio::test]
-async fn failed_replacement_returns_copyable_result() {
+async fn failed_replacement_returns_retryable_result() {
     let server = HttpFixture::new(200, TEXT_RESPONSE, false);
     let (mut core, _) = core(&server.endpoint, Some("Original selection"));
     core.open_writing_tools().await.unwrap();
@@ -1060,7 +1060,7 @@ async fn failed_replacement_returns_copyable_result() {
     assert!(matches!(
         result,
         WritingOutcome::Result {
-            can_replace: false,
+            can_replace: true,
             ..
         }
     ));
