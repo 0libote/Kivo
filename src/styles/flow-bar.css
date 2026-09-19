@@ -4,11 +4,12 @@
   height: 40px;
   display: grid;
   place-items: center;
-  border: 0;
+  border: 1px solid rgba(255,255,255,.13);
   border-radius: 20px;
   color: #f4f4f4;
-  background: #242424;
-  box-shadow: none;
+  background: rgba(29, 34, 29, .94);
+  box-shadow: 0 12px 30px rgba(0,0,0,.24), 0 2px 7px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.06);
+  backdrop-filter: blur(14px);
   pointer-events: auto;
   overflow: hidden;
   transform-origin: center bottom;
@@ -21,15 +22,15 @@
 .flow-bar[data-state="success"] { min-width: 40px; width: 40px; }
 .flow-bar[data-state="error"] { min-width: 174px; max-width: 376px; border-radius: 14px; }
 .flow-bar__content { height: 100%; display: flex; align-items: center; justify-content: center; padding: 0 12px; }
-.flow-bar__mic { color:  #e2e2e2; margin-right: 9px; }
+.flow-bar__mic { color: var(--signal); margin-right: 9px; }
 .flow-bar__idle { display: grid; place-items: center; color: #d4d4d4; }
 .waveform { height: 19px; display: flex; align-items: center; gap: 2px; }
 .waveform i { width: 2px; height: calc(3px + var(--level) * 15px); min-height: 3px; max-height: 18px; border-radius: 2px; background: currentColor; transition: height 75ms linear; }
 .flow-bar__processing { display: flex; align-items: center; gap: 8px; color: #d4d4d4; font-size: 12px; }
-.flow-bar__success { color: #e2e2e2; animation: success-pop 180ms cubic-bezier(.2,.9,.25,1.2); }
+.flow-bar__success { color: var(--signal); animation: success-pop 180ms cubic-bezier(.2,.9,.25,1.2); }
 .flow-bar__error { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 7px; font-size: 11.5px; color: var(--danger); }
 .flow-bar__error span { color: #f4f4f4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.flow-bar__error button { padding: 3px 5px; border: 0; color:  #e2e2e2; background: transparent; }
+.flow-bar__error button { padding: 4px 7px; border: 1px solid rgba(255,255,255,.14); border-radius: 5px; color: #f4f4f4; background: rgba(255,255,255,.06); }
 @keyframes flow-enter { from { opacity: 0; transform: translateY(7px) scale(.9); } to { opacity: 1; transform: none; } }
 @keyframes success-pop { from { transform: scale(.65); opacity: .2; } to { transform: none; opacity: 1; } }
 
@@ -45,6 +46,6 @@
 .flow-bar[data-state="starting"] { min-width: 116px; }
 @media (forced-colors: active) { .flow-bar { color: CanvasText; background: Canvas; } .flow-bar span, .flow-bar button { color: CanvasText; } }
 
-.flow-bar__stop { width: 28px; height: 28px; display: grid; place-items: center; margin-left: 8px; padding: 0; border: 0; border-radius: 50%; background: #ffffff14; }
-.flow-bar__stop:hover { background: #ffffff28; }
+.flow-bar__stop { width: 28px; height: 28px; display: grid; place-items: center; margin-left: 8px; padding: 0; border: 1px solid rgba(255,255,255,.12); border-radius: 50%; background: rgba(255,255,255,.08); }
+.flow-bar__stop:hover { background: rgba(255,255,255,.16); }
 .flow-bar__stop span { width: 8px; height: 8px; background: currentColor; border-radius: 2px; }
