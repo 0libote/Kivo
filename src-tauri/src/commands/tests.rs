@@ -1137,6 +1137,7 @@ async fn gemini_generation_timeout_tries_the_next_model() {
                 input: "Reply with OK.".into(),
                 system_instruction: "Return only OK.".into(),
             },
+            AiReasoningMode::Fast,
         )
         .await
         .unwrap();

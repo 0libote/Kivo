@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ai::WritingAction;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -38,6 +38,10 @@ impl AppSettings {
         if self.schema_version > SETTINGS_SCHEMA_VERSION {
             return Err(SettingsError::UnsupportedVersion(self.schema_version));
         }
+        let old_schema_version = self.schema_version;
+        if old_schema_version < 2 {
+            self.migrate_v2_defaults();
+        }
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self.general.validate()?;
         self.dictation.migrate_foreign_default();
@@ -47,6 +51,18 @@ impl AppSettings {
         self.ai.normalize();
         self.ai.validate()?;
         Ok(self)
+    }
+
+    fn migrate_v2_defaults(&mut self) {
+        // Kivo previously put a coding model first for Go. Move only that
+        // exact old default; an explicit model choice saved under v2 stays
+        // untouched.
+        if self.ai.provider == crate::ai::AiProvider::Go
+            && self.ai.models.len() == 1
+            && self.ai.models[0].trim() == "kimi-k2.7-code"
+        {
+            self.ai.models = vec![self.ai.provider.default_model().to_owned()];
+        }
     }
 }
 
@@ -337,6 +353,10 @@ pub struct AiSettings {
     /// Ordered failover queue: tried top to bottom until one succeeds.
     #[serde(default)]
     pub models: Vec<String>,
+    /// Fast/balanced/deep reasoning preset. Providers ignore it when the
+    /// selected model does not expose a compatible control.
+    #[serde(default)]
+    pub reasoning_mode: crate::ai::AiReasoningMode,
     /// Custom provider only: OpenAI-compatible base URL
     /// (e.g. Ollama `http://localhost:11434/v1`). `None` means the Ollama
     /// default. Ignored by the other providers.
@@ -357,6 +377,7 @@ impl Default for AiSettings {
         Self {
             provider: crate::ai::AiProvider::default(),
             models: vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()],
+            reasoning_mode: crate::ai::AiReasoningMode::default(),
             custom_base_url: None,
             legacy_model: None,
             legacy_backup_model: None,
@@ -368,11 +389,13 @@ impl AiSettings {
     pub fn new(
         provider: crate::ai::AiProvider,
         models: Vec<String>,
+        reasoning_mode: crate::ai::AiReasoningMode,
         custom_base_url: Option<String>,
     ) -> Self {
         Self {
             provider,
             models,
+            reasoning_mode,
             custom_base_url,
             legacy_model: None,
             legacy_backup_model: None,
@@ -790,6 +813,28 @@ mod tests {
     }
 
     #[test]
+    fn go_default_upgrade_prefers_the_fast_model_without_overwriting_new_choices() {
+        let old = AppSettings {
+            schema_version: 1,
+            ai: super::AiSettings {
+                provider: crate::ai::AiProvider::Go,
+                models: vec!["kimi-k2.7-code".into()],
+                ..super::AiSettings::default()
+            },
+            ..AppSettings::default()
+        };
+        let old = old.validate_and_normalize().unwrap();
+        assert_eq!(old.schema_version, super::SETTINGS_SCHEMA_VERSION);
+        assert_eq!(old.ai.models, vec!["glm-5.3-flash"]);
+
+        let mut explicit = AppSettings::default();
+        explicit.ai.provider = crate::ai::AiProvider::Go;
+        explicit.ai.models = vec!["kimi-k2.7-code".into()];
+        let explicit = explicit.validate_and_normalize().unwrap();
+        assert_eq!(explicit.ai.models, vec!["kimi-k2.7-code"]);
+    }
+
+    #[test]
     fn ai_legacy_primary_and_backup_migrate_into_the_queue() {
         // Pre-queue files stored `model` + `backupModel`: both migrate in
         // order, and the legacy keys are never written back out.
@@ -844,6 +889,10 @@ mod tests {
     fn ai_provider_defaults_to_gemini_and_legacy_files_keep_working() {
         use crate::ai::AiProvider;
         assert_eq!(AppSettings::default().ai.provider, AiProvider::Gemini);
+        assert_eq!(
+            AppSettings::default().ai.reasoning_mode,
+            crate::ai::AiReasoningMode::Fast
+        );
         assert_eq!(AppSettings::default().ai.custom_base_url, None);
         // Files written before the provider field existed deserialize via
         // serde defaults to Gemini, preserving the stored Gemini key slot.
@@ -861,6 +910,13 @@ mod tests {
         let settings = settings.validate_and_normalize().unwrap();
         assert_eq!(settings.ai.provider, AiProvider::Gemini);
         assert_eq!(settings.ai.models, vec!["gemini-2.5-flash".to_owned()]);
+
+        let explicit = serde_json::json!({"ai": {"reasoningMode": "deep"}});
+        let settings: AppSettings = serde_json::from_value(explicit).unwrap();
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.reasoning_mode,
+            crate::ai::AiReasoningMode::Deep
+        );
     }
 
     #[test]

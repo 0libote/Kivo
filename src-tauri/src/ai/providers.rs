@@ -3,7 +3,7 @@ use std::{fmt, time::Duration};
 use reqwest::{StatusCode, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 
-use super::{AiPrompt, ListedAiModel};
+use super::{AiPrompt, AiReasoningMode, ListedAiModel};
 use crate::security::SecretString;
 
 /// AI backends Kivo can send writing requests to.
@@ -109,8 +109,8 @@ impl AiProvider {
     pub const fn default_model(self) -> &'static str {
         match self {
             Self::Gemini | Self::Zen => super::DEFAULT_GEMINI_MODEL,
-            // Good coding quality with the largest Go monthly allowance.
-            Self::Go => "kimi-k2.7-code",
+            // Fast, high-throughput model for short writing requests.
+            Self::Go => "glm-5.3-flash",
             // Ollama's most common default; the user can type any pulled id.
             Self::Custom => "llama3.1",
         }
@@ -672,14 +672,24 @@ const ZEN_CURATED: &[(&str, &str, &str)] = &[
 
 const GO_CURATED: &[(&str, &str, &str)] = &[
     (
-        "kimi-k2.7-code",
-        "Kimi K2.7 Code",
-        "Default. Strong open coding model.",
-    ),
-    (
         "glm-5.3-flash",
         "GLM 5.3 Flash",
-        "Cheapest usage against the allowance.",
+        "Recommended. Fast, high-throughput model for short writing tasks.",
+    ),
+    (
+        "qwen3.8-flash",
+        "Qwen 3.8 Flash",
+        "Fast alternative with a low monthly usage cost.",
+    ),
+    (
+        "deepseek-v4.1-flash",
+        "DeepSeek V4.1 Flash",
+        "Fast budget alternative for everyday edits.",
+    ),
+    (
+        "kimi-k2.7-code",
+        "Kimi K2.7 Code",
+        "Strong coding model; prose edits may take longer.",
     ),
     (
         "deepseek-v4-flash",
@@ -1199,6 +1209,7 @@ impl OpenAiCompatClient {
         api_key: Option<&SecretString>,
         model: &str,
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, OpencodeError> {
         let model = Self::resolve_model(provider, model);
         let request = ChatCompletionRequest {
@@ -1216,7 +1227,8 @@ impl OpenAiCompatClient {
             max_tokens: None,
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) = completion_request(protocol, chat_url, &request);
+        let (url, body) =
+            completion_request(protocol, provider, reasoning_mode, chat_url, &request);
         let mut call = self.chat_request(provider, &url).json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
@@ -1281,7 +1293,13 @@ impl OpenAiCompatClient {
             max_tokens: Some(1),
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) = completion_request(protocol, chat_url, &request);
+        let (url, body) = completion_request(
+            protocol,
+            provider,
+            AiReasoningMode::Fast,
+            chat_url,
+            &request,
+        );
         let mut call = self.chat_request(provider, &url).json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
@@ -1331,12 +1349,13 @@ impl OpenAiCompatClient {
         api_key: Option<&SecretString>,
         models: &[String],
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, OpencodeError> {
         let normalized = normalize_model_list_for(provider, models);
         let mut last_error: Option<OpencodeError> = None;
         for model in &normalized {
             match self
-                .generate(provider, chat_url, api_key, model, prompt)
+                .generate(provider, chat_url, api_key, model, prompt, reasoning_mode)
                 .await
             {
                 Ok(output) => return Ok(output),
@@ -1377,8 +1396,60 @@ fn completion_protocol(provider: AiProvider, model: &str) -> CompletionProtocol 
     CompletionProtocol::Chat
 }
 
+fn chat_reasoning_effort(
+    provider: AiProvider,
+    model: &str,
+    reasoning_mode: AiReasoningMode,
+) -> Option<&'static str> {
+    if !matches!(provider, AiProvider::Zen | AiProvider::Go) {
+        return None;
+    }
+    let model = model.to_ascii_lowercase();
+    match model.as_str() {
+        // models.dev documents all three effort values for these exact ids.
+        "glm-5.3-flash"
+        | "glm-5.3"
+        | "deepseek-v4.1-flash"
+        | "deepseek-v4-flash"
+        | "deepseek-v4-flash-vision-exp" => Some(match reasoning_mode {
+            AiReasoningMode::Fast => "low",
+            AiReasoningMode::Balanced => "high",
+            AiReasoningMode::Deep => "max",
+        }),
+        // These models expose high/max only. Fast leaves the provider default
+        // in place instead of sending an unsupported low value.
+        "glm-5.2" | "deepseek-v4-pro" => match reasoning_mode {
+            AiReasoningMode::Fast => None,
+            AiReasoningMode::Balanced => Some("high"),
+            AiReasoningMode::Deep => Some("max"),
+        },
+        // Toggle-only and unknown models intentionally receive no guessed
+        // reasoning_effort field.
+        _ => None,
+    }
+}
+
+fn messages_reasoning(
+    provider: AiProvider,
+    model: &str,
+    reasoning_mode: AiReasoningMode,
+) -> Option<(&'static str, Option<&'static str>)> {
+    if !matches!(provider, AiProvider::Zen | AiProvider::Go)
+        || !model.eq_ignore_ascii_case("qwen3.8-flash")
+    {
+        return None;
+    }
+    Some(match reasoning_mode {
+        AiReasoningMode::Fast => ("disabled", None),
+        AiReasoningMode::Balanced => ("enabled", Some("medium")),
+        AiReasoningMode::Deep => ("enabled", Some("xhigh")),
+    })
+}
+
 fn completion_request(
     protocol: CompletionProtocol,
+    provider: AiProvider,
+    reasoning_mode: AiReasoningMode,
     chat_url: &str,
     request: &ChatCompletionRequest<'_>,
 ) -> (String, serde_json::Value) {
@@ -1386,10 +1457,13 @@ fn completion_request(
         .strip_suffix("/chat/completions")
         .unwrap_or(chat_url);
     match protocol {
-        CompletionProtocol::Chat => (
-            chat_url.to_owned(),
-            serde_json::to_value(request).expect("serializable request"),
-        ),
+        CompletionProtocol::Chat => {
+            let mut body = serde_json::to_value(request).expect("serializable request");
+            if let Some(effort) = chat_reasoning_effort(provider, request.model, reasoning_mode) {
+                body["reasoning_effort"] = effort.into();
+            }
+            (chat_url.to_owned(), body)
+        }
         CompletionProtocol::Messages => {
             let system = request
                 .messages
@@ -1403,16 +1477,22 @@ fn completion_request(
                 .iter()
                 .filter(|message| message.role != "system")
                 .collect();
-            (
-                format!("{base}/messages"),
-                serde_json::json!({
-                    "model": request.model,
-                    "system": system,
-                    "messages": messages,
-                    // Anthropic's protocol requires an explicit output limit.
-                    "max_tokens": request.max_tokens.unwrap_or(8192),
-                }),
-            )
+            let mut body = serde_json::json!({
+                "model": request.model,
+                "system": system,
+                "messages": messages,
+                // Anthropic's protocol requires an explicit output limit.
+                "max_tokens": request.max_tokens.unwrap_or(8192),
+            });
+            if let Some((thinking_type, effort)) =
+                messages_reasoning(provider, request.model, reasoning_mode)
+            {
+                body["thinking"] = serde_json::json!({"type": thinking_type});
+                if let Some(effort) = effort {
+                    body["output_config"] = serde_json::json!({"effort": effort});
+                }
+            }
+            (format!("{base}/messages"), body)
         }
         CompletionProtocol::Responses => {
             let mut body = serde_json::json!({
@@ -1746,7 +1826,14 @@ mod tests {
         };
         assert_eq!(
             client
-                .generate(AiProvider::Go, &url, Some(&key), "kimi-k2.7-code", &prompt)
+                .generate(
+                    AiProvider::Go,
+                    &url,
+                    Some(&key),
+                    "kimi-k2.7-code",
+                    &prompt,
+                    AiReasoningMode::Fast,
+                )
                 .await
                 .unwrap(),
             "hello world"
@@ -1869,7 +1956,7 @@ mod tests {
         );
         assert_eq!(
             normalize_model_for(AiProvider::Go, "bogus!!"),
-            "kimi-k2.7-code"
+            "glm-5.3-flash"
         );
     }
 
@@ -2093,6 +2180,8 @@ mod tests {
         };
         let (url, body) = completion_request(
             CompletionProtocol::Messages,
+            AiProvider::Go,
+            AiReasoningMode::Fast,
             "https://opencode.ai/zen/go/v1/chat/completions",
             &request,
         );
@@ -2111,10 +2200,135 @@ mod tests {
         };
         let (_, body) = completion_request(
             CompletionProtocol::Messages,
+            AiProvider::Go,
+            AiReasoningMode::Fast,
             "https://opencode.ai/zen/go/v1/chat/completions",
             &probe,
         );
         assert_eq!(body["max_tokens"], 1);
+    }
+
+    #[test]
+    fn reasoning_presets_use_only_documented_hosted_controls() {
+        let messages = [ChatMessage {
+            role: "user",
+            content: "helo world",
+        }];
+        let request = ChatCompletionRequest {
+            model: "glm-5.3-flash",
+            messages: &messages,
+            max_tokens: None,
+        };
+        for (mode, expected) in [
+            (AiReasoningMode::Fast, "low"),
+            (AiReasoningMode::Balanced, "high"),
+            (AiReasoningMode::Deep, "max"),
+        ] {
+            let (_, body) = completion_request(
+                CompletionProtocol::Chat,
+                AiProvider::Go,
+                mode,
+                "https://opencode.ai/zen/go/v1/chat/completions",
+                &request,
+            );
+            assert_eq!(body["reasoning_effort"], expected);
+        }
+
+        for (model, expected) in [
+            ("glm-5.2", [None, Some("high"), Some("max")]),
+            ("deepseek-v4-pro", [None, Some("high"), Some("max")]),
+        ] {
+            let request = ChatCompletionRequest {
+                model,
+                messages: &messages,
+                max_tokens: None,
+            };
+            for (mode, expected) in [
+                (AiReasoningMode::Fast, expected[0]),
+                (AiReasoningMode::Balanced, expected[1]),
+                (AiReasoningMode::Deep, expected[2]),
+            ] {
+                let (_, body) = completion_request(
+                    CompletionProtocol::Chat,
+                    AiProvider::Go,
+                    mode,
+                    "https://opencode.ai/zen/go/v1/chat/completions",
+                    &request,
+                );
+                assert_eq!(body["reasoning_effort"].as_str(), expected);
+            }
+        }
+
+        let request = ChatCompletionRequest {
+            model: "qwen3.8-flash",
+            messages: &messages,
+            max_tokens: None,
+        };
+        let (_, body) = completion_request(
+            CompletionProtocol::Messages,
+            AiProvider::Go,
+            AiReasoningMode::Fast,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &request,
+        );
+        assert_eq!(body["thinking"]["type"], "disabled");
+        assert!(body.get("output_config").is_none());
+        let (_, body) = completion_request(
+            CompletionProtocol::Messages,
+            AiProvider::Go,
+            AiReasoningMode::Deep,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &request,
+        );
+        assert_eq!(body["thinking"]["type"], "enabled");
+        assert_eq!(body["output_config"]["effort"], "xhigh");
+
+        for model in ["qwen3.8-max", "qwen3.9-flash"] {
+            let request = ChatCompletionRequest {
+                model,
+                messages: &messages,
+                max_tokens: None,
+            };
+            let (_, body) = completion_request(
+                CompletionProtocol::Messages,
+                AiProvider::Go,
+                AiReasoningMode::Balanced,
+                "https://opencode.ai/zen/go/v1/chat/completions",
+                &request,
+            );
+            assert!(body.get("reasoning_effort").is_none(), "{model}");
+            assert!(body.get("thinking").is_none(), "{model}");
+        }
+
+        for model in ["glm-5.4-flash", "deepseek-v5-flash"] {
+            let request = ChatCompletionRequest {
+                model,
+                messages: &messages,
+                max_tokens: None,
+            };
+            let (_, body) = completion_request(
+                CompletionProtocol::Chat,
+                AiProvider::Go,
+                AiReasoningMode::Balanced,
+                "https://opencode.ai/zen/go/v1/chat/completions",
+                &request,
+            );
+            assert!(body.get("reasoning_effort").is_none(), "{model}");
+        }
+
+        let request = ChatCompletionRequest {
+            model: "kimi-k2.7-code",
+            messages: &messages,
+            max_tokens: None,
+        };
+        let (_, body) = completion_request(
+            CompletionProtocol::Chat,
+            AiProvider::Go,
+            AiReasoningMode::Deep,
+            "https://opencode.ai/zen/go/v1/chat/completions",
+            &request,
+        );
+        assert!(body.get("reasoning_effort").is_none());
     }
 
     #[test]
@@ -2136,6 +2350,8 @@ mod tests {
         };
         let (url, body) = completion_request(
             CompletionProtocol::Responses,
+            AiProvider::Go,
+            AiReasoningMode::Fast,
             "https://opencode.ai/zen/go/v1/chat/completions",
             &request,
         );
@@ -2158,6 +2374,8 @@ mod tests {
         };
         let (_, body) = completion_request(
             CompletionProtocol::Responses,
+            AiProvider::Go,
+            AiReasoningMode::Fast,
             "https://opencode.ai/zen/go/v1/chat/completions",
             &probe,
         );
@@ -2184,6 +2402,8 @@ mod tests {
         };
         let (url, body) = completion_request(
             CompletionProtocol::Google,
+            AiProvider::Zen,
+            AiReasoningMode::Fast,
             "https://opencode.ai/zen/v1/chat/completions",
             &request,
         );

@@ -215,7 +215,7 @@ export function providerDefaultModel(provider: AiProviderId): string {
     case "zen":
       return DEFAULT_AI_MODEL;
     case "go":
-      return "kimi-k2.7-code";
+      return "glm-5.3-flash";
     case "custom":
       return "llama3.1";
     default:
@@ -257,8 +257,10 @@ const ZEN_FALLBACK_ROWS: PricedRow[] = [
 ];
 
 const GO_FALLBACK_ROWS: PricedRow[] = [
-  ["kimi-k2.7-code", "Kimi K2.7 Code", "Default. Strong open coding model.", "$0.95 in / $4.00 out per 1M · $60/mo incl.", "go_subscription"],
-  ["glm-5.3-flash", "GLM 5.3 Flash", "Cheapest usage against the allowance.", "$0.15 in / $0.50 out per 1M · $60/mo incl.", "go_subscription"],
+  ["glm-5.3-flash", "GLM 5.3 Flash", "Recommended. Fast, high-throughput model for short writing tasks.", "$0.15 in / $0.50 out per 1M · $60/mo incl.", "go_subscription"],
+  ["qwen3.8-flash", "Qwen 3.8 Flash", "Fast alternative with a low monthly usage cost.", "$0.15 in / $0.47 out per 1M · $30/mo incl.", "go_subscription"],
+  ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "Fast budget alternative for everyday edits.", "$0.15 in / $0.60 out per 1M · $60/mo incl.", "go_subscription"],
+  ["kimi-k2.7-code", "Kimi K2.7 Code", "Strong coding model; prose edits may take longer.", "$0.95 in / $4.00 out per 1M · $60/mo incl.", "go_subscription"],
   ["deepseek-v4-flash", "DeepSeek V4 Flash", "Fast budget reasoning for everyday edits.", "$0.15 in / $0.60 out per 1M · $30/mo incl.", "go_subscription"],
   ["qwen3.7-plus", "Qwen 3.7 Plus", "Balanced quality for longer rewrites.", "$0.40 in / $1.60 out per 1M · $60/mo incl.", "go_subscription"],
   ["minimax-m3", "MiniMax M3", "Capable all-rounder for writing tasks.", "$0.30 in / $1.20 out per 1M · $60/mo incl.", "go_subscription"],
