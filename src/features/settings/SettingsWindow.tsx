@@ -95,7 +95,10 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
   return (
     <main className="settings-window" data-loading={loading} data-platform={context.platform}>
       <aside className="settings-sidebar" aria-label="Settings sections">
-        <div className="settings-sidebar__brand"><span className="settings-sidebar__mark"><Icon name="audio" size={17} /></span><strong>Kivo</strong></div>
+        <div className="settings-sidebar__brand">
+          <span className="settings-sidebar__mark"><Icon name="audio" size={17} /></span>
+          <span><strong>Kivo</strong><small>Voice workspace</small></span>
+        </div>
         <nav>
           {SECTIONS.map((item) => (
             <Fragment key={item.id}>
@@ -106,7 +109,7 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
             </Fragment>
           ))}
         </nav>
-        <p className="settings-sidebar__status"><span aria-hidden="true" className="settings-sidebar__status-dot" data-paused={context.paused} />{context.paused ? "Paused" : "Ready"}<span className="settings-sidebar__version">{context.version}</span></p>
+        <p className="settings-sidebar__status"><span aria-hidden="true" className="settings-sidebar__status-dot" data-paused={context.paused} /><span><strong>{context.paused ? "Paused" : "Ready"}</strong><small>{context.paused ? "Resume from Home" : "Listening for shortcuts"}</small></span><span className="settings-sidebar__version">{context.version}</span></p>
       </aside>
       <SettingsMain key={section}>
         {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} onDictation={() => setSection("dictation")} /> : <SectionContent

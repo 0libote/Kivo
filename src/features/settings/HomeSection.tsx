@@ -16,7 +16,7 @@ export function HomeSection({ context, settings, onWriting, onDictation }: { rea
   useNativeEvent("recovery-changed", refresh);
 
   return <section className="settings-content home-content">
-    <header><h1>Home</h1><p>Write with your voice. Keep your train of thought.</p></header>
+    <header className="home-header"><span className="home-eyebrow"><i />Workspace ready</span><h1>Home</h1><p>Write with your voice. Keep your train of thought.</p></header>
     {paused ? <div className="home-pause" role="status"><span>Kivo is paused</span><Button compact onClick={() => void nativeBridge.setPaused(false).catch(() => setNotice("Kivo could not resume. Try again."))}>Resume Kivo</Button></div> : null}
     <div className="home-shortcuts" aria-label="Your shortcuts">
       <button className="home-shortcut" type="button" onClick={onDictation} aria-label="Change dictation shortcut"><Icon name="microphone" size={19} /><div className="home-shortcut__copy"><strong>Dictation</strong><span>Hold to speak, release to finish</span></div><div className="home-shortcut__tail"><div className="shortcut-summary">{formatShortcut(settings.dictationShortcut, context.platform).map((key, index) => <kbd key={index}>{key}</kbd>)}</div><span className="home-shortcut__edit">Edit</span></div></button>

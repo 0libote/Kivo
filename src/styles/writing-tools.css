@@ -94,3 +94,27 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-hint { font-size: 11px; }
 
 .writing-more .writing-action { width: 100%; }
+
+/* Compact command palette */
+.writing-popup { border-color: color-mix(in srgb, var(--border-strong) 80%, transparent); border-radius: 15px; background: color-mix(in srgb, var(--surface-strong) 97%, transparent); }
+.writing-popup__top { padding: 15px 16px 6px; }
+.writing-popup__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .01em; }
+.writing-popup__context { font-size: 10.5px; }
+.writing-command { padding: 6px 11px 9px; }
+.custom-prompt { min-height: 38px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+.custom-prompt:hover { border-color: var(--border-strong); background: var(--surface-muted); }
+.writing-actions { gap: 2px; padding: 3px 9px 5px; }
+.writing-action { min-height: 48px; padding: 7px 10px; border-radius: 9px; }
+.writing-action:hover, .writing-action[data-selected="true"] { background: var(--surface-muted); }
+.writing-action[data-selected="true"] { box-shadow: inset 2px 0 var(--accent); }
+.writing-action .icon { color: var(--text-secondary); }
+.writing-action[data-selected="true"] .icon { color: var(--accent); }
+.writing-action__copy strong { font-size: 12.5px; }
+.writing-action__copy small { color: var(--text-tertiary); }
+.writing-more summary { margin: 4px 9px 0; padding: 9px 1px; font-size: 11px; }
+.writing-summary-actions { padding-inline: 11px; }
+.writing-hint { margin: 3px 10px 0; padding: 8px 4px 11px; border-top: 1px solid var(--border); font-size: 10px; }
+.writing-result__header { padding: 15px 11px 11px 16px; }
+.writing-result__eyebrow { color: var(--accent); font-weight: 700; }
+.writing-result h1 { font-size: 16px; letter-spacing: -.02em; }
+.writing-result__footer { padding: 10px 11px; background: color-mix(in srgb, var(--surface-muted) 48%, transparent); }

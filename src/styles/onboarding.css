@@ -37,3 +37,24 @@
 :root[data-platform="windows"] .onboarding-step__icon { border-radius: 8px; }
 
 .onboarding-step .dictation-practice { margin: 16px 0; }
+
+/* Focused first-run workspace */
+.onboarding-window {
+  padding: 30px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 5%, transparent), transparent 42%),
+    var(--bg);
+}
+.onboarding-panel { width: min(560px, 100%); min-height: min(560px, calc(100vh - 60px)); border-radius: 18px; background: var(--surface-strong); box-shadow: 0 24px 70px rgba(17,19,23,.11), 0 2px 8px rgba(17,19,23,.05); }
+.onboarding-step { padding: 28px 28px 0; }
+.onboarding-welcome { padding: 48px 40px 58px; }
+.onboarding-mark { width: 70px; height: 70px; border-radius: 19px; color: #17191c; background: #ff765b; box-shadow: 0 14px 34px rgba(233,93,66,.24); }
+.onboarding-step__icon { width: 44px; height: 44px; border-radius: 12px; color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.onboarding-eyebrow { color: var(--accent); font-size: 9px; font-weight: 750; letter-spacing: .13em; }
+.onboarding-step h1 { margin-bottom: 11px; font-family: "Aptos Display", "Avenir Next", "Segoe UI Variable Display", sans-serif; font-size: 32px; font-weight: 650; letter-spacing: -.045em; }
+.onboarding-copy { color: var(--text-secondary); line-height: 1.55; }
+.permission-list, .onboarding-model, .shortcut-demo { border-radius: 12px; }
+.permission-row { min-height: 58px; padding-inline: 14px; }
+.onboarding-footer { margin-inline: 28px; }
+.onboarding-progress span { width: 20px; height: 4px; }
+.onboarding-progress span[data-active="true"] { width: 32px; background: var(--accent); transition: width 180ms ease; }

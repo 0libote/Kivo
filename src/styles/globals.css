@@ -1,49 +1,49 @@
 :root {
   color-scheme: light dark;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: "Aptos", "Avenir Next", "Segoe UI Variable", "Noto Sans", sans-serif;
   font-synthesis: none;
-  --bg: #f4f3ee;
-  --surface: #faf9f5;
-  --surface-strong: #fffefa;
-  --surface-muted: rgba(61, 75, 57, 0.065);
-  --text: #1f241f;
-  --text-secondary: #5f6a5d;
-  --text-tertiary: #7a8378;
-  --border: rgba(31, 36, 31, 0.12);
-  --border-strong: rgba(31, 36, 31, 0.2);
-  --hover: rgba(70, 88, 65, 0.09);
-  --selected: #e8eee4;
-  --accent: #3f523f;
+  --bg: #f3f4f6;
+  --surface: #f8f9fa;
+  --surface-strong: #ffffff;
+  --surface-muted: #eef0f2;
+  --text: #17191c;
+  --text-secondary: #5d626b;
+  --text-tertiary: #858b94;
+  --border: rgba(24, 27, 32, 0.1);
+  --border-strong: rgba(24, 27, 32, 0.17);
+  --hover: rgba(24, 27, 32, 0.055);
+  --selected: #f0f1f3;
+  --accent: #e95d42;
   --accent-text: #fff;
   --danger: #c7372f;
-  --success: #587557;
-  --signal: #a7c69b;
-  --shadow-overlay: 0 18px 46px rgba(20, 28, 20, 0.2), 0 3px 10px rgba(20, 28, 20, 0.12);
-  --shadow-panel: 0 1px 2px rgba(20, 28, 20, 0.04), 0 12px 30px rgba(20, 28, 20, 0.06);
-  --radius-control: 7px;
-  --radius-panel: 12px;
+  --success: #34845a;
+  --signal: #90e7b7;
+  --shadow-overlay: 0 24px 64px rgba(17, 19, 23, 0.2), 0 3px 12px rgba(17, 19, 23, 0.12);
+  --shadow-panel: 0 1px 2px rgba(17, 19, 23, 0.035), 0 8px 22px rgba(17, 19, 23, 0.045);
+  --radius-control: 8px;
+  --radius-panel: 14px;
   background: transparent;
   color: var(--text);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #181b18;
-    --surface: #1e231e;
-    --surface-strong: #252b25;
+    --bg: #111316;
+    --surface: #17191d;
+    --surface-strong: #1d2025;
     --surface-muted: rgba(255, 255, 255, 0.075);
-    --text: #edf1e9;
-    --text-secondary: #b2bcae;
-    --text-tertiary: #8d988c;
+    --text: #f3f4f5;
+    --text-secondary: #b0b4bb;
+    --text-tertiary: #7f858e;
     --border: rgba(255, 255, 255, 0.12);
     --border-strong: rgba(255, 255, 255, 0.2);
     --hover: rgba(255, 255, 255, 0.085);
-    --selected: #2d392d;
-    --accent: #b6cda9;
-    --accent-text: #1a2119;
+    --selected: #292d33;
+    --accent: #ff765b;
+    --accent-text: #17191c;
     --danger: #ff716b;
-    --success: #a7c69b;
-    --signal: #b6d3a9;
+    --success: #70d49d;
+    --signal: #90e7b7;
     --shadow-overlay: 0 20px 52px rgba(0, 0, 0, 0.52), 0 3px 11px rgba(0, 0, 0, 0.34);
     --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.2), 0 16px 34px rgba(0, 0, 0, 0.17);
   }
@@ -51,44 +51,44 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #f4f3ee;
-  --surface: #faf9f5;
-  --surface-strong: #fffefa;
-  --surface-muted: rgba(61, 75, 57, 0.065);
-  --text: #1f241f;
-  --text-secondary: #5f6a5d;
-  --text-tertiary: #7a8378;
-  --border: rgba(31, 36, 31, 0.12);
-  --border-strong: rgba(31, 36, 31, 0.2);
-  --hover: rgba(70, 88, 65, 0.09);
-  --selected: #e8eee4;
-  --accent: #3f523f;
+  --bg: #f3f4f6;
+  --surface: #f8f9fa;
+  --surface-strong: #ffffff;
+  --surface-muted: #eef0f2;
+  --text: #17191c;
+  --text-secondary: #5d626b;
+  --text-tertiary: #858b94;
+  --border: rgba(24, 27, 32, 0.1);
+  --border-strong: rgba(24, 27, 32, 0.17);
+  --hover: rgba(24, 27, 32, 0.055);
+  --selected: #f0f1f3;
+  --accent: #e95d42;
   --accent-text: #fff;
   --danger: #c7372f;
-  --success: #587557;
-  --signal: #a7c69b;
-  --shadow-overlay: 0 18px 46px rgba(20, 28, 20, 0.2), 0 3px 10px rgba(20, 28, 20, 0.12);
-  --shadow-panel: 0 1px 2px rgba(20, 28, 20, 0.04), 0 12px 30px rgba(20, 28, 20, 0.06);
+  --success: #34845a;
+  --signal: #90e7b7;
+  --shadow-overlay: 0 24px 64px rgba(17, 19, 23, 0.2), 0 3px 12px rgba(17, 19, 23, 0.12);
+  --shadow-panel: 0 1px 2px rgba(17, 19, 23, 0.035), 0 8px 22px rgba(17, 19, 23, 0.045);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #181b18;
-  --surface: #1e231e;
-  --surface-strong: #252b25;
+  --bg: #111316;
+  --surface: #17191d;
+  --surface-strong: #1d2025;
   --surface-muted: rgba(255, 255, 255, 0.075);
-  --text: #edf1e9;
-  --text-secondary: #b2bcae;
-  --text-tertiary: #8d988c;
+  --text: #f3f4f5;
+  --text-secondary: #b0b4bb;
+  --text-tertiary: #7f858e;
   --border: rgba(255, 255, 255, 0.12);
   --border-strong: rgba(255, 255, 255, 0.2);
   --hover: rgba(255, 255, 255, 0.085);
-  --selected: #2d392d;
-  --accent: #b6cda9;
-  --accent-text: #1a2119;
+  --selected: #292d33;
+  --accent: #ff765b;
+  --accent-text: #17191c;
   --danger: #ff716b;
-  --success: #a7c69b;
-  --signal: #b6d3a9;
+  --success: #70d49d;
+  --signal: #90e7b7;
   --shadow-overlay: 0 20px 52px rgba(0, 0, 0, 0.52), 0 3px 11px rgba(0, 0, 0, 0.34);
   --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.2), 0 16px 34px rgba(0, 0, 0, 0.17);
 }
@@ -101,7 +101,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
-body { overflow: hidden; background: transparent; font-size: 14px; line-height: 1.5; user-select: none; }
+body { overflow: hidden; background: transparent; font-size: 14px; line-height: 1.5; letter-spacing: -.005em; user-select: none; }
 ::selection { color: var(--accent-text); background: var(--accent); }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
