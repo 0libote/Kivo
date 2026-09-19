@@ -4,8 +4,8 @@ use reqwest::{Url, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    GeminiClient, GeminiError, GenerationConfig, InteractionResponse, LinkSourceKind,
-    parse_api_error_code, parse_api_error_detail, parse_interaction,
+    AiReasoningMode, GeminiClient, GeminiError, GenerationConfig, InteractionResponse,
+    LinkSourceKind, parse_api_error_code, parse_api_error_detail, parse_interaction,
 };
 use crate::security::SecretString;
 
@@ -110,11 +110,15 @@ impl GeminiClient {
         api_key: &SecretString,
         model: &str,
         source: &LinkSource,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         // Same retry as text generation: 500s are transient.
         let mut delay = Duration::from_millis(500);
         for _ in 0..3 {
-            match self.summarize_link_once(api_key, model, source).await {
+            match self
+                .summarize_link_once(api_key, model, source, reasoning_mode)
+                .await
+            {
                 Err(error) if error.is_server_error() => {
                     tokio::time::sleep(delay).await;
                     delay = (delay * 2).min(Duration::from_secs(10));
@@ -122,7 +126,8 @@ impl GeminiClient {
                 result => return result,
             }
         }
-        self.summarize_link_once(api_key, model, source).await
+        self.summarize_link_once(api_key, model, source, reasoning_mode)
+            .await
     }
 
     async fn summarize_link_once(
@@ -130,6 +135,7 @@ impl GeminiClient {
         api_key: &SecretString,
         model: &str,
         source: &LinkSource,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         // Revalidate even if a caller constructed/deserialized LinkSource directly.
         let validated = LinkSource::parse(&source.url)?;
@@ -139,7 +145,7 @@ impl GeminiClient {
         let api_key =
             HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
         let model = super::normalize_model(model);
-        let request = LinkSummaryRequest::new(model.as_str(), &validated);
+        let request = LinkSummaryRequest::new(model.as_str(), &validated, reasoning_mode);
         let response = self
             .http
             .post(&self.endpoint)
@@ -175,12 +181,16 @@ impl GeminiClient {
         api_key: &SecretString,
         models: &[String],
         source: &LinkSource,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         let mut models = models.iter();
         let first = models.next().map(|model| super::normalize_model(model));
         let mut current = first.unwrap_or_else(|| super::DEFAULT_GEMINI_MODEL.to_owned());
         loop {
-            match self.summarize_link(api_key, &current, source).await {
+            match self
+                .summarize_link(api_key, &current, source, reasoning_mode)
+                .await
+            {
                 Ok(output) => return Ok(output),
                 Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
@@ -211,7 +221,7 @@ struct LinkSummaryRequest<'a> {
 }
 
 impl<'a> LinkSummaryRequest<'a> {
-    fn new(model: &'a str, source: &'a LinkSource) -> Self {
+    fn new(model: &'a str, source: &'a LinkSource, reasoning_mode: AiReasoningMode) -> Self {
         let (input, tools) = match source.kind {
             LinkSourceKind::Website => (
                 vec![LinkInput::Text {
@@ -234,7 +244,7 @@ impl<'a> LinkSummaryRequest<'a> {
             input,
             system_instruction: SUMMARY_SYSTEM,
             store: false,
-            generation_config: super::thinking_level_for(model)
+            generation_config: super::thinking_level_for(model, reasoning_mode)
                 .map(|thinking_level| GenerationConfig { thinking_level }),
             tools,
         }
@@ -378,9 +388,12 @@ mod tests {
             ("https://youtu.be/9hE5-98ZeCg", LinkSourceKind::Youtube),
         ] {
             let source = LinkSource::parse(url).unwrap();
-            let request =
-                serde_json::to_value(LinkSummaryRequest::new(super::super::GEMINI_MODEL, &source))
-                    .unwrap();
+            let request = serde_json::to_value(LinkSummaryRequest::new(
+                super::super::GEMINI_MODEL,
+                &source,
+                super::super::AiReasoningMode::Fast,
+            ))
+            .unwrap();
             assert_eq!(request["store"], false);
             assert_eq!(request["generation_config"]["thinking_level"], "low");
             assert!(

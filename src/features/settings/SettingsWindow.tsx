@@ -692,6 +692,24 @@ function AiSection({
           <p className="settings-note">Summarize-link needs the Gemini provider (it reads pages and videos for you). With {info.label}, summarize pasted text instead.</p>
         ) : null}
       </SettingsGroup>
+      <SettingsGroup header="Response speed">
+        <SettingRow label="Reasoning" description="Fast is recommended for short edits. Balanced and Deep can help difficult rewrites but may take longer and use more quota; unsupported models use their own default." stacked>
+          <select
+            aria-label="AI reasoning mode"
+            disabled={busy !== null}
+            onChange={(event) => {
+              const aiReasoningMode = event.target.value as AppSettings["aiReasoningMode"];
+              void save({ aiReasoningMode });
+            }}
+            value={settings.aiReasoningMode}
+          >
+            <option value="fast">Fast (recommended)</option>
+            <option value="balanced">Balanced</option>
+            <option value="deep">Deep</option>
+          </select>
+        </SettingRow>
+        <p className="settings-note">Kivo maps this to each provider’s native thinking control. Custom OpenAI-compatible endpoints are left unchanged.</p>
+      </SettingsGroup>
       <SettingsGroup header="API key">
         <SettingRow label={keyLabel(info)} description={keyDescription(info, apiStatus)} stacked>
           <div className="api-key-editor">

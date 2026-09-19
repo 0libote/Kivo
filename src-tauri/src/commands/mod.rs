@@ -9,9 +9,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     ai::{
-        AiPrompt, AiProvider, GeminiClient, GeminiError, LinkSource, ListedAiModel,
-        OpenAiCompatClient, OpencodeError, PromptError, WritingAction, canonical_model_id_for,
-        curated_models_for, dictation_cleanup_prompt, writing_prompt,
+        AiPrompt, AiProvider, AiReasoningMode, GeminiClient, GeminiError, LinkSource,
+        ListedAiModel, OpenAiCompatClient, OpencodeError, PromptError, WritingAction,
+        canonical_model_id_for, curated_models_for, dictation_cleanup_prompt, writing_prompt,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
@@ -162,7 +162,7 @@ impl AppCore {
     }
 
     pub async fn test_api_key(&self) -> Result<CredentialStatus, AppCoreError> {
-        let (provider, models, base_url) = self.ai_config();
+        let (provider, models, base_url, _) = self.ai_config();
         match provider {
             AiProvider::Gemini => {
                 let api_key = self.require_provider_key(provider)?;
@@ -180,6 +180,7 @@ impl AppCore {
                             input: "Reply with OK.".into(),
                             system_instruction: "Return only OK.".into(),
                         },
+                        AiReasoningMode::Fast,
                     )
                     .await?;
                 if models.len() > 1 {
@@ -230,13 +231,14 @@ impl AppCore {
             .unwrap_or_default()
     }
 
-    fn ai_config(&self) -> (AiProvider, Vec<String>, Option<String>) {
+    fn ai_config(&self) -> (AiProvider, Vec<String>, Option<String>, AiReasoningMode) {
         self.settings()
             .map(|settings| {
                 (
                     settings.ai.provider,
                     settings.ai.models,
                     settings.ai.custom_base_url,
+                    settings.ai.reasoning_mode,
                 )
             })
             .unwrap_or_else(|_| {
@@ -244,6 +246,7 @@ impl AppCore {
                     AiProvider::default(),
                     vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()],
                     None,
+                    AiReasoningMode::default(),
                 )
             })
     }
@@ -264,12 +267,13 @@ impl AppCore {
         models: &[String],
         base_url: Option<&str>,
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, AppCoreError> {
         match provider {
             AiProvider::Gemini => {
                 let api_key = api_key.ok_or(AppCoreError::AiNotConfigured { provider })?;
                 self.ai
-                    .generate_in_order(api_key, models, prompt)
+                    .generate_in_order(api_key, models, prompt, reasoning_mode)
                     .await
                     .map_err(Into::into)
             }
@@ -278,7 +282,7 @@ impl AppCore {
                     .resolve_chat_url(base_url)
                     .ok_or(AppCoreError::AiNotConfigured { provider })?;
                 self.compat
-                    .generate_in_order(provider, &chat_url, api_key, models, prompt)
+                    .generate_in_order(provider, &chat_url, api_key, models, prompt, reasoning_mode)
                     .await
                     .map_err(Into::into)
             }
@@ -468,7 +472,7 @@ impl AppCore {
                 let cleaned = tokio::select! {
                     biased;
                     _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &ai_models, ai_base_url.as_deref(), &prompt)) => result,
+                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &ai_models, ai_base_url.as_deref(), &prompt, AiReasoningMode::Fast)) => result,
                 };
                 if let Ok(Ok(cleaned)) = cleaned {
                     final_text = cleaned;
@@ -646,7 +650,7 @@ impl AppCore {
                 .as_deref()
                 .or_else(|| selection.as_ref().map(|value| value.text()))
                 .ok_or(PromptError::EmptySource)?;
-            let (provider, models, base_url) = self.ai_config();
+            let (provider, models, base_url, reasoning_mode) = self.ai_config();
             if source_kind == WritingSourceKind::Link {
                 let source = LinkSource::parse(source_text)?;
                 // Link retrieval (URL context / video input) is a Gemini
@@ -660,7 +664,7 @@ impl AppCore {
                 let api_key = self.require_provider_key(provider)?;
                 let result = self
                     .ai
-                    .summarize_link_in_order(&api_key, &models, &source)
+                    .summarize_link_in_order(&api_key, &models, &source, reasoning_mode)
                     .await?;
                 Ok::<_, AppCoreError>((result, Some(source)))
             } else {
@@ -677,6 +681,7 @@ impl AppCore {
                         &models,
                         base_url.as_deref(),
                         &prompt,
+                        reasoning_mode,
                     )
                     .await?;
                 Ok((result, None))
@@ -1105,6 +1110,8 @@ pub struct FrontendSettings {
     pub ai_provider: String,
     #[serde(default = "default_ai_models")]
     pub ai_models: Vec<String>,
+    #[serde(default = "default_ai_reasoning_mode")]
+    pub ai_reasoning_mode: String,
     #[serde(default)]
     pub ai_custom_base_url: Option<String>,
     pub onboarding_complete: bool,
@@ -1123,6 +1130,10 @@ fn default_ai_provider() -> String {
 
 fn default_ai_models() -> Vec<String> {
     vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()]
+}
+
+fn default_ai_reasoning_mode() -> String {
+    AiReasoningMode::default().as_str().to_owned()
 }
 
 impl From<AppSettings> for FrontendSettings {
@@ -1169,6 +1180,7 @@ impl From<AppSettings> for FrontendSettings {
             writing_allow_manual_text: settings.writing_tools.allow_manual_text,
             ai_provider: settings.ai.provider.as_str().into(),
             ai_models: settings.ai.models,
+            ai_reasoning_mode: settings.ai.reasoning_mode.as_str().into(),
             ai_custom_base_url: settings.ai.custom_base_url,
             onboarding_complete: settings.general.onboarding_complete,
             ai_model: None,
@@ -1217,6 +1229,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
             settings.ai_models
         };
         let ai_models = crate::ai::normalize_model_list(ai_provider, &ai_models);
+        let ai_reasoning_mode = AiReasoningMode::parse(&settings.ai_reasoning_mode);
         let ai_custom_base_url =
             crate::ai::normalize_base_url(settings.ai_custom_base_url.as_deref());
         Ok(AppSettings {
@@ -1254,7 +1267,12 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 popup_height: settings.writing_popup_height,
                 allow_manual_text: settings.writing_allow_manual_text,
             },
-            ai: crate::config::AiSettings::new(ai_provider, ai_models, ai_custom_base_url),
+            ai: crate::config::AiSettings::new(
+                ai_provider,
+                ai_models,
+                ai_reasoning_mode,
+                ai_custom_base_url,
+            ),
         })
     }
 }
@@ -1284,6 +1302,7 @@ pub struct SettingsPatch {
     writing_allow_manual_text: Option<bool>,
     ai_provider: Option<String>,
     ai_models: Option<Vec<String>>,
+    ai_reasoning_mode: Option<String>,
     ai_custom_base_url: Option<Option<String>>,
     onboarding_complete: Option<bool>,
 }
@@ -1328,6 +1347,7 @@ impl SettingsPatch {
         assign!(writing_allow_manual_text);
         assign!(ai_provider);
         assign!(ai_models);
+        assign!(ai_reasoning_mode);
         assign!(ai_custom_base_url);
         assign!(onboarding_complete);
         settings
@@ -1613,7 +1633,7 @@ pub async fn list_ai_models(
     // curated list when no key is stored or the fetch fails (offline /
     // invalid key), so the selector never appears empty. Identical on macOS
     // and Windows: keys stay in the Rust process and are sent via header.
-    let (provider, _, base_url) = core.ai_config();
+    let (provider, _, base_url, _) = core.ai_config();
     Ok(core
         .list_provider_models(provider, base_url.as_deref())
         .await)

@@ -19,6 +19,10 @@ test("settings navigation and controls work", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "AI", exact: true })).toBeVisible();
   await expect(page.getByLabel("Google AI Studio API key")).toBeVisible();
   await expect(page.getByText("Main model + fallbacks")).toBeVisible();
+  const reasoningSelect = page.getByLabel("AI reasoning mode", { exact: true });
+  await expect(reasoningSelect).toHaveValue("fast");
+  await reasoningSelect.selectOption("balanced");
+  await expect(reasoningSelect).toHaveValue("balanced");
   const firstModel = page.getByLabel("Model 1 of 1 (main model)", { exact: true });
   await expect(firstModel).toBeVisible();
   const options = await firstModel.locator("option").allTextContents();

@@ -79,6 +79,8 @@ export interface AppSettings {
   aiProvider: AiProviderId;
   /** Ordered failover queue: tried top to bottom until one succeeds. */
   aiModels: string[];
+  /** Fast/balanced/deep preset; unsupported model/provider controls are omitted. */
+  aiReasoningMode: "fast" | "balanced" | "deep";
   aiCustomBaseUrl: string | null;
   onboardingComplete: boolean;
 }
@@ -237,6 +239,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     writingAllowManualText: true,
     aiProvider: DEFAULT_AI_PROVIDER,
     aiModels: [DEFAULT_AI_MODEL],
+    aiReasoningMode: "fast",
     aiCustomBaseUrl: null,
     onboardingComplete: false,
   };

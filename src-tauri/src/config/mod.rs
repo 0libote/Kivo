@@ -353,6 +353,10 @@ pub struct AiSettings {
     /// Ordered failover queue: tried top to bottom until one succeeds.
     #[serde(default)]
     pub models: Vec<String>,
+    /// Fast/balanced/deep reasoning preset. Providers ignore it when the
+    /// selected model does not expose a compatible control.
+    #[serde(default)]
+    pub reasoning_mode: crate::ai::AiReasoningMode,
     /// Custom provider only: OpenAI-compatible base URL
     /// (e.g. Ollama `http://localhost:11434/v1`). `None` means the Ollama
     /// default. Ignored by the other providers.
@@ -373,6 +377,7 @@ impl Default for AiSettings {
         Self {
             provider: crate::ai::AiProvider::default(),
             models: vec![crate::ai::DEFAULT_GEMINI_MODEL.to_owned()],
+            reasoning_mode: crate::ai::AiReasoningMode::default(),
             custom_base_url: None,
             legacy_model: None,
             legacy_backup_model: None,
@@ -384,11 +389,13 @@ impl AiSettings {
     pub fn new(
         provider: crate::ai::AiProvider,
         models: Vec<String>,
+        reasoning_mode: crate::ai::AiReasoningMode,
         custom_base_url: Option<String>,
     ) -> Self {
         Self {
             provider,
             models,
+            reasoning_mode,
             custom_base_url,
             legacy_model: None,
             legacy_backup_model: None,
@@ -882,6 +889,10 @@ mod tests {
     fn ai_provider_defaults_to_gemini_and_legacy_files_keep_working() {
         use crate::ai::AiProvider;
         assert_eq!(AppSettings::default().ai.provider, AiProvider::Gemini);
+        assert_eq!(
+            AppSettings::default().ai.reasoning_mode,
+            crate::ai::AiReasoningMode::Fast
+        );
         assert_eq!(AppSettings::default().ai.custom_base_url, None);
         // Files written before the provider field existed deserialize via
         // serde defaults to Gemini, preserving the stored Gemini key slot.
@@ -899,6 +910,13 @@ mod tests {
         let settings = settings.validate_and_normalize().unwrap();
         assert_eq!(settings.ai.provider, AiProvider::Gemini);
         assert_eq!(settings.ai.models, vec!["gemini-2.5-flash".to_owned()]);
+
+        let explicit = serde_json::json!({"ai": {"reasoningMode": "deep"}});
+        let settings: AppSettings = serde_json::from_value(explicit).unwrap();
+        assert_eq!(
+            settings.validate_and_normalize().unwrap().ai.reasoning_mode,
+            crate::ai::AiReasoningMode::Deep
+        );
     }
 
     #[test]

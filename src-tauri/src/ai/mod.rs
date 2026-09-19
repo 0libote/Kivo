@@ -34,11 +34,52 @@ pub const GEMINI_INTERACTIONS_ENDPOINT: &str =
 /// Listing a model does not prove it can complete an Interactions request.
 pub const GEMINI_MODELS_ENDPOINT: &str = "https://generativelanguage.googleapis.com/v1beta/models";
 
+/// User-facing reasoning presets. Providers map these to their native
+/// controls when the selected model supports them; otherwise they omit the
+/// option and use the model default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiReasoningMode {
+    #[default]
+    Fast,
+    Balanced,
+    Deep,
+}
+
+impl AiReasoningMode {
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_lowercase().as_str() {
+            "balanced" => Self::Balanced,
+            "deep" => Self::Deep,
+            _ => Self::Fast,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Fast => "fast",
+            Self::Balanced => "balanced",
+            Self::Deep => "deep",
+        }
+    }
+
+    /// Gemini's Interactions API exposes low/medium/high rather than an off
+    /// switch for the current Flash models. Fast preserves Kivo's existing
+    /// low-thinking behavior.
+    pub const fn gemini_level(self) -> &'static str {
+        match self {
+            Self::Fast => "low",
+            Self::Balanced => "medium",
+            Self::Deep => "high",
+        }
+    }
+}
+
 /// Curated suggestions for the model picker. Validation itself is allow-all
 /// (see [`is_usable_model`]): any well-formed model id works with Kivo's
-/// Interactions API usage (stateless text input, `store: false`, low thinking,
-/// plain-text output, plus `url_context` for webpages and video input for
-/// YouTube), so newest text models keep working without an update.
+/// Interactions API usage (stateless text input, `store: false`, configurable
+/// reasoning, plain-text output, plus `url_context` for webpages and video
+/// input for YouTube), so newest text models keep working without an update.
 /// Speech synthesis / live audio, image generation, transcription, embedding,
 /// video, music, robotics, and research agents are blocked instead (see
 /// [`BLOCKED_MODEL_SUBSTRINGS`]): they reject this request shape or return
@@ -230,9 +271,9 @@ pub fn normalize_model_list(provider: AiProvider, ids: &[String]) -> Vec<String>
 /// but other families (e.g. Gemma supports only `minimal`/`high`) reject it
 /// with HTTP 400 `invalid_request`. Omit the field there and take the model
 /// default instead of failing the request.
-fn thinking_level_for(model: &str) -> Option<&'static str> {
+fn thinking_level_for(model: &str, reasoning_mode: AiReasoningMode) -> Option<&'static str> {
     if canonical_model_id(model).starts_with("gemini-") {
-        Some("low")
+        Some(reasoning_mode.gemini_level())
     } else {
         None
     }
@@ -423,11 +464,15 @@ impl GeminiClient {
         api_key: &SecretString,
         model: &str,
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         // ponytail: upstream retries 5xx 3x with doubling 500ms backoff; same.
         let mut delay = Duration::from_millis(500);
         for _ in 0..3 {
-            match self.generate_once(api_key, model, prompt).await {
+            match self
+                .generate_once(api_key, model, prompt, reasoning_mode)
+                .await
+            {
                 Err(error) if error.is_server_error() => {
                     tokio::time::sleep(delay).await;
                     delay = (delay * 2).min(Duration::from_secs(10));
@@ -435,7 +480,8 @@ impl GeminiClient {
                 result => return result,
             }
         }
-        self.generate_once(api_key, model, prompt).await
+        self.generate_once(api_key, model, prompt, reasoning_mode)
+            .await
     }
 
     async fn generate_once(
@@ -443,6 +489,7 @@ impl GeminiClient {
         api_key: &SecretString,
         model: &str,
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         let api_key =
             HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
@@ -452,7 +499,7 @@ impl GeminiClient {
             input: &prompt.input,
             system_instruction: &prompt.system_instruction,
             store: false,
-            generation_config: thinking_level_for(&model)
+            generation_config: thinking_level_for(&model, reasoning_mode)
                 .map(|thinking_level| GenerationConfig { thinking_level }),
         };
 
@@ -559,6 +606,7 @@ impl GeminiClient {
         api_key: &SecretString,
         models: &[String],
         prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
     ) -> Result<String, GeminiError> {
         let mut models = models.iter();
         let first = models.next().map(|model| Self::resolve_model(model));
@@ -567,7 +615,10 @@ impl GeminiClient {
             None => Self::resolve_model(""),
         };
         loop {
-            match self.generate(api_key, &current, prompt).await {
+            match self
+                .generate(api_key, &current, prompt, reasoning_mode)
+                .await
+            {
                 Ok(output) => return Ok(output),
                 Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
@@ -984,11 +1035,11 @@ impl std::error::Error for GeminiError {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError, GenerationConfig,
-        InteractionRequest, InteractionResponse, WritingAction, curated_listed_models,
-        dictation_cleanup_prompt, filter_api_models, is_blocked_model, is_usable_model,
-        normalize_model, parse_api_error_code, parse_api_error_detail, parse_interaction,
-        supported_models, thinking_level_for, writing_prompt,
+        AiReasoningMode, ApiModel, DEFAULT_GEMINI_MODEL, GEMINI_MODEL, GeminiError,
+        GenerationConfig, InteractionRequest, InteractionResponse, WritingAction,
+        curated_listed_models, dictation_cleanup_prompt, filter_api_models, is_blocked_model,
+        is_usable_model, normalize_model, parse_api_error_code, parse_api_error_detail,
+        parse_interaction, supported_models, thinking_level_for, writing_prompt,
     };
 
     #[test]
@@ -1053,7 +1104,7 @@ mod tests {
             input: "source",
             system_instruction: "instruction",
             store: false,
-            generation_config: thinking_level_for(GEMINI_MODEL)
+            generation_config: thinking_level_for(GEMINI_MODEL, AiReasoningMode::Fast)
                 .map(|thinking_level| GenerationConfig { thinking_level }),
         };
         let json = serde_json::to_value(request).unwrap();
@@ -1069,15 +1120,28 @@ mod tests {
     fn non_gemini_models_omit_thinking_level() {
         // Gemma rejects thinking_level "low" with HTTP 400 invalid_request,
         // so it must not be sent where the family doesn't support it.
-        assert_eq!(thinking_level_for("gemini-3.8-flash"), Some("low"));
-        assert_eq!(thinking_level_for("models/gemini-3.6-flash"), Some("low"));
-        assert_eq!(thinking_level_for("gemma-4-31b-it"), None);
+        assert_eq!(
+            thinking_level_for("gemini-3.8-flash", AiReasoningMode::Fast),
+            Some("low")
+        );
+        assert_eq!(
+            thinking_level_for("models/gemini-3.6-flash", AiReasoningMode::Balanced),
+            Some("medium")
+        );
+        assert_eq!(
+            thinking_level_for("gemini-3.8-flash", AiReasoningMode::Deep),
+            Some("high")
+        );
+        assert_eq!(
+            thinking_level_for("gemma-4-31b-it", AiReasoningMode::Fast),
+            None
+        );
         let request = InteractionRequest {
             model: "gemma-4-31b-it",
             input: "source",
             system_instruction: "instruction",
             store: false,
-            generation_config: thinking_level_for("gemma-4-31b-it")
+            generation_config: thinking_level_for("gemma-4-31b-it", AiReasoningMode::Fast)
                 .map(|thinking_level| GenerationConfig { thinking_level }),
         };
         let json = serde_json::to_value(request).unwrap();

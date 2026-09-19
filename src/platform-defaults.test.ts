@@ -59,6 +59,7 @@ describe("platform defaults parity", () => {
     expect(defaultSettings("macos").aiProvider).toBe("gemini");
     expect(defaultSettings("windows").aiProvider).toBe("gemini");
     expect(defaultSettings("linux").aiProvider).toBe("gemini");
+    expect(defaultSettings("windows").aiReasoningMode).toBe("fast");
     expect(defaultSettings("macos").aiCustomBaseUrl).toBeNull();
   });
 
