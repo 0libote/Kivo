@@ -834,7 +834,11 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
             // window frame, so the order matters.
             size_writing_surface(app, "menu", None).map_err(platform_command_error)?;
             position_writing_surface(app, context.cursor, context.anchor);
-            show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
+            // Keep the source editor focused while the menu is opened. Native
+            // accessibility targets can then replace text without requiring
+            // the user to switch back to the editor.
+            set_writing_surface_focusability(app, "menu").map_err(platform_command_error)?;
+            show_surface(app, "writing-tools", false).map_err(platform_command_error)?;
             let _ = app.emit_to(
                 "writing-tools",
                 "writing-context",
@@ -995,6 +999,32 @@ pub(crate) fn size_writing_surface(
     {
         clamp_to_monitor_on(&window, &mut position, size, None);
         let _ = window.set_position(Position::Physical(position));
+    }
+    Ok(())
+}
+
+/// The selection menu is a mouse-interactive overlay, not the active
+/// application. Text-entry modes deliberately opt back into focus so their
+/// inputs behave like normal controls.
+pub(crate) fn set_writing_surface_focusability(
+    app: &AppHandle,
+    mode: &str,
+) -> Result<(), PlatformError> {
+    let window = app.get_webview_window("writing-tools").ok_or_else(|| {
+        PlatformError::new(
+            PlatformErrorKind::NotFound,
+            "set_writing_surface_focusability",
+            "The Writing Tools window is unavailable.",
+        )
+    })?;
+    let focusable = cfg!(target_os = "linux") || matches!(mode, "custom" | "summary");
+    window
+        .set_focusable(focusable)
+        .map_err(|_| window_error("set_writing_surface_focusability"))?;
+    if focusable && !window.is_focused().unwrap_or(false) {
+        window
+            .set_focus()
+            .map_err(|_| window_error("set_writing_surface_focusability"))?;
     }
     Ok(())
 }

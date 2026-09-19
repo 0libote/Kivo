@@ -163,10 +163,10 @@ impl PlatformImpl {
             .selection
             .lock()
             .map_err(|_| os_error("replace_selected_text", "Selection state unavailable."))?;
-        if !selection
+        let current_target = selection
             .as_ref()
-            .is_some_and(|(token, target)| *token == snapshot.native_token && target.is_current())
-        {
+            .and_then(|(token, target)| (*token == snapshot.native_token).then_some(target));
+        if !current_target.is_some_and(|target| target.is_current()) {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
                 "replace_selected_text",
