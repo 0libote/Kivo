@@ -419,7 +419,8 @@ function ProcessingView({ close, label, hint }: { readonly close: () => void; re
     return () => window.clearInterval(timer);
   }, []);
 
-  const status = `${label ?? "Working"}${elapsed > 0 ? ` · ${elapsed}s` : ""}`;
+  const statusLabel = label ?? "Working";
+  const status = elapsed > 0 ? `${statusLabel} · ${elapsed}s` : statusLabel;
   return (
     <div aria-live="polite" className="writing-processing">
       <Spinner label={`Running ${label ?? "writing action"}`} />
