@@ -91,7 +91,6 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-more summary { padding: 10px; margin-top: 5px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .writing-more[open] summary { margin-bottom: 4px; }
 .writing-source label { font-size: 11px; text-transform: none; }
-.writing-command { padding: 5px 10px 7px; }
 .writing-hint { font-size: 11px; }
 
 .writing-more .writing-action { width: 100%; }
