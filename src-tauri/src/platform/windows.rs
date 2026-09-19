@@ -179,7 +179,11 @@ impl PlatformImpl {
             ));
         }
         current_target.restore_focus();
-        if !current_target.is_current() {
+        // UI Automation runtime ids can change when Chromium/WebView2 or a
+        // native control is reactivated. The live selection read below is the
+        // authoritative stale-selection check; only require the stable owner
+        // window/process here before sending Ctrl+V.
+        if !current_target.is_foreground() {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
                 "replace_selected_text",
@@ -189,7 +193,7 @@ impl PlatformImpl {
         let (current, process_id) = match selected_text() {
             Ok((current, process_id, _)) => (current, process_id),
             Err(error)
-                if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback
+                if error.operation == "get_selected_text"
                     && matches!(
                         error.kind,
                         PlatformErrorKind::Unsupported | PlatformErrorKind::NotFound
@@ -377,7 +381,7 @@ impl WindowsTextTarget {
     }
 
     fn is_current(&self) -> bool {
-        unsafe { GetForegroundWindow() }.0 as usize == self.window
+        self.is_foreground()
             && if self.identity.is_empty() {
                 let mut process_id = 0;
                 unsafe {
@@ -391,6 +395,16 @@ impl WindowsTextTarget {
                         identity == self.identity && process_id == self.process_id
                     })
             }
+    }
+
+    fn is_foreground(&self) -> bool {
+        let window = HWND(self.window as *mut _);
+        if unsafe { GetForegroundWindow() } != window {
+            return false;
+        }
+        let mut process_id = 0;
+        (unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) }) != 0
+            && process_id == self.process_id
     }
 }
 
