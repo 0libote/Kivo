@@ -257,9 +257,9 @@ function ApiKeyStep(props: ApiKeyStepProps) {
   return (
     <div className="onboarding-step">
       <div className="onboarding-step__icon"><Icon name="spark" size={24} /></div>
-      <p className="onboarding-eyebrow">Step 3 of 3</p>
-      <h1>Add AI, then you’re ready</h1>
-      <p className="onboarding-copy">Use Google Gemini directly, OpenCode Zen credits, the OpenCode Go subscription, or your own local endpoint. Keys are stored by the operating system and never appear in Kivo’s settings files or logs.</p>
+      <p className="onboarding-eyebrow">Step 3 of 3 · Optional</p>
+      <h1>Add AI when you’re ready</h1>
+      <p className="onboarding-copy">Writing Tools and optional dictation cleanup use an AI provider. Plain dictation works without one, so you can finish setup now and connect a provider later.</p>
       <div className="onboarding-model">
         <label className="onboarding-model__label" htmlFor="onboarding-ai-provider">Provider</label>
         <select

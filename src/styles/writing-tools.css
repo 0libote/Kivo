@@ -1,18 +1,25 @@
 .writing-stage { width: 100%; height: 100%; padding: 2px; background: transparent; }
 dialog.writing-popup { position: relative; inset: auto; margin: 0; padding: 0; max-width: none; }
 dialog.writing-popup:not([open]) { display: none; }
-.writing-popup { width: 100%; max-height: calc(var(--writing-max-height, 460px) - 4px); overflow: hidden; border: 0; border-radius: var(--radius-panel); background: var(--surface); box-shadow: none; animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
+.writing-popup { width: 100%; max-height: calc(var(--writing-max-height, 460px) - 4px); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-panel); background: color-mix(in srgb, var(--surface-strong) 92%, var(--bg)); box-shadow: var(--shadow-overlay); animation: writing-enter 150ms cubic-bezier(.2,.82,.24,1) both; color: var(--text); }
 .writing-popup textarea, .writing-popup input { user-select: text; }
 @keyframes writing-enter { from { opacity: 0; transform: translateY(-3px) scale(.985); } to { opacity: 1; transform: none; } }
 .writing-popup__header { height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 7px 0 12px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11.5px; font-weight: 600; }
-.writing-command { display: flex; align-items: center; gap: 2px; padding: 8px 6px 4px 8px; }
+.writing-popup__top { display: flex; flex-direction: column; gap: 1px; padding: 12px 14px 5px; color: var(--text-secondary); }
+.writing-popup__eyebrow { color: var(--text); font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+.writing-popup__context { color: var(--text-tertiary); font-size: 11px; }
+.writing-command { display: flex; align-items: center; gap: 2px; padding: 5px 10px 7px; }
 .writing-command .custom-prompt { flex: 1; margin: 0; }
 .writing-command .icon-button { flex: 0 0 auto; }
 .writing-actions { display: flex; flex-direction: column; gap: 1px; padding: 2px 8px 4px; }
-.writing-action { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 14px; }
+.writing-action { min-height: 49px; display: flex; align-items: center; gap: 11px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; text-align: left; font-size: 14px; transition: background 120ms ease, transform 100ms ease; }
 .writing-action:hover, .writing-action[data-selected="true"] { background: var(--selected); }
-.writing-action .icon { color: var(--text-secondary); }
-.custom-prompt { min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border: 0; border-radius: 8px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
+.writing-action:active { transform: scale(.99); }
+.writing-action .icon { color: var(--accent); }
+.writing-action__copy { min-width: 0; display: grid; gap: 1px; }
+.writing-action__copy strong { font-size: 13px; font-weight: 650; }
+.writing-action__copy small { color: var(--text-secondary); font-size: 11px; line-height: 1.25; }
+.custom-prompt { min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid transparent; border-radius: 8px; background: var(--surface-muted); color: var(--text-secondary); text-align: left; }
 .custom-prompt:hover { color: var(--text); background: var(--hover); }
 .custom-prompt span { flex: 1; }
 .custom-prompt kbd { font-size: 11px; color: var(--text-tertiary); }
@@ -52,11 +59,11 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-error strong, .writing-error span { display: block; }
 .writing-error span { margin-top: 2px; color: var(--text-secondary); font-size: 12px; }
 .writing-error__actions { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; }
-.writing-source { padding: 6px 8px 0; }
+.writing-source { padding: 9px 10px 0; }
 .writing-source label { display: block; margin: 0 4px 4px; color: var(--text-tertiary); font-size: 10px; text-transform: uppercase; letter-spacing: .045em; }
-.writing-source textarea { width: 100%; min-height: 56px; max-height: 110px; padding: 7px 9px; border: 1px solid transparent; border-radius: 7px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
+.writing-source textarea { width: 100%; min-height: 56px; max-height: 110px; padding: 9px 10px; border: 1px solid transparent; border-radius: 8px; background: var(--surface-muted); color: var(--text); font: inherit; font-size: 12.5px; line-height: 1.45; resize: vertical; }
 .writing-source textarea:focus { outline: none; border-color: var(--accent); }
-.writing-hint { margin: 0; padding: 6px 14px 10px; color: var(--text-tertiary); font-size: 11px; }
+.writing-hint { margin: 0; padding: 8px 14px 11px; color: var(--text-tertiary); font-size: 10.5px; }
 .writing-opening { height: 64px; display: grid; place-items: center; color: var(--text-secondary); }
 :root[data-platform="windows"] .writing-action { border-radius: 4px; }
 
@@ -81,10 +88,9 @@ dialog.writing-popup:not([open]) { display: none; }
 .writing-result__source > :last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .writing-result__error { margin: 0; padding: 6px 15px 0; color: var(--danger); font-size: 12px; }
 
-.writing-more summary { padding: 10px; margin-top: 5px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; cursor: default; }
+.writing-more summary { padding: 10px; margin-top: 5px; border-top: 1px solid var(--border); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
 .writing-more[open] summary { margin-bottom: 4px; }
 .writing-source label { font-size: 11px; text-transform: none; }
-.writing-command { padding: 12px 10px 8px; }
 .writing-hint { font-size: 11px; }
 
 .writing-more .writing-action { width: 100%; }
