@@ -58,7 +58,9 @@
   box-shadow: 0 18px 42px rgba(0,0,0,.3), 0 3px 10px rgba(0,0,0,.18), inset 0 1px rgba(255,255,255,.07);
   backdrop-filter: blur(20px) saturate(1.2);
 }
-.flow-bar__mic { color: #ff8068; }
-.waveform { color: #ff8068; }
+.flow-bar__mic { color: #f4f4f4; }
+.waveform { color: #f4f4f4; }
 .flow-bar__success { color: #90e7b7; }
 .flow-bar__stop { border-color: rgba(255,255,255,.1); background: rgba(255,255,255,.07); }
+
+.flow-bar__mic, .waveform { color: #f4f4f4; }
