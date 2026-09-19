@@ -15,7 +15,7 @@ export function DictationPractice({ shortcut, platform }: { readonly shortcut: s
   // (speech engine, shortcuts) link nowhere.
   const showMicSettings = /could\s?not|couldn’t|microphone/i.test(status);
   return <div className="dictation-practice">
-    <div className="dictation-practice__header"><strong>Try a sentence</strong><button className="text-link" onClick={() => field.current?.focus()} type="button">Try dictation</button></div>
+    <div className="dictation-practice__header"><strong>Practice dictation</strong><button className="text-link" onClick={() => field.current?.focus()} type="button">Try dictation</button></div>
     <p>Click the field, then hold {formatShortcut(shortcut, platform).join(" + ")} and speak.</p>
     <textarea aria-label="Dictation practice" placeholder="What’s on your mind?" ref={field} rows={3} spellCheck />
     <p className="dictation-practice__status" aria-live="polite">{status || "Only your latest dictation is kept, until you clear it or quit."}</p>

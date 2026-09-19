@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ModelQueueEditor } from "./ModelQueueEditor";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -36,13 +36,19 @@ interface SettingsWindowProps {
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
   { id: "home", label: "Home", icon: "home" },
-  { id: "general", label: "General", icon: "settings" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
   { id: "ai", label: "AI", icon: "connection" },
+  { id: "general", label: "General", icon: "settings" },
   { id: "permissions", label: "Permissions", icon: "check" },
   { id: "about", label: "About", icon: "info" },
 ];
+
+const NAV_GROUP_LABELS: Partial<Record<SettingsSection, string>> = {
+  home: "Workspace",
+  dictation: "Tools",
+  general: "System",
+};
 
 type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
 
@@ -92,12 +98,15 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
         <div className="settings-sidebar__brand"><span className="settings-sidebar__mark"><Icon name="audio" size={17} /></span><strong>Kivo</strong></div>
         <nav>
           {SECTIONS.map((item) => (
-            <button aria-current={section === item.id ? "page" : undefined} key={item.id} onClick={() => setSection(item.id)} type="button">
-              <Icon name={item.icon} size={16} /><span>{item.label}</span>
-            </button>
+            <Fragment key={item.id}>
+              {NAV_GROUP_LABELS[item.id] ? <span className="settings-sidebar__group-label">{NAV_GROUP_LABELS[item.id]}</span> : null}
+              <button aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)} type="button">
+                <Icon name={item.icon} size={16} /><span>{item.label}</span>
+              </button>
+            </Fragment>
           ))}
         </nav>
-        <p className="settings-sidebar__status">Kivo <span className="settings-sidebar__version">{context.version}</span></p>
+        <p className="settings-sidebar__status"><span aria-hidden="true" className="settings-sidebar__status-dot" data-paused={context.paused} />{context.paused ? "Paused" : "Ready"}<span className="settings-sidebar__version">{context.version}</span></p>
       </aside>
       <SettingsMain key={section}>
         {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} onDictation={() => setSection("dictation")} /> : <SectionContent

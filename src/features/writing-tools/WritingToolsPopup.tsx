@@ -153,15 +153,21 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     const mode = state.mode;
     if (mode === "closed" || !element) return;
     let frame = 0;
-    const observer = new ResizeObserver(() => {
+    const reportHeight = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        // Layout height excludes the entrance animation's temporary scale.
-        void nativeBridge.setSurfaceMode("writing-tools", mode, element.offsetHeight + 4).catch(() => {});
+        // Ask for the full content height; the native shell clamps it to the
+        // user's maximum, while the harness can still observe menu changes.
+        const content = element.querySelector<HTMLElement>(".writing-menu") ?? element;
+        void nativeBridge.setSurfaceMode("writing-tools", mode, content.scrollHeight + 4).catch(() => {});
       });
-    });
+    };
+    const observer = new ResizeObserver(reportHeight);
+    const mutationObserver = new MutationObserver(reportHeight);
     observer.observe(element);
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); };
+    mutationObserver.observe(element, { attributes: true, childList: true, subtree: true });
+    reportHeight();
+    return () => { observer.disconnect(); mutationObserver.disconnect(); cancelAnimationFrame(frame); };
   }, [state.mode]);
 
   const close = useCallback(() => {
@@ -319,15 +325,19 @@ function MenuView(props: MenuViewProps) {
   const more = useRef<HTMLDetailsElement>(null);
   useEffect(() => { if (selectedIndex >= 3 && more.current) more.current.open = true; }, [selectedIndex]);
   const renderAction = (action: typeof actions[number], index: number) => <button
-    aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
+    aria-label={action.label} aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
     key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
-    role="option" type="button"><Icon name={action.icon} size={16} /><span>{action.label}</span></button>;
+    role="option" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
   return (
     <div className="writing-menu">
+      <div className="writing-popup__top" data-tauri-drag-region>
+        <span className="writing-popup__eyebrow">Writing Tools</span>
+        <span className="writing-popup__context">{applicationName ? `Selected text in ${applicationName}` : "Selected text"}</span>
+      </div>
       <div className="writing-command" data-tauri-drag-region>
         <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
           <Icon name="pencil" size={15} />
-          <span>Describe your change…</span>
+          <span>Describe an edit…</span>
           <kbd>↵</kbd>
         </button>
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
@@ -342,7 +352,7 @@ function MenuView(props: MenuViewProps) {
       {allowManualText ? (
         <div className="writing-source">
           <label htmlFor="writing-source-text">
-            {applicationName ? `Selected in ${applicationName}` : "Selected text"}
+            Text to improve
           </label>
           <textarea
             id="writing-source-text"
@@ -383,7 +393,7 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
         onClick={() => dispatch({ type: "BACK" })}
         type="button"
       >
-        ‹
+        <Icon name="arrow-left" size={15} />
       </button>
       <input
         aria-label="Custom writing instruction"
