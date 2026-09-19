@@ -28,20 +28,23 @@ use ::windows::{
         },
         System::Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
         System::Ole::{CF_UNICODETEXT, OleFlushClipboard, OleGetClipboard, OleSetClipboard},
+        System::Threading::{AttachThreadInput, GetCurrentThreadId},
         UI::{
             Accessibility::{
                 CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId,
             },
             Input::KeyboardAndMouse::{
                 GetAsyncKeyState, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-                SendInput, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN, VK_V,
+                SendInput, SetFocus, VIRTUAL_KEY, VK_C, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_RWIN,
+                VK_V,
             },
             WindowsAndMessaging::{
-                CallNextHookEx, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow, GetMessageW,
-                GetWindowLongPtrW, GetWindowTextW, GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG,
-                PostThreadMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW,
-                UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
-                WM_SYSKEYUP, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+                CallNextHookEx, GUITHREADINFO, GWL_EXSTYLE, GetCursorPos, GetForegroundWindow,
+                GetGUIThreadInfo, GetMessageW, GetWindowLongPtrW, GetWindowTextW,
+                GetWindowThreadProcessId, KBDLLHOOKSTRUCT, MSG, PostThreadMessageW,
+                SetForegroundWindow, SetWindowLongPtrW, SetWindowsHookExW, UnhookWindowsHookEx,
+                WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
+                WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
             },
         },
     },
@@ -153,12 +156,6 @@ impl PlatformImpl {
         replacement: &str,
     ) -> PlatformResult<()> {
         let window = HWND(snapshot.owner.native_handle as *mut _);
-        if !unsafe { SetForegroundWindow(window) }.as_bool() {
-            return Err(os_error(
-                "replace_selected_text",
-                "The original application could not be focused.",
-            ));
-        }
         let selection = self
             .selection
             .lock()
@@ -166,7 +163,27 @@ impl PlatformImpl {
         let current_target = selection
             .as_ref()
             .and_then(|(token, target)| (*token == snapshot.native_token).then_some(target));
-        if !current_target.is_some_and(|target| target.is_current()) {
+        let Some(current_target) = current_target else {
+            return Err(PlatformError::new(
+                PlatformErrorKind::InvalidState,
+                "replace_selected_text",
+                "The original text field or selection changed.",
+            ));
+        };
+        if !unsafe { SetForegroundWindow(window) }.as_bool()
+            && unsafe { GetForegroundWindow() } != window
+        {
+            return Err(os_error(
+                "replace_selected_text",
+                "The original application could not be focused.",
+            ));
+        }
+        current_target.restore_focus();
+        // UI Automation runtime ids can change when Chromium/WebView2 or a
+        // native control is reactivated. The live selection read below is the
+        // authoritative stale-selection check; only require the stable owner
+        // window/process here before sending Ctrl+V.
+        if !current_target.is_foreground() {
             return Err(PlatformError::new(
                 PlatformErrorKind::InvalidState,
                 "replace_selected_text",
@@ -176,7 +193,7 @@ impl PlatformImpl {
         let (current, process_id) = match selected_text() {
             Ok((current, process_id, _)) => (current, process_id),
             Err(error)
-                if snapshot.strategy == crate::text::TextAccessStrategy::ClipboardFallback
+                if error.operation == "get_selected_text"
                     && matches!(
                         error.kind,
                         PlatformErrorKind::Unsupported | PlatformErrorKind::NotFound
@@ -319,12 +336,14 @@ impl PlatformImpl {
 struct WindowsTextTarget {
     window: usize,
     process_id: u32,
+    focus_window: usize,
     identity: Vec<i32>,
 }
 
 impl WindowsTextTarget {
     fn capture() -> PlatformResult<Self> {
         let window = unsafe { GetForegroundWindow() };
+        let focus_window = focused_window(window);
         let (identity, process_id) = focused_identity().unwrap_or_else(|_| {
             let mut process_id = 0;
             unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) };
@@ -333,11 +352,36 @@ impl WindowsTextTarget {
         Ok(Self {
             window: window.0 as usize,
             process_id,
+            focus_window: focus_window.0 as usize,
             identity,
         })
     }
+
+    fn restore_focus(&self) {
+        let focus_window = HWND(self.focus_window as *mut _);
+        if focus_window.is_invalid() {
+            return;
+        }
+        // Activating a top-level window does not necessarily restore its edit
+        // control. SetFocus only accepts windows on the calling thread's
+        // input queue, so bridge the queues for this one focus operation.
+        let target_thread = unsafe { GetWindowThreadProcessId(HWND(self.window as *mut _), None) };
+        let current_thread = unsafe { GetCurrentThreadId() };
+        if target_thread == 0 {
+            return;
+        }
+        if target_thread == current_thread {
+            let _ = unsafe { SetFocus(Some(focus_window)) };
+            return;
+        }
+        if unsafe { AttachThreadInput(current_thread, target_thread, true) }.as_bool() {
+            let _ = unsafe { SetFocus(Some(focus_window)) };
+            let _ = unsafe { AttachThreadInput(current_thread, target_thread, false) };
+        }
+    }
+
     fn is_current(&self) -> bool {
-        unsafe { GetForegroundWindow() }.0 as usize == self.window
+        self.is_foreground()
             && if self.identity.is_empty() {
                 let mut process_id = 0;
                 unsafe {
@@ -352,6 +396,30 @@ impl WindowsTextTarget {
                     })
             }
     }
+
+    fn is_foreground(&self) -> bool {
+        let window = HWND(self.window as *mut _);
+        if unsafe { GetForegroundWindow() } != window {
+            return false;
+        }
+        let mut process_id = 0;
+        (unsafe { GetWindowThreadProcessId(window, Some(&mut process_id)) }) != 0
+            && process_id == self.process_id
+    }
+}
+
+fn focused_window(window: HWND) -> HWND {
+    let thread_id = unsafe { GetWindowThreadProcessId(window, None) };
+    if thread_id == 0 {
+        return HWND::default();
+    }
+    let mut info = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    unsafe { GetGUIThreadInfo(thread_id, &mut info) }
+        .map(|_| info.hwndFocus)
+        .unwrap_or_default()
 }
 
 // UIA calls may run on Tauri's existing STA or a worker's new MTA. Only
@@ -374,6 +442,7 @@ impl Drop for AutomationApartment {
 
 impl crate::text::InsertionTarget for WindowsTextTarget {
     fn insert(&self, text: &str) -> Result<(), crate::text::TextError> {
+        self.restore_focus();
         if !self.is_current() {
             return Err(crate::text::TextError::SelectionExpired);
         }
