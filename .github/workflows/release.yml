@@ -97,11 +97,22 @@ jobs:
           workspaces: src-tauri
       # The Windows x86_64 build compiles the on-device speech runtime with its
       # Vulkan backend, which needs the SDK's glslc + headers at build time.
+      # Uses the official LunarG installer in silent mode (the installer sets
+      # no env for this process, so VULKAN_SDK is exported for CMake and the
+      # build script's link search).
       - name: Install Vulkan SDK (Windows x64)
-        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
-        with:
-          version: 1.4.357.0
-          cache: true
+        shell: pwsh
+        run: |
+          $version = "1.4.357.0"
+          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
+          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
+          $sdk = "C:\VulkanSDK\$version"
+          $header = "$sdk\Include\vulkan\vulkan.h"
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
+          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
+          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Vulkan SDK ready at $sdk"
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun typecheck
       - run: bun lint
