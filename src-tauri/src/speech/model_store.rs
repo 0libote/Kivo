@@ -218,8 +218,11 @@ impl ModelStore {
         tokio::fs::create_dir_all(&self.directory)
             .await
             .map_err(|_| ModelStoreError::Unavailable)?;
+        // A leftover `.partial` is resumed rather than discarded: dropping the
+        // connection halfway through a 500 MB model should not restart it.
+        // The final SHA-256 check still rejects a partial that came from a
+        // different file.
         let partial = self.directory.join(format!("{}.partial", entry.filename));
-        let _ = tokio::fs::remove_file(&partial).await;
 
         let cancel = Arc::new(AtomicBool::new(false));
         self.cancels
@@ -229,7 +232,11 @@ impl ModelStore {
         let result = self.stream_to_file(app, entry, &partial, &cancel).await;
         self.cancels.lock().ok().map(|mut map| map.remove(id));
         if let Err(error) = result {
-            let _ = tokio::fs::remove_file(&partial).await;
+            // Keep an interrupted download for the next attempt; a cancel is
+            // deliberate, so discard it.
+            if cancel.load(Ordering::SeqCst) {
+                let _ = tokio::fs::remove_file(&partial).await;
+            }
             return Err(error);
         }
 
@@ -282,24 +289,51 @@ impl ModelStore {
             "https://huggingface.co/{}/resolve/{}/{}",
             entry.repo, entry.revision, entry.filename
         );
-        let response = reqwest::Client::builder()
+        let existing = tokio::fs::metadata(partial)
+            .await
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .build()
-            .map_err(|_| ModelStoreError::Download)?
-            .get(&url)
+            .map_err(|_| ModelStoreError::Download)?;
+        let mut request = client.get(&url);
+        if existing > 0 {
+            request = request.header(reqwest::header::RANGE, format!("bytes={existing}-"));
+        }
+        let response = request
             .send()
             .await
             .map_err(|_| ModelStoreError::Download)?;
-        if !response.status().is_success() {
-            return Err(ModelStoreError::Download);
-        }
-        let total = response.content_length().unwrap_or(entry.size_bytes);
+        let plan = plan_download(
+            existing,
+            response.status().as_u16(),
+            response.content_length(),
+            entry.size_bytes,
+        )
+        .map_err(|_| ModelStoreError::Download)?;
 
-        let mut file = tokio::fs::File::create(partial)
-            .await
-            .map_err(|_| ModelStoreError::Unavailable)?;
+        let (mut file, mut downloaded, total) = match plan {
+            // A previous attempt wrote the whole file but never verified it;
+            // the hash check below still decides.
+            DownloadPlan::Complete => return Ok(()),
+            DownloadPlan::Resume { offset, total } => {
+                let file = tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(partial)
+                    .await
+                    .map_err(|_| ModelStoreError::Unavailable)?;
+                (file, offset, total)
+            }
+            // A server that ignores Range restarts from zero, so truncate.
+            DownloadPlan::Restart { total } => {
+                let file = tokio::fs::File::create(partial)
+                    .await
+                    .map_err(|_| ModelStoreError::Unavailable)?;
+                (file, 0, total)
+            }
+        };
         let mut stream = response.bytes_stream();
-        let mut downloaded: u64 = 0;
         let mut last_emit = Instant::now();
         while let Some(chunk) = stream.next().await {
             if cancel.load(Ordering::SeqCst) {
@@ -338,6 +372,45 @@ impl ModelStore {
     }
 }
 
+/// How a download response maps onto the `.partial` file. `Err(())` is a
+/// non-success status the caller turns into a retryable download error.
+#[derive(Debug, PartialEq, Eq)]
+enum DownloadPlan {
+    /// 416: the partial already holds every byte the server has.
+    Complete,
+    /// 206: append the remaining bytes after `offset`.
+    Resume { offset: u64, total: u64 },
+    /// 200 (or a server that ignored `Range`): truncate and start over.
+    Restart { total: u64 },
+}
+
+fn plan_download(
+    existing: u64,
+    status: u16,
+    content_length: Option<u64>,
+    fallback_size: u64,
+) -> Result<DownloadPlan, ()> {
+    if status == 416 {
+        return Ok(DownloadPlan::Complete);
+    }
+    let resumed = status == 206;
+    if !resumed && !(200..300).contains(&status) {
+        return Err(());
+    }
+    if resumed {
+        Ok(DownloadPlan::Resume {
+            offset: existing,
+            total: content_length
+                .map(|remaining| remaining + existing)
+                .unwrap_or(fallback_size),
+        })
+    } else {
+        Ok(DownloadPlan::Restart {
+            total: content_length.unwrap_or(fallback_size),
+        })
+    }
+}
+
 fn verify_sha256(path: &Path, expected: &str) -> io::Result<bool> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
@@ -353,7 +426,40 @@ fn verify_sha256(path: &Path, expected: &str) -> io::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelStore, catalog_entry, verify_sha256};
+    use super::{DownloadPlan, ModelStore, catalog_entry, plan_download, verify_sha256};
+
+    #[test]
+    fn download_plan_resumes_and_restarts_correctly() {
+        // 206 appends after the bytes already on disk and reports the real total.
+        assert_eq!(
+            plan_download(100, 206, Some(900), 1000),
+            Ok(DownloadPlan::Resume {
+                offset: 100,
+                total: 1000
+            })
+        );
+        // 206 without a length falls back to the catalog size.
+        assert_eq!(
+            plan_download(100, 206, None, 1000),
+            Ok(DownloadPlan::Resume {
+                offset: 100,
+                total: 1000
+            })
+        );
+        // 200 means the server ignored Range: truncate and start over.
+        assert_eq!(
+            plan_download(100, 200, Some(1000), 1000),
+            Ok(DownloadPlan::Restart { total: 1000 })
+        );
+        // 416 means the partial already covers the file; let verification decide.
+        assert_eq!(
+            plan_download(1000, 416, None, 1000),
+            Ok(DownloadPlan::Complete)
+        );
+        // Anything else is a retryable failure.
+        assert!(plan_download(0, 500, None, 1000).is_err());
+        assert!(plan_download(0, 404, None, 1000).is_err());
+    }
 
     #[test]
     fn every_catalog_entry_is_well_formed() {
