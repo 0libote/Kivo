@@ -19,7 +19,8 @@ const emptySelection = { hasSelection: false, applicationName: "Editor", canRepl
 async function installHarness(page: Page, context: SelectionContext) {
   await page.goto("/?surface=writing-tools");
   await page.evaluate(async ({ context }) => {
-    const { nativeBridge } = await import("/src/platform/native.ts") as { nativeBridge: NativeBridge & { emit: (event: string, context: SelectionContext) => void } };
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = await import(path) as { nativeBridge: NativeBridge & { emit: (event: string, context: SelectionContext) => void } };
     window.summaryTest = {
       requests: [],
       pending: [],
@@ -41,7 +42,6 @@ for (const platform of ["macos", "windows"] as const) {
       await page.addInitScript((value) => localStorage.setItem("kivo-dev-settings", JSON.stringify({ theme: value })), theme);
       await installHarness(page, textSelection);
 
-      await page.getByText("More actions", { exact: true }).click();
       await page.getByRole("option", { name: "Summarize", exact: true }).click();
       await expect.poll(() => page.evaluate(() => window.summaryTest.requests)).toEqual([{ action: "summarize", text: textSelection.initialText, sourceKind: "text" }]);
       await page.evaluate(() => window.summaryTest.pending[0].resolve({ kind: "result", text: "A useful summary.", canReplace: false }));
@@ -73,7 +73,8 @@ test("link summary retry keeps the captured URL without editable fallback", asyn
   await installHarness(page, linkSelection);
   await page.getByRole("button", { name: "Summarize", exact: true }).click();
   await page.evaluate(async () => {
-    const { NativeError } = await import("/src/types.ts");
+    const path = "/src/types.ts";
+    const { NativeError } = await import(path);
     window.summaryTest.pending[0].reject(new NativeError({ code: "unavailable", message: "Content unavailable.", recoverable: true }));
   });
   await page.getByRole("button", { name: "Retry", exact: true }).click();

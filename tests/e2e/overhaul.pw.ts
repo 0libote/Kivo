@@ -55,12 +55,12 @@ for (const platform of ["windows", "macos"] as const) {
   });
 }
 
-test("More actions stays reachable from the keyboard and recording can finish from its indicator", async ({ page }, testInfo) => {
+test("Every writing action is visible and recording can finish from its indicator", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 380, height: 460 });
   await page.goto("/?surface=writing-tools");
   await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("writing-menu.png") });
-  await expect(page.getByRole("option", { name: "Summarize", exact: true })).not.toBeVisible();
+  await expect(page.getByRole("option", { name: "Summarize", exact: true })).toBeVisible();
   for (let index = 0; index < 5; index++) await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("option", { name: "Summarize", exact: true })).toBeVisible();
   await page.keyboard.press("Enter");
@@ -77,28 +77,6 @@ test("More actions stays reachable from the keyboard and recording can finish fr
   await page.screenshot({ path: testInfo.outputPath("dictation-error.png") });
   await page.getByRole("button", { name: "Dismiss dictation error" }).click();
   await expect(page.locator('.flow-bar[data-state="hidden"]')).toHaveCount(1);
-});
-
-test("Writing Tools requests its content height and can expand after shrinking", async ({ page }) => {
-  await page.setViewportSize({ width: 380, height: 460 });
-  await page.goto("/?surface=writing-tools");
-  await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
-  await page.evaluate(async () => {
-    const path = "/src/platform/native.ts";
-    const { nativeBridge } = await import(path);
-    nativeBridge.setSurfaceMode = async (_surface: string, _mode: string, height: number) => {
-      document.documentElement.dataset.requestedHeight = String(height);
-    };
-  });
-  await page.getByText("More actions", { exact: true }).click();
-  await expect.poll(() => page.locator("html").getAttribute("data-requested-height")).not.toBeNull();
-  const expanded = Number(await page.locator("html").getAttribute("data-requested-height"));
-  await page.getByText("More actions", { exact: true }).click();
-  await expect.poll(async () => Number(await page.locator("html").getAttribute("data-requested-height"))).toBeLessThan(expanded);
-  const compact = Number(await page.locator("html").getAttribute("data-requested-height"));
-  await page.setViewportSize({ width: 380, height: compact });
-  await page.getByText("More actions", { exact: true }).click();
-  await expect.poll(async () => Number(await page.locator("html").getAttribute("data-requested-height"))).toBeGreaterThan(compact);
 });
 
 test("writing settings stay focused on actions and navigation resets scroll", async ({ page }, testInfo) => {

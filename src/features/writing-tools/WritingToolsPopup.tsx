@@ -311,8 +311,6 @@ interface MenuViewProps {
 
 function MenuView(props: MenuViewProps) {
   const { actions, applicationName, close, dispatch, runAction, selectedIndex } = props;
-  const more = useRef<HTMLDetailsElement>(null);
-  useEffect(() => { if (selectedIndex >= 3 && more.current) more.current.open = true; }, [selectedIndex]);
   const renderAction = (action: typeof actions[number], index: number) => <button
     aria-label={action.label} aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
     key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
@@ -320,24 +318,17 @@ function MenuView(props: MenuViewProps) {
   return (
     <div className="writing-menu">
       <div className="writing-popup__top" data-tauri-drag-region>
-        <span className="writing-popup__eyebrow">Writing Tools</span>
-        <span className="writing-popup__context">{applicationName ? `Selected text in ${applicationName}` : "Selected text"}</span>
-      </div>
-      <div className="writing-command" data-tauri-drag-region>
-        <button className="custom-prompt" onClick={() => dispatch({ type: "OPEN_CUSTOM" })} type="button">
-          <Icon name="pencil" size={15} />
-          <span>Describe an edit…</span>
-          <kbd>↵</kbd>
-        </button>
+        <span className="writing-popup__heading">
+          <span className="writing-popup__eyebrow">Writing Tools</span>
+          <span className="writing-popup__context">{applicationName ? `Selected text in ${applicationName}` : "Selected text"}</span>
+        </span>
         <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
           <Icon name="close" size={14} />
         </button>
       </div>
       <div aria-label="Writing actions" className="writing-actions" role="listbox">
-        {actions.slice(0, 3).map((action, index) => renderAction(action, index))}
-        {actions.length > 3 ? <details className="writing-more" ref={more}><summary>More actions</summary><div role="group" aria-label="More writing actions">{actions.slice(3).map((action, index) => renderAction(action, index + 3))}</div></details> : null}
+        {actions.map(renderAction)}
       </div>
-      <p className="writing-hint">↑↓ to choose · ↵ to run · Esc to close</p>
     </div>
   );
 }
@@ -559,10 +550,12 @@ function prepareWritingRequest(state: WritingToolsState, action: WritingActionId
   if (action === "custom" && !state.customInstruction.trim()) return undefined;
   const text = state.sourceText.trim();
   if (!text) return undefined;
+  let sourceKind: WritingRequest["sourceKind"];
+  if (action === "summarize") sourceKind = state.isLinkSummary ? "link" : "text";
   return {
     action,
     instruction: action === "custom" ? state.customInstruction.trim() : undefined,
     text,
-    sourceKind: action === "summarize" ? (state.isLinkSummary ? "link" : "text") : undefined,
+    sourceKind,
   };
 }
