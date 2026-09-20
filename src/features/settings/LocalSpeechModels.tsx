@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
@@ -31,6 +31,9 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // A cancel rejects the in-flight download; without this the rejection would
+  // surface as a failure the user did not experience.
+  const cancelled = useRef(new Set<string>());
 
   useNativeEvent<LocalSpeechModelInfo[]>("local-models-changed", setModels);
   useNativeEvent<LocalModelProgress>("local-model-progress", (update) => {
@@ -68,11 +71,20 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
       setModels(await nativeBridge.downloadLocalSpeechModel(modelId));
       await save({ localSpeechModel: modelId });
     } catch (caught) {
-      setError(caught instanceof NativeError ? caught.message : "The model could not be downloaded.");
+      if (!cancelled.current.has(modelId)) {
+        setError(caught instanceof NativeError ? caught.message : "The model could not be downloaded.");
+      }
     } finally {
+      cancelled.current.delete(modelId);
       clearProgress(modelId);
       setBusy(null);
     }
+  }
+
+  function cancel(modelId: string) {
+    cancelled.current.add(modelId);
+    clearProgress(modelId);
+    void nativeBridge.cancelLocalSpeechModelDownload(modelId).catch(() => {});
   }
 
   async function remove(modelId: string) {
@@ -114,7 +126,7 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
                       max={downloading.total || model.sizeBytes}
                       value={downloading.downloaded}
                     />
-                    <Button compact onClick={() => void nativeBridge.cancelLocalSpeechModelDownload(model.id).catch(() => {})}>
+                    <Button compact onClick={() => cancel(model.id)}>
                       Cancel
                     </Button>
                   </>
