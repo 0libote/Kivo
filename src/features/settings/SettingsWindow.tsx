@@ -532,39 +532,11 @@ function WritingSection({
 }) {
   return (
     <SettingsContent title="Writing Tools" subtitle="Choose the actions shown when you work with selected text.">
-      <SettingsGroup>
+      <SettingsGroup className="writing-shortcut-group">
         <SettingRow label="Shortcut">
           <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
         </SettingRow>
-        <SettingRow label="Open beside" description="Choose where Writing Tools appears.">
-          <SegmentedControl
-            ariaLabel="Popup placement"
-            onChange={(writingPopupAnchor) => void save({ writingPopupAnchor })}
-            options={[{ label: "Cursor", value: "cursor" }, { label: "Selection", value: "selection" }, { label: "Fixed", value: "fixed" }]}
-            value={settings.writingPopupAnchor}
-          />
-        </SettingRow>
       </SettingsGroup>
-      <details className="settings-advanced"><summary>Popup appearance</summary><SettingsGroup>
-        {settings.writingPopupAnchor === "fixed" ? (
-          <SettingRow label="Fixed position" description="Top-left corner of the popup, in pixels.">
-            <div className="popup-geometry">
-              <label>X<NumberPreference label="Fixed popup X" min={0} max={4000} value={settings.writingPopupX} onChange={value => save({ writingPopupX: value })} /></label>
-              <label>Y<NumberPreference label="Fixed popup Y" min={0} max={4000} value={settings.writingPopupY} onChange={value => save({ writingPopupY: value })} /></label>
-            </div>
-          </SettingRow>
-        ) : null}
-        <SettingRow label="Popup size" description="Width and maximum height. The window fits its content.">
-          <div className="popup-geometry">
-            <label>W<NumberPreference label="Popup width" min={280} max={800} value={settings.writingPopupWidth} onChange={value => save({ writingPopupWidth: value })} /></label>
-            <label>H<NumberPreference label="Popup height" min={200} max={800} value={settings.writingPopupHeight} onChange={value => save({ writingPopupHeight: value })} /></label>
-          </div>
-        </SettingRow>
-        <SettingRow label="Editable selected text" description="Show the captured highlight in an editable box before running an action.">
-          <Switch checked={settings.writingAllowManualText} label="Editable selected text" onChange={(value) => void save({ writingAllowManualText: value })} />
-        </SettingRow>
-      </SettingsGroup>
-      </details>
       <SettingsGroup header="Actions">
         <div className="writing-preferences-actions">{DEFAULT_WRITING_ACTIONS.map((id) => {
           const action = writingAction(id);
@@ -637,9 +609,9 @@ function AiSection({
   }
 
   return (
-    <SettingsContent title="AI" subtitle={aiSubtitle(info)}>
-      <SettingsGroup header="Provider">
-        <SettingRow label="Provider" description={providerBlurb(info)} stacked>
+    <SettingsContent title="AI" subtitle="Choose the service and models Kivo uses for Writing Tools and dictation cleanup.">
+      <SettingsGroup header="Service">
+        <SettingRow label="AI service" description={providerBlurb(info)} stacked>
           <select
             aria-label="AI provider"
             disabled={busy !== null}
@@ -661,7 +633,7 @@ function AiSection({
           </select>
         </SettingRow>
         {provider === "custom" ? (
-          <SettingRow label="Base URL" description="OpenAI-compatible endpoint — Ollama, LM Studio, or any OpenCode-style provider. Models are pulled from this server's /models list." stacked>
+          <SettingRow label="Server URL" description="The address of your OpenAI-compatible API. Use this for Ollama, LM Studio, or a hosted server." stacked>
             <div className="api-key-editor">
               <input
                 aria-label="Custom base URL"
@@ -684,42 +656,7 @@ function AiSection({
           </SettingRow>
         ) : null}
       </SettingsGroup>
-      <SettingsGroup header="Main model + fallbacks">
-        <SettingRow label="Model priority" description="The first row handles every request. Fallbacks are tried only if the previous model fails; put a fast model first for everyday edits. Pick Custom model ID to type any ID." stacked>
-          <ModelQueueEditor
-            disabled={busy !== null}
-            provider={provider}
-            onChange={(aiModels) => {
-              void save({ aiModels })
-                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
-                .catch(() => {});
-            }}
-            value={settings.aiModels}
-          />
-        </SettingRow>
-        {!info.supportsLinkSummary ? (
-          <p className="settings-note">Summarize-link needs the Gemini provider (it reads pages and videos for you). With {info.label}, summarize pasted text instead.</p>
-        ) : null}
-      </SettingsGroup>
-      <SettingsGroup header="Response speed">
-        <SettingRow label="Reasoning" description="Fast is recommended for short edits. Balanced and Deep can help difficult rewrites but may take longer and use more quota; unsupported models use their own default." stacked>
-          <select
-            aria-label="AI reasoning mode"
-            disabled={busy !== null}
-            onChange={(event) => {
-              const aiReasoningMode = event.target.value as AppSettings["aiReasoningMode"];
-              void save({ aiReasoningMode });
-            }}
-            value={settings.aiReasoningMode}
-          >
-            <option value="fast">Fast (recommended)</option>
-            <option value="balanced">Balanced</option>
-            <option value="deep">Deep</option>
-          </select>
-        </SettingRow>
-        <p className="settings-note">Kivo maps this to each provider’s native thinking control. Custom OpenAI-compatible endpoints are left unchanged.</p>
-      </SettingsGroup>
-      <SettingsGroup header="API key">
+      <SettingsGroup header="Connection">
         <SettingRow label={keyLabel(info)} description={keyDescription(info, apiStatus)} stacked>
           <div className="api-key-editor">
             <input
@@ -753,7 +690,7 @@ function AiSection({
             </Button>
           </div>
         </SettingRow>
-        <SettingRow label="Connection" description={connectionDescription(info, apiStatus)}>
+        <SettingRow label="Status" description={connectionDescription(info, apiStatus)}>
           <StatusIndicator label={connectionLabel(apiStatus)} state={apiStatus.connection} />
         </SettingRow>
         <div className="settings-group__footer settings-group__footer--split">
@@ -770,9 +707,6 @@ function AiSection({
                   setNotice(`${info.label} is ready for writing requests.`);
                 })
                 .catch((error: unknown) => {
-                  // Never leave the indicator stuck at "testing": a failed
-                  // test must land on a terminal connection state so the user
-                  // can correct the key and retry instead of looping.
                   const code = error instanceof NativeError ? error.code : "";
                   const message = error instanceof NativeError ? error.message : `Couldn’t connect to ${info.label}.`;
                   setNotice(message);
@@ -801,15 +735,50 @@ function AiSection({
             >Remove key</Button>
           ) : null}
         </div>
+        {info.keyUrl ? (
+          <div className="settings-group__footer"><button className="text-link" onClick={() => void nativeBridge.openExternal(info.keyUrl as string).catch(() => setNotice(`${info.label} couldn’t be opened.`))} type="button">{keyLinkLabel(info)}</button></div>
+        ) : null}
+      </SettingsGroup>
+      <SettingsGroup header="Models">
+        <SettingRow label="Models, in order" description="Kivo tries the primary model first. If it fails, Kivo tries each fallback in order." stacked>
+          <ModelQueueEditor
+            disabled={busy !== null}
+            provider={provider}
+            onChange={(aiModels) => {
+              void save({ aiModels })
+                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
+                .catch(() => {});
+            }}
+            value={settings.aiModels}
+          />
+        </SettingRow>
+        {!info.supportsLinkSummary ? (
+          <p className="settings-note">Link summaries require Gemini. {info.label} can still summarize selected text.</p>
+        ) : null}
+      </SettingsGroup>
+      <SettingsGroup header="Response">
+        <SettingRow label="Thinking level" description="Fast is best for everyday writing. Higher levels can help difficult rewrites, but take longer and may use more quota." stacked>
+          <select
+            aria-label="AI reasoning mode"
+            disabled={busy !== null}
+            onChange={(event) => {
+              const aiReasoningMode = event.target.value as AppSettings["aiReasoningMode"];
+              void save({ aiReasoningMode });
+            }}
+            value={settings.aiReasoningMode}
+          >
+            <option value="fast">Fast — recommended</option>
+            <option value="balanced">Balanced — more thorough</option>
+            <option value="deep">Deep — slowest</option>
+          </select>
+        </SettingRow>
       </SettingsGroup>
       {info.testUsesQuota ? (
-        <p className="settings-note">Test connection sends a short generation request using your first model and consumes API quota. Backup models are checked against the model list.</p>
+        <p className="settings-note">Testing the connection sends one short request and may use a small amount of quota.</p>
       ) : null}
-      {info.keyUrl ? (
-        <button className="text-link" onClick={() => void nativeBridge.openExternal(info.keyUrl as string).catch(() => setNotice(`${info.label} couldn’t be opened.`))} type="button">{keyLinkLabel(info)}</button>
-      ) : (
+      {!info.keyUrl ? (
         <p className="settings-note">No key needed for a local server. Pull a model first — e.g. <code>ollama pull {info.defaultModel}</code> — then Refresh the model list.</p>
-      )}
+      ) : null}
     </SettingsContent>
   );
 }
@@ -817,13 +786,13 @@ function AiSection({
 function providerBlurb(info: AiProviderInfo): string {
   switch (info.id as AiProviderId) {
     case "zen":
-      return "Pay-as-you-go credits from OpenCode. Works with any model below; each row shows its price.";
+      return "OpenCode’s pay-as-you-go service. Model prices appear below.";
     case "go":
-      return "Included in the $10/month OpenCode Go subscription. GLM-5.3 Flash is the recommended fast choice for short writing tasks; coding models can take longer.";
+      return "Uses your OpenCode Go subscription. GLM-5.3 Flash is the recommended model.";
     case "custom":
-      return "Any OpenAI-compatible endpoint — Ollama or LM Studio on your machine, or a hosted provider.";
+      return "Connect to Ollama, LM Studio, or another OpenAI-compatible server.";
     default:
-      return "Calls Google directly. The only provider that supports summarize-link.";
+      return "Connects directly to Google and supports summaries of highlighted links.";
   }
 }
 
@@ -833,19 +802,6 @@ const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
   { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
   { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
 ];
-
-function aiSubtitle(info: AiProviderInfo): string {
-  switch (info.id as AiProviderId) {
-    case "zen":
-      return "Kivo sends only the text needed for your request to OpenCode Zen (pay-as-you-go credits).";
-    case "go":
-      return "Kivo sends only the text needed for your request to OpenCode Go (included in your $10/month subscription).";
-    case "custom":
-      return "Kivo sends only the text needed for your request to your configured endpoint — nothing goes through Kivo servers.";
-    default:
-      return "Kivo sends only the text needed for your request directly to Google Gemini.";
-  }
-}
 
 function keyLabel(info: AiProviderInfo): string {
   if (info.id === "custom") return "Custom endpoint API key (optional)";
@@ -993,8 +949,8 @@ function SettingsContent({ title, subtitle, children }: { readonly title: string
   return <section className="settings-content"><header><h1>{title}</h1><p>{subtitle}</p></header>{children}</section>;
 }
 
-function SettingsGroup({ header, children }: { readonly header?: string; readonly children: ReactNode }) {
-  return <section className="settings-group">{header ? <h2>{header}</h2> : null}<div className="settings-group__body">{children}</div></section>;
+function SettingsGroup({ header, children, className = "" }: { readonly header?: string; readonly children: ReactNode; readonly className?: string }) {
+  return <section className={`settings-group ${className}`}>{header ? <h2>{header}</h2> : null}<div className="settings-group__body">{children}</div></section>;
 }
 
 function SettingRow({ label, description, children, stacked = false }: { readonly label: string; readonly description?: string; readonly children: ReactNode; readonly stacked?: boolean }) {

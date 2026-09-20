@@ -18,7 +18,7 @@ test("settings navigation and controls work", async ({ page }) => {
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.getByRole("heading", { name: "AI", exact: true })).toBeVisible();
   await expect(page.getByLabel("Google AI Studio API key")).toBeVisible();
-  await expect(page.getByText("Main model + fallbacks")).toBeVisible();
+  await expect(page.getByText("Models", { exact: true })).toBeVisible();
   const reasoningSelect = page.getByLabel("AI reasoning mode", { exact: true });
   await expect(reasoningSelect).toHaveValue("fast");
   await reasoningSelect.selectOption("balanced");
@@ -35,7 +35,7 @@ test("settings navigation and controls work", async ({ page }) => {
   }
   await firstModel.selectOption("gemini-3.6-flash");
   await expect(firstModel).toHaveValue("gemini-3.6-flash");
-  await page.getByRole("button", { name: "+ Add model", exact: true }).click();
+  await page.getByRole("button", { name: "+ Add fallback", exact: true }).click();
   const queueFirst = page.getByLabel("Model 1 of 2 (main model)", { exact: true });
   const queueSecond = page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true });
   await expect(queueFirst).toHaveValue("gemini-3.6-flash");
@@ -118,7 +118,6 @@ test("writing tools supports keyboard custom instructions and informational resu
   await page.keyboard.type("Translate to French");
   await expect(page.getByLabel("Custom writing instruction")).toHaveValue("Translate to French");
   await page.keyboard.press("Escape");
-  await page.getByText("More actions", { exact: true }).click();
   await page.getByRole("option", { name: "Summarize" }).click();
   await expect(page.getByText(/short greeting/)).toBeVisible({ timeout: 2_000 });
   await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();

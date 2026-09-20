@@ -147,8 +147,8 @@ struct WritingContextEvent {
 }
 
 /// User preferences cap the popup; the frontend reports its content height.
-const WRITING_DEFAULT_WIDTH: f64 = 380.0;
-const WRITING_DEFAULT_HEIGHT: f64 = 460.0;
+const WRITING_DEFAULT_WIDTH: f64 = 360.0;
+const WRITING_DEFAULT_HEIGHT: f64 = 420.0;
 
 pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
     build_window(app, "flow-bar", "Kivo Dictation", 220.0, 68.0, false, true)?;
@@ -786,6 +786,8 @@ pub(crate) async fn begin_dictation(app: &AppHandle, core: &AppCore) -> Result<(
     ) {
         return Ok(());
     }
+    let _ = core.dismiss_writing_tools();
+    hide_surface(app, "writing-tools");
     show_surface(app, "flow-bar", false).map_err(platform_command_error)?;
     emit_dictation(app, "starting", None, false);
     register_cancel_shortcut(app);
@@ -830,6 +832,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
     // still owns focus. Both UIA and macOS Accessibility depend on this.
     match core.open_writing_tools().await {
         Ok(context) => {
+            hide_surface(app, "flow-bar");
             // Size before positioning: placement clamps against the real
             // window frame, so the order matters.
             size_writing_surface(app, "menu", None).map_err(platform_command_error)?;
@@ -854,6 +857,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
         }
         Err(crate::commands::AppCoreError::WritingCancelled) => Ok(()),
         Err(error) => {
+            hide_surface(app, "flow-bar");
             size_writing_surface(app, "error", None).map_err(platform_command_error)?;
             show_surface(app, "writing-tools", true).map_err(platform_command_error)?;
             let command_error = CommandError::from(error);
@@ -1029,16 +1033,8 @@ pub(crate) fn set_writing_surface_focusability(
     Ok(())
 }
 
-fn writing_popup_size(app: &AppHandle) -> (f64, f64) {
-    app.try_state::<AppCore>()
-        .and_then(|core| core.settings().ok())
-        .map(|settings| {
-            (
-                settings.writing_tools.popup_width,
-                settings.writing_tools.popup_height,
-            )
-        })
-        .unwrap_or((WRITING_DEFAULT_WIDTH, WRITING_DEFAULT_HEIGHT))
+fn writing_popup_size(_app: &AppHandle) -> (f64, f64) {
+    (WRITING_DEFAULT_WIDTH, WRITING_DEFAULT_HEIGHT)
 }
 
 pub(crate) fn show_surface(
@@ -1164,105 +1160,13 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
 
 pub(crate) fn position_writing_surface(
     app: &AppHandle,
-    cursor: Option<crate::text::ScreenPoint>,
-    anchor: Option<crate::text::ScreenRect>,
+    _cursor: Option<crate::text::ScreenPoint>,
+    _anchor: Option<crate::text::ScreenRect>,
 ) {
     let Some(window) = app.get_webview_window("writing-tools") else {
         return;
     };
-    let Ok(window_size) = window.outer_size() else {
-        return;
-    };
-    let (anchor_mode, fixed_x, fixed_y) = writing_popup_placement(app);
-
-    // "fixed" pins the top-left corner exactly (clamped on-screen); every
-    // other mode anchors a point and offsets below the cursor/selection.
-    if anchor_mode == "fixed" {
-        let mut position = PhysicalPosition::new(fixed_x.round() as i32, fixed_y.round() as i32);
-        // Clamp against the monitor holding the fixed point so a position
-        // saved on a secondary display is not dragged to the primary one.
-        let fixed_monitor = monitor_containing(&window, fixed_x, fixed_y);
-        clamp_to_monitor_on(&window, &mut position, window_size, fixed_monitor);
-        let _ = window.set_position(Position::Physical(position));
-        return;
-    }
-
-    let selection_point =
-        anchor.map(|bounds| (bounds.x + bounds.width / 2.0, bounds.y + bounds.height));
-    let Some((point_x, point_y)) = (match anchor_mode.as_str() {
-        "selection" => selection_point.or_else(|| cursor.map(|point| (point.x, point.y))),
-        _ => cursor.map(|point| (point.x, point.y)).or(selection_point),
-    }) else {
-        center_on_monitor(&window, window_size);
-        return;
-    };
-
-    let monitor = monitor_containing(&window, point_x, point_y)
-        .or_else(|| window.current_monitor().ok().flatten())
-        .or_else(|| window.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        return;
-    };
-    let work_area = monitor.work_area();
-    let origin = &work_area.position;
-    let monitor_size = &work_area.size;
-    let window_width = window_size.width as f64;
-    let window_height = window_size.height as f64;
-    // Points arrive in physical pixels; the stored cursor/selection values
-    // are converted at capture time, so only rounding happens here.
-    let mut x = (point_x - window_width / 2.0).round() as i32;
-    let mut y = (point_y + 16.0).round() as i32;
-    let right = origin.x + monitor_size.width as i32;
-    let bottom = origin.y + monitor_size.height as i32;
-    x = x.clamp(
-        origin.x + 8,
-        (right - window_size.width as i32 - 8).max(origin.x + 8),
-    );
-    // Flip above the point when there is no room below.
-    if y + window_size.height as i32 > bottom - 8 {
-        y = (point_y - window_height - 12.0).round() as i32;
-    }
-    y = y.clamp(
-        origin.y + 8,
-        (bottom - window_size.height as i32 - 8).max(origin.y + 8),
-    );
-    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
-}
-
-fn writing_popup_placement(app: &AppHandle) -> (String, f64, f64) {
-    app.try_state::<AppCore>()
-        .and_then(|core| core.settings().ok())
-        .map(|settings| {
-            let mode = match settings.writing_tools.popup_anchor {
-                crate::config::PopupAnchor::Selection => "selection",
-                crate::config::PopupAnchor::Fixed => "fixed",
-                crate::config::PopupAnchor::Cursor => "cursor",
-            }
-            .to_owned();
-            (
-                mode,
-                settings.writing_tools.popup_fixed_x,
-                settings.writing_tools.popup_fixed_y,
-            )
-        })
-        .unwrap_or(("cursor".to_owned(), 480.0, 320.0))
-}
-
-fn monitor_containing(window: &WebviewWindow, x: f64, y: f64) -> Option<tauri::Monitor> {
-    window
-        .available_monitors()
-        .ok()?
-        .into_iter()
-        .find(|monitor| {
-            let origin = monitor.position();
-            let size = monitor.size();
-            let origin_x = f64::from(origin.x);
-            let origin_y = f64::from(origin.y);
-            x >= origin_x
-                && x < origin_x + f64::from(size.width)
-                && y >= origin_y
-                && y < origin_y + f64::from(size.height)
-        })
+    position_flow_bar(app, &window);
 }
 
 fn clamp_to_monitor_on(
@@ -1288,23 +1192,6 @@ fn clamp_to_monitor_on(
         origin.y + 8,
         (origin.y + monitor_size.height as i32 - window_size.height as i32 - 8).max(origin.y + 8),
     );
-}
-
-fn center_on_monitor(window: &WebviewWindow, window_size: tauri::PhysicalSize<u32>) {
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        return;
-    };
-    let work_area = monitor.work_area();
-    let origin = &work_area.position;
-    let monitor_size = &work_area.size;
-    let x = origin.x + (monitor_size.width.saturating_sub(window_size.width) / 2) as i32;
-    let y = origin.y + (monitor_size.height.saturating_sub(window_size.height) / 2) as i32;
-    let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
 }
 
 pub(crate) fn hide_surface(app: &AppHandle, surface: &str) {

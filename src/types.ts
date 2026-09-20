@@ -38,7 +38,6 @@ export type WritingActionId =
   | "key-points"
   | "custom";
 
-export type WritingPopupAnchor = "cursor" | "selection" | "fixed";
 
 /** AI backends (mirrors `AiProvider` in `src-tauri/src/ai/providers.rs`). */
 export type AiProviderId = "gemini" | "zen" | "go" | "custom";
@@ -70,12 +69,6 @@ export interface AppSettings {
   dictationHoldThresholdMs: number;
   writingShortcut: string;
   enabledWritingActions: WritingActionId[];
-  writingPopupAnchor: WritingPopupAnchor;
-  writingPopupX: number;
-  writingPopupY: number;
-  writingPopupWidth: number;
-  writingPopupHeight: number;
-  writingAllowManualText: boolean;
   aiProvider: AiProviderId;
   /** Ordered failover queue: tried top to bottom until one succeeds. */
   aiModels: string[];
@@ -128,14 +121,14 @@ export interface SelectionContext {
   applicationName: string;
   canReplace: boolean;
   bounds?: { x: number; y: number; width: number; height: number };
-  /** Captured highlight for the manual text box; empty when nothing is selected. */
+  /** Captured highlight; empty when nothing is selected. */
   initialText: string;
 }
 
 export interface WritingRequest {
   action: WritingActionId;
   instruction?: string;
-  /** Edited text-box content, or the explicit summary text / URL. */
+  /** Captured selection sent to the requested action. */
   text?: string;
   sourceKind?: "text" | "link";
 }
@@ -231,12 +224,6 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationHoldThresholdMs: 350,
     writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
-    writingPopupAnchor: "cursor",
-    writingPopupX: 480,
-    writingPopupY: 320,
-    writingPopupWidth: 380,
-    writingPopupHeight: 460,
-    writingAllowManualText: true,
     aiProvider: DEFAULT_AI_PROVIDER,
     aiModels: [DEFAULT_AI_MODEL],
     aiReasoningMode: "fast",

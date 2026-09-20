@@ -61,7 +61,7 @@ export function ModelQueueEditor({
 
   const candidate = addCandidate();
   const canAdd = !disabled && !refreshing && queue.length < MAX_AI_MODELS && candidate != null;
-  let addText = "+ Add model";
+  let addText = "+ Add fallback";
   if (refreshing) {
     addText = "Refreshing…";
   } else if (queue.length >= MAX_AI_MODELS) {
@@ -80,6 +80,7 @@ export function ModelQueueEditor({
             <li className="ai-model-queue__row" key={`${index}:${id}`}>
               <span aria-hidden className="ai-model-queue__position" data-first={index === 0}>{index + 1}</span>
               <div className="ai-model-queue__pick">
+                <span className="ai-model-queue__role">{index === 0 ? "Primary" : `Fallback ${index}`}</span>
                 <div className="ai-model-queue__select-row">
                   <select
                     aria-label={`Model ${index + 1} of ${queue.length} (${priority})`}

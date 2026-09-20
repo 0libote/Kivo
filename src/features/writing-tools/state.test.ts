@@ -1,117 +1,53 @@
 import { describe, expect, it } from "vitest";
-import { initialWritingToolsState, writingToolsReducer } from "./state";
+import { initialWritingToolsState, isWebUrl, writingToolsReducer } from "./state";
 
-const context = { hasSelection: true, applicationName: "TextEdit", canReplace: true, initialText: "Hello, how are you?" };
-const emptyContext = { hasSelection: false, applicationName: "Writing Tools", canReplace: false, initialText: "" };
+const context = { hasSelection: true, applicationName: "Editor", canReplace: true, initialText: "Hello, how are you?" };
+const linkContext = { ...context, initialText: "https://example.com/article" };
+const emptyContext = { hasSelection: false, applicationName: "Editor", canReplace: false, initialText: "" };
 const actions = ["proofread", "summarize", "custom"] as const;
 
+function open(selected = context) {
+  return writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: selected, enabledActions: [...actions] });
+}
+
 describe("writingToolsReducer", () => {
-  it("wraps keyboard navigation", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: [...actions] });
-    expect(writingToolsReducer(open, { type: "MOVE", delta: -1 }).selectedIndex).toBe(2);
-    expect(writingToolsReducer(open, { type: "MOVE", delta: 3 }).selectedIndex).toBe(0);
+  it("opens presets for selected text and wraps keyboard navigation", () => {
+    const state = open();
+    expect(state).toMatchObject({ mode: "menu", sourceText: context.initialText, isLinkSummary: false });
+    expect(writingToolsReducer(state, { type: "MOVE", delta: -1 }).selectedIndex).toBe(2);
+    expect(writingToolsReducer(state, { type: "MOVE", delta: 3 }).selectedIndex).toBe(0);
   });
 
-  it("prefills the editable source box with the captured highlight", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: [...actions] });
-    expect(open).toMatchObject({ mode: "menu", sourceText: "Hello, how are you?" });
-    const edited = writingToolsReducer(open, { type: "SET_SOURCE", value: "Edited text" });
-    expect(edited.sourceText).toBe("Edited text");
+  it("opens highlighted links directly in link summary mode", () => {
+    const state = open(linkContext);
+    expect(state).toMatchObject({ mode: "summary", activeAction: "summarize", isLinkSummary: true });
+    const processing = writingToolsReducer(state, { type: "RUN", action: "summarize" });
+    const result = writingToolsReducer(processing, { type: "RESULT", text: "Summary", canReplace: true });
+    expect(result).toMatchObject({ mode: "result", resultCanReplace: false });
   });
 
-  it("opens the summarize entry when nothing is selected", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: [...actions] });
-    expect(open).toMatchObject({ mode: "summary", summaryKind: "text", usesSummaryInput: true, activeAction: "summarize" });
-    const processing = writingToolsReducer(open, { type: "RUN", action: "summarize" });
-    expect(processing.mode).toBe("processing");
-    const result = writingToolsReducer(processing, { type: "RESULT", text: "A useful summary." });
-    expect(result).toMatchObject({ mode: "result", activeAction: "summarize" });
-    expect(writingToolsReducer(result, { type: "BACK" })).toMatchObject({ mode: "summary", usesSummaryInput: true });
+  it("requires a selection instead of offering a manual AI input", () => {
+    expect(open(emptyContext)).toMatchObject({ mode: "error", error: "Select some text first." });
   });
 
-  it("reports selection errors when nothing is selected and Summarize is disabled", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: ["proofread"] });
-    expect(open).toMatchObject({ mode: "error", error: "Select some text first." });
+  it("keeps normal summaries replaceable only when the backend allows it", () => {
+    const processing = writingToolsReducer(open(), { type: "RUN", action: "summarize" });
+    expect(writingToolsReducer(processing, { type: "RESULT", text: "Summary", canReplace: false }).resultCanReplace).toBe(false);
+    expect(writingToolsReducer(processing, { type: "RESULT", text: "Summary", canReplace: true }).resultCanReplace).toBe(true);
   });
 
-  it("stays on the error when Back has nowhere to go without a selection", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: emptyContext, enabledActions: ["proofread"] });
-    // Summarize is disabled, so Back must not land on a dead-end summary
-    // entry (the error view offers Close instead).
-    expect(writingToolsReducer(open, { type: "BACK" })).toMatchObject({ mode: "error" });
-  });
-
-  it("dismisses after replacement", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: [...actions] });
-    const processing = writingToolsReducer(open, { type: "RUN", action: "proofread" });
-    expect(processing.mode).toBe("processing");
+  it("dismisses after replacement and keeps errors retryable", () => {
+    const processing = writingToolsReducer(open(), { type: "RUN", action: "proofread" });
     expect(writingToolsReducer(processing, { type: "REPLACED" })).toEqual(initialWritingToolsState);
-  });
-
-  it("morphs informational actions into a result surface", () => {
-    const open = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: [...actions] });
-    const processing = writingToolsReducer(open, { type: "RUN", action: "summarize" });
-    const result = writingToolsReducer(processing, { type: "RESULT", text: "A useful summary." });
-    expect(result).toMatchObject({ mode: "result", activeAction: "summarize", resultText: "A useful summary." });
-  });
-
-  it("keeps errors calm and retryable", () => {
-    const failed = writingToolsReducer(initialWritingToolsState, {
-      type: "FAIL",
-      message: "Gemini is temporarily rate limited.",
-      canRetry: true,
-    });
-    expect(failed).toMatchObject({ mode: "error", canRetry: true });
+    expect(writingToolsReducer(processing, { type: "FAIL", message: "Try again", canRetry: true })).toMatchObject({ mode: "error", canRetry: true });
   });
 });
 
-describe("summary inputs", () => {
-  function open(hasSelection = false) {
-    return writingToolsReducer(initialWritingToolsState, { type: "OPEN", context: hasSelection ? context : emptyContext, enabledActions: [...actions] });
-  }
-
-  it("keeps pasted summary input when retrying after a failure", () => {
-    const summary = writingToolsReducer(open(), { type: "OPEN_SUMMARY", kind: "text" });
-    const edited = writingToolsReducer(summary, { type: "SET_SUMMARY_INPUT", value: "A long transcript" });
-    expect(edited).toMatchObject({ mode: "summary", summaryInput: "A long transcript" });
-    const running = writingToolsReducer(edited, { type: "RUN", action: "summarize" });
-    const failed = writingToolsReducer(running, { type: "FAIL", message: "Try again", canRetry: true });
-    expect(writingToolsReducer(failed, { type: "BACK" })).toMatchObject({ mode: "summary", summaryInput: "A long transcript", usesSummaryInput: true });
-  });
-
-  it("prefills links only when the selection is a URL", () => {
-    expect(writingToolsReducer(open(true), { type: "OPEN_SUMMARY", kind: "link" }).summaryInput).toBe("");
-    const selection = writingToolsReducer(open(true), { type: "SET_SOURCE", value: " https://example.com/article " });
-    expect(writingToolsReducer(selection, { type: "OPEN_SUMMARY", kind: "link" }).summaryInput).toBe("https://example.com/article");
-  });
-
-  it("never offers replacement for a link, even if a response allows it", () => {
-    const summary = writingToolsReducer(open(true), { type: "OPEN_SUMMARY", kind: "link" });
-    const running = writingToolsReducer(summary, { type: "RUN", action: "summarize" });
-    const result = writingToolsReducer(running, { type: "RESULT", text: "Summary", canReplace: true });
-    expect(result.resultCanReplace).toBe(false);
-  });
-
-  it("honors the backend replacement restriction for text results", () => {
-    const running = writingToolsReducer(open(true), { type: "RUN", action: "summarize" });
-    expect(writingToolsReducer(running, { type: "RESULT", text: "Summary", canReplace: false }).resultCanReplace).toBe(false);
-  });
-
-  it("retries the same summary and returns to its input on Back", () => {
-    const summary = writingToolsReducer(open(), { type: "OPEN_SUMMARY", kind: "link" });
-    const input = writingToolsReducer(summary, { type: "SET_SUMMARY_INPUT", value: "https://example.com" });
-    const running = writingToolsReducer(input, { type: "RUN", action: "summarize" });
-    const failed = writingToolsReducer(running, { type: "FAIL", message: "Try again", canRetry: true });
-    expect(writingToolsReducer(failed, { type: "BACK" })).toMatchObject({ mode: "summary", summaryInput: "https://example.com" });
-    const retried = writingToolsReducer(failed, { type: "RUN", action: "summarize" });
-    expect(retried.mode).toBe("processing");
-    expect(writingToolsReducer(retried, { type: "RESULT", text: "Summary" }).mode).toBe("result");
-  });
-
-  it("respects disabled Summarize and resets summary state on reopen", () => {
-    const disabled = writingToolsReducer(initialWritingToolsState, { type: "OPEN", context, enabledActions: ["proofread"] });
-    expect(writingToolsReducer(disabled, { type: "OPEN_SUMMARY", kind: "link" })).toBe(disabled);
-    const summary = writingToolsReducer(open(), { type: "OPEN_SUMMARY", kind: "link" });
-    expect(writingToolsReducer(summary, { type: "OPEN", context, enabledActions: [...actions] })).toMatchObject({ mode: "menu", usesSummaryInput: false, summaryInput: "", resultCanReplace: false });
+describe("isWebUrl", () => {
+  it("accepts only credential-free HTTP links", () => {
+    expect(isWebUrl(" https://example.com/article ")).toBe(true);
+    expect(isWebUrl("javascript:alert(1)")).toBe(false);
+    expect(isWebUrl("https://user:secret@example.com")).toBe(false);
+    expect(isWebUrl("Some selected text")).toBe(false);
   });
 });
