@@ -27,9 +27,12 @@ tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread", "sy
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 sha2 = "0.10"
 # On-device speech capture. cpal records the default input device into memory;
-# rubato resamples it to the 16 kHz mono f32 the local models expect.
+# rubato resamples it to the 16 kHz mono f32 the local models expect. earshot
+# is a pure-Rust voice-activity detector (no model asset) shared by every
+# platform, so silence is trimmed and never sent to the model to hallucinate on.
 cpal = "0.16"
 rubato = "0.16"
+earshot = "1.2"
 
 # On-device transcription runtime (whisper-family GGML/GGUF), static and
 # self-contained (no DLLs to ship). Backend per target: Metal on macOS, Vulkan

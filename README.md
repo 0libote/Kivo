@@ -105,6 +105,8 @@ On-device models are multilingual Whisper GGML conversions published by [`handy-
 
 The runtime is compiled into Kivo, not shipped as a separate server, and links statically on every platform (no extra DLLs to ship): Metal on macOS, Vulkan on Windows x86_64, CPU on Windows-on-ARM and Linux. On Windows the GPU backend is used when a Vulkan-capable driver is present and falls back to CPU otherwise. Building the Windows Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on the build machine; the SDK installer sets `VULKAN_SDK`, which the build script reads to find `vulkan-1.lib`. End users do not need the SDK.
 
+A pure-Rust voice-activity detector (`earshot`) trims silence around speech before transcription, so a quiet recording reports "no speech" instead of inventing words; it needs no model file and runs identically on every platform.
+
 On-device transcription uses the default microphone unless the selected device can be matched by name; a platform-specific device id that has no matching capture device falls back to the default. Only the latest dictation is kept in memory, as with the system engine.
 
 ## Website and YouTube summaries

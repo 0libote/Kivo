@@ -267,7 +267,14 @@ impl SpeechEngine for LocalSpeechEngine {
                 let samples = session.samples.lock().map_err(|_| SpeechError::Backend)?;
                 resample_to_16k(&samples, session.sample_rate)
             };
-            self.transcribe(pcm, session.locale).await
+            // Trim to the spoken span so silence is never sent to the model
+            // (Whisper hallucinates words on silence). No speech is a clean
+            // "nothing detected" instead of a bogus transcript.
+            let Some((start, end)) = voiced_span(&pcm) else {
+                return Err(SpeechError::NoSpeechDetected);
+            };
+            self.transcribe(pcm[start..end].to_vec(), session.locale)
+                .await
         })
     }
 
@@ -395,6 +402,45 @@ fn run_capture(
     drop(stream);
 }
 
+/// earshot's required frame: 16 ms of 16 kHz audio.
+const VAD_FRAME_SAMPLES: usize = 256;
+/// earshot scores above 0.5 are generally voice.
+const VAD_THRESHOLD: f32 = 0.5;
+
+/// The sample range covering all detected speech, or `None` when the clip is
+/// silent. Uses earshot, a pure-Rust VAD, so the same code runs on every
+/// platform with no model file to ship.
+fn voiced_span(samples: &[f32]) -> Option<(usize, usize)> {
+    let mut detector = earshot::Detector::default();
+    let mut spans = Vec::new();
+    let mut index = 0;
+    while index + VAD_FRAME_SAMPLES <= samples.len() {
+        let score = detector.predict_f32(&samples[index..index + VAD_FRAME_SAMPLES]);
+        if score >= VAD_THRESHOLD {
+            spans.push((index, index + VAD_FRAME_SAMPLES));
+        }
+        index += VAD_FRAME_SAMPLES;
+    }
+    merge_span(spans.into_iter(), samples.len())
+}
+
+/// First speech sample to the last, ignoring per-segment gaps. Pure so the
+/// span math is testable without a VAD.
+fn merge_span(spans: impl Iterator<Item = (usize, usize)>, len: usize) -> Option<(usize, usize)> {
+    let mut first: Option<usize> = None;
+    let mut last = 0usize;
+    for (start, end) in spans {
+        let start = start.min(len);
+        let end = end.min(len);
+        if start >= end {
+            continue;
+        }
+        first.get_or_insert(start);
+        last = last.max(end);
+    }
+    first.map(|start| (start, last))
+}
+
 fn resample_to_16k(samples: &[f32], input_rate: u32) -> Vec<f32> {
     if input_rate == TARGET_SAMPLE_RATE || samples.is_empty() {
         return samples.to_vec();
@@ -429,7 +475,7 @@ fn resample_to_16k(samples: &[f32], input_rate: u32) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{TARGET_SAMPLE_RATE, resample_to_16k};
+    use super::{TARGET_SAMPLE_RATE, merge_span, resample_to_16k, voiced_span};
 
     #[test]
     fn passthrough_at_target_rate() {
@@ -448,6 +494,31 @@ mod tests {
             "expected ~{expected} samples, got {}",
             output.len()
         );
+    }
+
+    #[test]
+    fn merge_span_covers_first_to_last_speech() {
+        assert_eq!(merge_span(std::iter::empty(), 1000), None);
+        assert_eq!(merge_span([(100, 200)].into_iter(), 1000), Some((100, 200)));
+        assert_eq!(
+            merge_span([(100, 200), (150, 300)].into_iter(), 1000),
+            Some((100, 300))
+        );
+        // Clamped to the buffer; empty or inverted spans are ignored.
+        assert_eq!(
+            merge_span([(900, 5000)].into_iter(), 1000),
+            Some((900, 1000))
+        );
+        assert_eq!(
+            merge_span([(50, 50), (10, 20)].into_iter(), 1000),
+            Some((10, 20))
+        );
+    }
+
+    #[test]
+    fn silence_has_no_speech_span() {
+        assert!(voiced_span(&[]).is_none());
+        assert!(voiced_span(&vec![0.0f32; 16_000]).is_none());
     }
 
     #[test]
