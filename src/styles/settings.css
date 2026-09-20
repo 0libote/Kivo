@@ -19,7 +19,7 @@
 .settings-content > header h1 { letter-spacing: -.03em; margin: 0 0 4px; font-family: inherit; font-size: 25px; font-weight: 650; line-height: 1.2; }
 .settings-content > header p { max-width: 560px; color: var(--text-secondary); margin: 0; font-size: 13px; }
 .settings-group { margin: 0 0 22px; }
-.settings-group > h2 { color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .13em; margin: 0 0 9px 2px; font-size: 9px; font-weight: 750; }
+.settings-group > h2 { color: var(--text-tertiary); text-transform: uppercase; letter-spacing: .11em; margin: 0 0 9px 2px; font-size: 10px; font-weight: 750; }
 .settings-group__body { border: 1px solid var(--border); border-color: var(--border); background: var(--surface-strong); box-shadow: none; border-radius: 9px; overflow: hidden; }
 .setting-row { border-top: 1px solid var(--border); justify-content: space-between; align-items: center; gap: 18px; min-height: 62px; padding: 12px 15px; display: flex; }
 .setting-row:first-child { border-top: 0; }
@@ -41,6 +41,7 @@
 .ai-model-queue__position { background: var(--surface-muted); width: 26px; height: 26px; color: var(--text-secondary); font-variant-numeric: tabular-nums; border-radius: 50%; flex: none; place-items: center; margin-top: 2px; font-size: 12px; font-weight: 650; display: grid; }
 .ai-model-queue__position[data-first="true"] { background: var(--accent); color: var(--accent-text); }
 .ai-model-queue__pick { flex: 1; align-content: start; gap: 5px; min-width: 0; display: grid; }
+.ai-model-queue__role { color: var(--text-tertiary); letter-spacing: .08em; text-transform: uppercase; font-size: 10px; font-weight: 700; }
 .ai-model-queue__select-row { align-items: center; gap: 6px; display: flex; }
 .ai-model-queue__select-row select { flex: 1; min-width: 0; }
 .ai-model-queue__actions { flex: none; gap: 4px; display: flex; }
@@ -113,6 +114,7 @@
   .writing-preferences-actions { grid-template-columns: 1fr; }
   .writing-preferences-actions .setting-row { border-left: 0; flex-direction: row; align-items: center; }
   .writing-preferences-actions .setting-row:nth-child(2) { border-top: 1px solid var(--border); }
+  .writing-shortcut-group .setting-row { flex-direction: row; align-items: center; }
   .settings-sidebar { padding-inline: 8px; }
   .home-shortcut { flex-wrap: wrap; min-height: 72px; }
   .settings-sidebar__brand { padding-inline: 6px; }
