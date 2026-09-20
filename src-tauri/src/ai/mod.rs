@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 use crate::security::SecretString;
 
 mod link_summary;
+pub mod local;
 pub mod providers;
 pub use link_summary::LinkSource;
+pub use local::{LocalAiServer, detect_local_servers, install_runtime};
 pub use providers::{
     AiProvider, Billing, OpenAiCompatClient, OpencodeError, ProviderInfo, canonical_model_id_for,
     curated_models_for, is_usable_model_for, normalize_base_url, provider_infos,

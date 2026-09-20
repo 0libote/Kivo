@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "system-proxy"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream", "system-proxy"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon", "image-png"] }
@@ -24,6 +24,32 @@ tauri-plugin-single-instance = "2.4.4"
 tauri-plugin-updater = "2.11.0"
 thiserror = "2.0"
 tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.10"
+# On-device speech capture. cpal records the default input device into memory;
+# rubato resamples it to the 16 kHz mono f32 the local models expect. earshot
+# is a pure-Rust voice-activity detector (no model asset) shared by every
+# platform, so silence is trimmed and never sent to the model to hallucinate on.
+cpal = "0.16"
+rubato = "0.16"
+earshot = "1.2"
+
+# On-device transcription runtime (whisper-family GGML/GGUF), static and
+# self-contained (no DLLs to ship). Backend per target: Metal on macOS, Vulkan
+# on Windows x86_64, CPU elsewhere.
+#
+# The Vulkan backend is compiled in, not shipped as a module, so building it
+# needs the Vulkan SDK (glslc + headers) on the build machine; end users need
+# only a Vulkan-capable GPU driver and fall back to CPU when none is present.
+# Windows-on-ARM and Linux stay CPU-only.
+[target.'cfg(target_os = "macos")'.dependencies]
+transcribe-cpp = { version = "0.2.3", default-features = false, features = ["metal"] }
+
+[target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
+transcribe-cpp = { version = "0.2.3", default-features = false, features = ["vulkan"] }
+
+[target.'cfg(not(any(target_os = "macos", all(windows, target_arch = "x86_64"))))'.dependencies]
+transcribe-cpp = { version = "0.2.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

@@ -15,12 +15,13 @@ use crate::{
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
-        SettingsRuntimeError,
+        SettingsRuntimeError, SpeechEnginePreference,
     },
     security::{CredentialError, CredentialStatus, CredentialStore, SecretString},
     speech::{
-        DictationMachine, DictationPhase, MicrophoneDevice, SpeechEngine, SpeechError,
-        SpeechEventSink, SpeechStartOptions,
+        DictationMachine, DictationPhase, MicrophoneDevice, SpeechBackend, SpeechEngine,
+        SpeechError, SpeechEventSink, SpeechStartOptions,
+        model_store::{LocalSpeechModel, ModelStore, ModelStoreError},
     },
     text::{
         ActiveApplication, CapturedSelection, ScreenPoint, ScreenRect, TextError, TextService,
@@ -393,10 +394,16 @@ impl AppCore {
             LanguagePreference::Auto => None,
             LanguagePreference::Locale { tag } => Some(tag),
         };
+        let backend = match settings.speech_engine {
+            SpeechEnginePreference::System => SpeechBackend::System,
+            SpeechEnginePreference::Local => SpeechBackend::Local {
+                model_id: settings.local_speech_model.clone().unwrap_or_default(),
+            },
+        };
         let started = tokio::select! {
             biased;
             _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-            result = self.speech.start(SpeechStartOptions { microphone_id: settings.microphone_id, locale }, events) => result,
+            result = self.speech.start(SpeechStartOptions { microphone_id: settings.microphone_id, locale, backend }, events) => result,
         };
         let session = match started {
             Ok(session) => session,
@@ -930,6 +937,7 @@ pub enum AppCoreError {
     Opencode(OpencodeError),
     Prompt(PromptError),
     Speech(SpeechError),
+    ModelStore(ModelStoreError),
     DictationTransition(crate::speech::DictationTransitionError),
     Text(TextError),
     WritingTransition(WritingTransitionError),
@@ -951,6 +959,7 @@ impl std::error::Error for AppCoreError {
             Self::Opencode(error) => Some(error),
             Self::Prompt(error) => Some(error),
             Self::Speech(error) => Some(error),
+            Self::ModelStore(error) => Some(error),
             Self::DictationTransition(error) => Some(error),
             Self::Text(error) => Some(error),
             Self::WritingTransition(error) => Some(error),
@@ -977,6 +986,7 @@ impl AppCoreError {
             Self::Opencode(error) => error.code(),
             Self::Prompt(_) => "invalid_prompt",
             Self::Speech(_) => "speech",
+            Self::ModelStore(_) => "local_model",
             Self::DictationTransition(_) => "dictation_state",
             Self::Text(_) => "text_integration",
             Self::WritingTransition(_) => "writing_state",
@@ -1010,6 +1020,7 @@ impl AppCoreError {
             Self::Credential(error) => error.to_string(),
             Self::Prompt(error) => error.to_string(),
             Self::Speech(error) => error.to_string(),
+            Self::ModelStore(error) => error.to_string(),
             Self::DictationTransition(_) | Self::WritingTransition(_) => {
                 "That action is not available right now.".into()
             }
@@ -1035,6 +1046,7 @@ from_core_error!(Gemini, GeminiError);
 from_core_error!(Opencode, OpencodeError);
 from_core_error!(Prompt, PromptError);
 from_core_error!(Speech, SpeechError);
+from_core_error!(ModelStore, ModelStoreError);
 from_core_error!(DictationTransition, crate::speech::DictationTransitionError);
 from_core_error!(Text, TextError);
 from_core_error!(WritingTransition, WritingTransitionError);
@@ -1057,6 +1069,8 @@ impl From<AppCoreError> for CommandError {
             | AppCoreError::Opencode(OpencodeError::EmptyResponse)
             | AppCoreError::Speech(SpeechError::NoSpeechDetected)
             | AppCoreError::Speech(SpeechError::RecognitionUnavailable)
+            | AppCoreError::Speech(SpeechError::LocalModelUnavailable)
+            | AppCoreError::ModelStore(_)
             | AppCoreError::Speech(SpeechError::Backend) => true,
             AppCoreError::AiTimeout => true,
             AppCoreError::Gemini(error) if error.is_rate_limited() => true,
@@ -1080,6 +1094,24 @@ fn default_hold_threshold_ms() -> u64 {
     350
 }
 
+fn default_speech_engine() -> String {
+    "system".into()
+}
+
+fn speech_engine_id(preference: SpeechEnginePreference) -> &'static str {
+    match preference {
+        SpeechEnginePreference::System => "system",
+        SpeechEnginePreference::Local => "local",
+    }
+}
+
+fn parse_speech_engine(value: &str) -> SpeechEnginePreference {
+    match value {
+        "local" => SpeechEnginePreference::Local,
+        _ => SpeechEnginePreference::System,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
@@ -1098,6 +1130,10 @@ pub struct FrontendSettings {
     pub dictation_hold_enabled: bool,
     #[serde(default = "default_hold_threshold_ms")]
     pub dictation_hold_threshold_ms: u64,
+    #[serde(default = "default_speech_engine")]
+    pub speech_engine: String,
+    #[serde(default)]
+    pub local_speech_model: Option<String>,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
     #[serde(default = "default_ai_provider")]
@@ -1153,6 +1189,8 @@ impl From<AppSettings> for FrontendSettings {
             dictation_tap_enabled: settings.dictation.tap_enabled,
             dictation_hold_enabled: settings.dictation.hold_enabled,
             dictation_hold_threshold_ms: settings.dictation.hold_threshold_ms,
+            speech_engine: speech_engine_id(settings.dictation.speech_engine).into(),
+            local_speech_model: settings.dictation.local_speech_model,
             writing_shortcut: settings.writing_tools.shortcut.accelerator,
             enabled_writing_actions: settings
                 .writing_tools
@@ -1234,6 +1272,8 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 tap_enabled: settings.dictation_tap_enabled,
                 hold_enabled: settings.dictation_hold_enabled,
                 hold_threshold_ms: settings.dictation_hold_threshold_ms,
+                speech_engine: parse_speech_engine(&settings.speech_engine),
+                local_speech_model: settings.local_speech_model,
             },
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
@@ -1264,6 +1304,8 @@ pub struct SettingsPatch {
     dictation_tap_enabled: Option<bool>,
     dictation_hold_enabled: Option<bool>,
     dictation_hold_threshold_ms: Option<u64>,
+    speech_engine: Option<String>,
+    local_speech_model: Option<Option<String>>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
     ai_provider: Option<String>,
@@ -1303,6 +1345,8 @@ impl SettingsPatch {
         assign!(dictation_tap_enabled);
         assign!(dictation_hold_enabled);
         assign!(dictation_hold_threshold_ms);
+        assign!(speech_engine);
+        assign!(local_speech_model);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
         assign!(ai_provider);
@@ -1576,6 +1620,59 @@ fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
             }),
     );
     Some(languages)
+}
+
+#[tauri::command]
+pub fn list_local_speech_models(store: State<'_, Arc<ModelStore>>) -> Vec<LocalSpeechModel> {
+    store.list()
+}
+
+#[tauri::command]
+pub async fn download_local_speech_model(
+    app: AppHandle,
+    store: State<'_, Arc<ModelStore>>,
+    model_id: String,
+) -> Result<Vec<LocalSpeechModel>, CommandError> {
+    store
+        .download(&app, &model_id)
+        .await
+        .map_err(|error| CommandError::from(AppCoreError::ModelStore(error)))?;
+    Ok(store.list())
+}
+
+#[tauri::command]
+pub fn cancel_local_speech_model_download(store: State<'_, Arc<ModelStore>>, model_id: String) {
+    store.cancel(&model_id);
+}
+
+#[tauri::command]
+pub fn delete_local_speech_model(
+    app: AppHandle,
+    store: State<'_, Arc<ModelStore>>,
+    model_id: String,
+) -> Result<Vec<LocalSpeechModel>, CommandError> {
+    store
+        .delete(&model_id)
+        .map_err(|error| CommandError::from(AppCoreError::ModelStore(error)))?;
+    let models = store.list();
+    let _ = app.emit("local-models-changed", &models);
+    Ok(models)
+}
+
+#[tauri::command]
+pub async fn detect_local_ai_servers() -> Vec<crate::ai::LocalAiServer> {
+    crate::ai::detect_local_servers().await
+}
+
+#[tauri::command]
+pub async fn install_local_ai_runtime(app: AppHandle) -> Result<(), CommandError> {
+    crate::ai::install_runtime(&app)
+        .await
+        .map_err(|message| CommandError {
+            code: "local_ai_install".into(),
+            message,
+            recoverable: true,
+        })
 }
 
 #[tauri::command]

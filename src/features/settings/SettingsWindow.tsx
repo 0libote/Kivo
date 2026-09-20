@@ -1,5 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ModelQueueEditor } from "./ModelQueueEditor";
+import { LocalSpeechModels } from "./LocalSpeechModels";
+import { LocalAiSetup } from "./LocalAiSetup";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { Button } from "../../components/Button";
@@ -448,8 +450,47 @@ function DictationSection({
     context.platform === "macos" && settings.dictationShortcut === "Fn"
       ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
       : undefined;
+  let languageDescription = "Automatic follows the current input language when supported.";
+  if (settings.speechEngine === "local") {
+    languageDescription = "On-device models detect the spoken language automatically; set this only to force one.";
+  } else if (context.platform === "windows") {
+    languageDescription = "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
+  }
   return (
     <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop.">
+      <SettingsGroup header="Recognition">
+        <SettingRow
+          label="Transcription engine"
+          description={settings.speechEngine === "local"
+            ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
+            : "System: uses the operating-system speech engine, which may use the network on some systems."}
+          stacked
+        >
+          <SegmentedControl
+            ariaLabel="Transcription engine"
+            onChange={(engine) => void save({ speechEngine: engine as AppSettings["speechEngine"] })}
+            options={[
+              { label: "System", value: "system" },
+              { label: "On-device", value: "local" },
+            ]}
+            value={settings.speechEngine}
+          />
+        </SettingRow>
+        {settings.speechEngine === "local" ? (
+          <SettingRow label="On-device model" stacked>
+            <LocalSpeechModels save={save} settings={settings} />
+          </SettingRow>
+        ) : null}
+        <SettingRow label="Language" description={languageDescription}>
+          {languages.length === 0 ? (
+            <span className="setting-empty">No languages found. Reopen Settings to try again.</span>
+          ) : (
+            <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={languages.some((language) => language.code === settings.dictationLanguage) ? settings.dictationLanguage : languages[0].code}>
+              {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
+            </select>
+          )}
+        </SettingRow>
+      </SettingsGroup>
       <SettingsGroup>
         <SettingRow label="Shortcut" description={shortcutNote}>
           <ShortcutRecorder label="Dictation shortcut" onChange={(dictationShortcut) => save({ dictationShortcut })} platform={context.platform} value={settings.dictationShortcut} />
@@ -470,15 +511,6 @@ function DictationSection({
             <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={microphones.some((device) => device.id === (settings.microphoneId ?? "")) || settings.microphoneId === null ? (settings.microphoneId ?? "") : ""}>
               <option value="">System Default</option>
               {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
-            </select>
-          )}
-        </SettingRow>
-        <SettingRow label="Language" description={context.platform === "windows" ? "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech." : "Automatic follows the current input language when supported."}>
-          {languages.length === 0 ? (
-            <span className="setting-empty">No languages found. Reopen Settings to try again.</span>
-          ) : (
-            <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={languages.some((language) => language.code === settings.dictationLanguage) ? settings.dictationLanguage : languages[0].code}>
-              {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
             </select>
           )}
         </SettingRow>
@@ -633,27 +665,32 @@ function AiSection({
           </select>
         </SettingRow>
         {provider === "custom" ? (
-          <SettingRow label="Server URL" description="The address of your OpenAI-compatible API. Use this for Ollama, LM Studio, or a hosted server." stacked>
-            <div className="api-key-editor">
-              <input
-                aria-label="Custom base URL"
-                autoCapitalize="none"
-                autoComplete="off"
-                defaultValue={settings.aiCustomBaseUrl ?? ""}
-                key={provider}
-                onBlur={(event) => {
-                  const raw = event.target.value.trim();
-                  const aiCustomBaseUrl = raw === "" ? null : raw;
-                  if (aiCustomBaseUrl !== settings.aiCustomBaseUrl) {
-                    void save({ aiCustomBaseUrl }).catch(() => setNotice("The base URL couldn’t be saved."));
-                  }
-                }}
-                placeholder={info.defaultBaseUrl ?? "http://localhost:11434/v1"}
-                spellCheck={false}
-                type="url"
-              />
-            </div>
-          </SettingRow>
+          <>
+            <SettingRow label="Server URL" description="The address of your OpenAI-compatible API. Use this for Ollama, LM Studio, or a hosted server." stacked>
+              <div className="api-key-editor">
+                <input
+                  aria-label="Custom base URL"
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  defaultValue={settings.aiCustomBaseUrl ?? ""}
+                  key={provider}
+                  onBlur={(event) => {
+                    const raw = event.target.value.trim();
+                    const aiCustomBaseUrl = raw === "" ? null : raw;
+                    if (aiCustomBaseUrl !== settings.aiCustomBaseUrl) {
+                      void save({ aiCustomBaseUrl }).catch(() => setNotice("The base URL couldn’t be saved."));
+                    }
+                  }}
+                  placeholder={info.defaultBaseUrl ?? "http://localhost:11434/v1"}
+                  spellCheck={false}
+                  type="url"
+                />
+              </div>
+            </SettingRow>
+            <SettingRow label="Local servers" description="Kivo checks this computer for a running Ollama, LM Studio, or llama.cpp server." stacked>
+              <LocalAiSetup disabled={busy !== null} save={save} settings={settings} />
+            </SettingRow>
+          </>
         ) : null}
       </SettingsGroup>
       <SettingsGroup header="Connection">
