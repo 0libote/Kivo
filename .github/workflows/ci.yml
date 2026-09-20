@@ -179,6 +179,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy
+      # The Windows x86_64 build compiles the on-device speech runtime with its
+      # Vulkan backend, which needs the SDK's glslc + headers at build time.
+      - name: Install Vulkan SDK (Windows x64)
+        if: runner.os == 'Windows'
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
+        with:
+          version: 1.4.357.0
+          cache: true
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
@@ -436,6 +444,11 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+      - name: Install Vulkan SDK (Windows x64)
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
+        with:
+          version: 1.4.357.0
+          cache: true
       - run: bun install --frozen-lockfile --ignore-scripts
       # No signing keys: the NSIS .exe installs with a bypassable
       # SmartScreen warning ("More info" -> "Run anyway").
@@ -546,6 +559,11 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+      - name: Install Vulkan SDK (Windows x64)
+        uses: humbletim/install-vulkan-sdk@30ba978f977e81b72d091fc8888feb1fb26f9aff # v1.2
+        with:
+          version: 1.4.357.0
+          cache: true
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity

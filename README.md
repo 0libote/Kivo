@@ -31,6 +31,7 @@ Physical testing on both systems is required before a release, especially for Fn
 - Visual Studio Build Tools with Desktop development with C++.
 - Windows 11 SDK 10.0.26100 or newer. SignTool is optional for Authenticode signing.
 - WebView2 Runtime (included with current Windows 11 installations).
+- The [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) for the on-device speech runtime's GPU backend (x64 only). Install it once; it sets `VULKAN_SDK` for new terminals.
 - An installed desktop speech language for dictation. A signing certificate is optional for building and sharing the `.exe`.
 
 If more than one Visual Studio install is present (for example Build Tools 2026 plus VS 2022), CMake may default to one without the C++ workload. Point it at a complete install for the build shell, e.g. `$env:CMAKE_GENERATOR = "Visual Studio 17 2022"` in PowerShell before `bun tauri dev`.
@@ -102,7 +103,7 @@ Dictation can run either on the operating-system speech engine or entirely on th
 
 On-device models are multilingual Whisper GGML conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0), the same files the `transcribe-cpp` runtime is built for. Kivo offers Tiny, Base, Small (recommended), Medium, and Large v3 Turbo; each is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
 
-The runtime is compiled into Kivo, not shipped as a separate server: Metal on macOS, static CPU on Windows (no extra DLLs or runtime to install). A user who wants GPU acceleration on Windows can add `features = ["vulkan"]` to the Windows `transcribe-cpp` dependency, which requires the Vulkan SDK at build time and shipping the ggml DLLs.
+The runtime is compiled into Kivo, not shipped as a separate server, and links statically on every platform (no extra DLLs to ship): Metal on macOS, Vulkan on Windows x86_64, CPU on Windows-on-ARM and Linux. On Windows the GPU backend is used when a Vulkan-capable driver is present and falls back to CPU otherwise. Building the Windows Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on the build machine; the SDK installer sets `VULKAN_SDK`, which the build script reads to find `vulkan-1.lib`. End users do not need the SDK.
 
 On-device transcription uses the default microphone unless the selected device can be matched by name; a platform-specific device id that has no matching capture device falls back to the default. Only the latest dictation is kept in memory, as with the system engine.
 
