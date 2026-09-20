@@ -467,6 +467,12 @@ impl AppCore {
         let ai_models = settings.ai.models.clone();
         let ai_base_url = settings.ai.custom_base_url.clone();
         let dictation = settings.dictation;
+        // A dedicated cleanup model pins the request to one entry; otherwise
+        // cleanup follows the Writing Tools failover queue.
+        let cleanup_models = match dictation.cleanup_model.clone() {
+            Some(model) => vec![model],
+            None => ai_models,
+        };
         let mut final_text = transcript.into_text();
         if dictation.improve_with_ai
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
@@ -479,7 +485,7 @@ impl AppCore {
                 let cleaned = tokio::select! {
                     biased;
                     _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &ai_models, ai_base_url.as_deref(), &prompt, AiReasoningMode::Fast)) => result,
+                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &cleanup_models, ai_base_url.as_deref(), &prompt, AiReasoningMode::Fast)) => result,
                 };
                 if let Ok(Ok(cleaned)) = cleaned {
                     final_text = cleaned;
@@ -1134,6 +1140,8 @@ pub struct FrontendSettings {
     pub speech_engine: String,
     #[serde(default)]
     pub local_speech_model: Option<String>,
+    #[serde(default)]
+    pub dictation_cleanup_model: Option<String>,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
     #[serde(default = "default_ai_provider")]
@@ -1191,6 +1199,7 @@ impl From<AppSettings> for FrontendSettings {
             dictation_hold_threshold_ms: settings.dictation.hold_threshold_ms,
             speech_engine: speech_engine_id(settings.dictation.speech_engine).into(),
             local_speech_model: settings.dictation.local_speech_model,
+            dictation_cleanup_model: settings.dictation.cleanup_model,
             writing_shortcut: settings.writing_tools.shortcut.accelerator,
             enabled_writing_actions: settings
                 .writing_tools
@@ -1274,6 +1283,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 hold_threshold_ms: settings.dictation_hold_threshold_ms,
                 speech_engine: parse_speech_engine(&settings.speech_engine),
                 local_speech_model: settings.local_speech_model,
+                cleanup_model: settings.dictation_cleanup_model,
             },
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
@@ -1306,6 +1316,7 @@ pub struct SettingsPatch {
     dictation_hold_threshold_ms: Option<u64>,
     speech_engine: Option<String>,
     local_speech_model: Option<Option<String>>,
+    dictation_cleanup_model: Option<Option<String>>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
     ai_provider: Option<String>,
@@ -1347,6 +1358,7 @@ impl SettingsPatch {
         assign!(dictation_hold_threshold_ms);
         assign!(speech_engine);
         assign!(local_speech_model);
+        assign!(dictation_cleanup_model);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
         assign!(ai_provider);

@@ -7,7 +7,10 @@
 //! one-click to detect and configure, and offers to install Ollama the same
 //! way a browser would hand the download to the OS.
 
-use std::{path::PathBuf, process::Command, time::Duration};
+use std::{path::Path, time::Duration};
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+use std::process::Command;
 
 use futures_util::StreamExt;
 use serde::Serialize;
@@ -132,13 +135,17 @@ pub async fn install_runtime(app: &AppHandle) -> Result<(), String> {
     launch_installer(&path)
 }
 
-fn launch_installer(path: &PathBuf) -> Result<(), String> {
+fn launch_installer(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let result = Command::new(path).spawn();
     #[cfg(target_os = "macos")]
     let result = Command::new("open").arg(path).spawn();
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    let result: std::io::Result<std::process::Child> = Err(std::io::Error::other("unsupported"));
+    let result: std::io::Result<std::process::Child> = {
+        // Unsupported host: keep the path meaningful for the error context.
+        let _ = path;
+        Err(std::io::Error::other("unsupported"))
+    };
     result
         .map(|_| ())
         .map_err(|_| "The installer could not be opened.".to_owned())

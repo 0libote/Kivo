@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ModelQueueEditor } from "./ModelQueueEditor";
 import { LocalSpeechModels } from "./LocalSpeechModels";
+import { DictationCleanupModel } from "./DictationCleanupModel";
 import { LocalAiSetup } from "./LocalAiSetup";
 import { HomeSection } from "./HomeSection";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -519,6 +520,11 @@ function DictationSection({
         <SettingRow label="Improve dictated text with AI" description="Cleans punctuation and obvious filler words without changing your meaning.">
           <Switch checked={settings.improveDictationWithAi} label="Improve dictated text with AI" onChange={(value) => void save({ improveDictationWithAi: value })} />
         </SettingRow>
+        {settings.improveDictationWithAi ? (
+          <SettingRow label="Cleanup model" description="Which AI model tidies the transcript. Defaults to your Writing Tools models, in order.">
+            <DictationCleanupModel save={save} settings={settings} />
+          </SettingRow>
+        ) : null}
         <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
           <Switch checked={settings.soundFeedback} label="Sound feedback" onChange={(value) => void save({ soundFeedback: value })} />
         </SettingRow>
@@ -641,7 +647,7 @@ function AiSection({
   }
 
   return (
-    <SettingsContent title="AI" subtitle="Choose the service and models Kivo uses for Writing Tools and dictation cleanup.">
+    <SettingsContent title="AI" subtitle="Choose the service and models Kivo uses for Writing Tools. Dictation cleanup follows these models unless you set its own under Dictation.">
       <SettingsGroup header="Service">
         <SettingRow label="AI service" description={providerBlurb(info)} stacked>
           <select
