@@ -327,7 +327,7 @@ function MenuView(props: MenuViewProps) {
         </button>
       </div>
       <div aria-label="Writing actions" className="writing-actions" role="listbox">
-        {actions.map(renderAction)}
+        {actions.map((action, index) => renderAction(action, index))}
       </div>
     </div>
   );
