@@ -15,6 +15,10 @@ import {
   type AppContext,
   type AppSettings,
   type DictationSnapshot,
+  type LocalAiInstallProgress,
+  type LocalAiServerInfo,
+  type LocalModelProgress,
+  type LocalSpeechModelInfo,
   type MicrophoneDevice,
   NativeError,
   type NativeErrorShape,
@@ -39,6 +43,9 @@ type NativeEventMap = {
   "writing-error": NativeErrorShape;
   "permission-status-changed": PermissionStatus[];
   "settings-changed": AppSettings;
+  "local-models-changed": LocalSpeechModelInfo[];
+  "local-model-progress": LocalModelProgress;
+  "local-ai-install-progress": LocalAiInstallProgress;
 };
 
 export interface UpdateResult {
@@ -64,8 +71,14 @@ export interface NativeBridge {
   resetPermissionGrants(): Promise<PermissionStatus[]>;
   listMicrophones(): Promise<MicrophoneDevice[]>;
   listSpeechLanguages(): Promise<SpeechLanguage[]>;
+  listLocalSpeechModels(): Promise<LocalSpeechModelInfo[]>;
+  downloadLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
+  cancelLocalSpeechModelDownload(modelId: string): Promise<void>;
+  deleteLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
   listAiProviders(): Promise<AiProviderInfo[]>;
   listAiModels(): Promise<AiModelInfo[]>;
+  detectLocalAiServers(): Promise<LocalAiServerInfo[]>;
+  installLocalAiRuntime(): Promise<void>;
   getApiKeyStatus(): Promise<ApiKeyStatus>;
   saveApiKey(apiKey: string): Promise<ApiKeyStatus>;
   clearApiKey(): Promise<ApiKeyStatus>;
@@ -154,8 +167,14 @@ class TauriBridge implements NativeBridge {
   resetPermissionGrants = () => call<PermissionStatus[]>("reset_permission_grants");
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
+  listLocalSpeechModels = () => call<LocalSpeechModelInfo[]>("list_local_speech_models");
+  downloadLocalSpeechModel = (modelId: string) => call<LocalSpeechModelInfo[]>("download_local_speech_model", { modelId });
+  cancelLocalSpeechModelDownload = (modelId: string) => call<void>("cancel_local_speech_model_download", { modelId });
+  deleteLocalSpeechModel = (modelId: string) => call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = () => call<AiModelInfo[]>("list_ai_models");
+  detectLocalAiServers = () => call<LocalAiServerInfo[]>("detect_local_ai_servers");
+  installLocalAiRuntime = () => call<void>("install_local_ai_runtime");
   getApiKeyStatus = () => call<ApiKeyStatus>("get_api_key_status");
   saveApiKey = (apiKey: string) => call<ApiKeyStatus>("store_api_key", { apiKey });
   clearApiKey = () => call<ApiKeyStatus>("remove_api_key");
@@ -317,6 +336,45 @@ class MockBridge implements NativeBridge {
     ];
   }
 
+  // Illustrative catalog mirroring src-tauri/src/speech/model_store.rs; the
+  // harness never downloads anything.
+  private localModels: LocalSpeechModelInfo[] = [
+    { id: "whisper-tiny", name: "Tiny", description: "Fastest and smallest.", sizeBytes: 44_211_616, recommended: false, downloaded: false },
+    { id: "whisper-base", name: "Base", description: "A light, responsive model.", sizeBytes: 63_786_048, recommended: false, downloaded: false },
+    { id: "whisper-small", name: "Small", description: "Recommended.", sizeBytes: 193_749_056, recommended: true, downloaded: true },
+    { id: "whisper-medium", name: "Medium", description: "Higher accuracy.", sizeBytes: 504_102_848, recommended: false, downloaded: false },
+    { id: "whisper-large-v3-turbo", name: "Large v3 Turbo", description: "Best quality.", sizeBytes: 536_069_728, recommended: false, downloaded: false },
+  ];
+
+  async listLocalSpeechModels() {
+    return structuredClone(this.localModels);
+  }
+
+  async downloadLocalSpeechModel(modelId: string) {
+    const model = this.localModels.find((candidate) => candidate.id === modelId);
+    if (model && !model.downloaded) {
+      const steps = 4;
+      for (let step = 1; step <= steps; step += 1) {
+        this.emit("local-model-progress", { modelId, downloaded: Math.round((model.sizeBytes * step) / steps), total: model.sizeBytes });
+        await delay(180);
+      }
+      model.downloaded = true;
+    }
+    this.emit("local-models-changed", structuredClone(this.localModels));
+    return structuredClone(this.localModels);
+  }
+
+  async cancelLocalSpeechModelDownload() {
+    // Intentional no-op: the harness download resolves immediately.
+  }
+
+  async deleteLocalSpeechModel(modelId: string) {
+    const model = this.localModels.find((candidate) => candidate.id === modelId);
+    if (model) model.downloaded = false;
+    this.emit("local-models-changed", structuredClone(this.localModels));
+    return structuredClone(this.localModels);
+  }
+
   async listAiProviders(): Promise<AiProviderInfo[]> {
     return [
       { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
@@ -328,6 +386,18 @@ class MockBridge implements NativeBridge {
 
   async listAiModels(): Promise<AiModelInfo[]> {
     return structuredClone(fallbackAiModels(this.settings.aiProvider));
+  }
+
+  async detectLocalAiServers(): Promise<LocalAiServerInfo[]> {
+    return [
+      { id: "ollama", name: "Ollama", baseUrl: "http://localhost:11434/v1", running: false, models: [] },
+      { id: "lmstudio", name: "LM Studio", baseUrl: "http://localhost:1234/v1", running: false, models: [] },
+      { id: "llamacpp", name: "llama.cpp", baseUrl: "http://localhost:8080/v1", running: false, models: [] },
+    ];
+  }
+
+  async installLocalAiRuntime(): Promise<void> {
+    // Intentional no-op: the browser harness does not download installers.
   }
 
   private currentKeyStatus(): ApiKeyStatus {

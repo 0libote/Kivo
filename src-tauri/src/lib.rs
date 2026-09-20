@@ -20,6 +20,7 @@ use crate::{
         adapters::{PlatformCredentialStore, PlatformSpeechEngine, PlatformTextService},
     },
     shell::{ShellSettingsRuntime, ShellState},
+    speech::{local::LocalSpeechEngine, model_store::ModelStore, router::SelectableSpeechEngine},
 };
 
 pub fn run() {
@@ -35,15 +36,21 @@ pub fn run() {
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
+            // On-device models live in the app data directory and are managed
+            // by Kivo (downloaded, verified, deleted); nothing is bundled.
+            let model_store = Arc::new(ModelStore::new(app.path().app_data_dir()?.join("models")));
+            let system_speech = Arc::new(PlatformSpeechEngine::new(Arc::clone(&platform)));
+            let local_speech = Arc::new(LocalSpeechEngine::new(Arc::clone(&model_store)));
             let core = AppCore::new(
                 SettingsRepository::new(settings_path),
                 Arc::new(ShellSettingsRuntime(handle.clone())),
                 Arc::new(PlatformCredentialStore::new(Arc::clone(&platform))),
                 GeminiClient::new()?,
-                Arc::new(PlatformSpeechEngine::new(Arc::clone(&platform))),
+                Arc::new(SelectableSpeechEngine::new(system_speech, local_speech)),
                 Arc::new(PlatformTextService::new(Arc::clone(&platform))),
             )?;
             let settings = commands::FrontendSettings::from(core.settings()?);
+            app.manage(model_store);
             app.manage(platform);
             app.manage(core);
 
@@ -91,6 +98,12 @@ pub fn run() {
             commands::reset_permission_grants,
             commands::list_microphones,
             commands::list_speech_languages,
+            commands::list_local_speech_models,
+            commands::download_local_speech_model,
+            commands::cancel_local_speech_model_download,
+            commands::delete_local_speech_model,
+            commands::detect_local_ai_servers,
+            commands::install_local_ai_runtime,
             commands::list_ai_providers,
             commands::list_ai_models,
             commands::get_api_key_status,

@@ -42,6 +42,39 @@ export type WritingActionId =
 /** AI backends (mirrors `AiProvider` in `src-tauri/src/ai/providers.rs`). */
 export type AiProviderId = "gemini" | "zen" | "go" | "custom";
 
+/** Which recognizer powers dictation (mirrors `SpeechEnginePreference`). */
+export type SpeechEngineId = "system" | "local";
+
+/** One downloadable on-device speech model. */
+export interface LocalSpeechModelInfo {
+  id: string;
+  name: string;
+  description: string;
+  sizeBytes: number;
+  recommended: boolean;
+  downloaded: boolean;
+}
+
+export interface LocalModelProgress {
+  modelId: string;
+  downloaded: number;
+  total: number;
+}
+
+/** A locally running OpenAI-compatible server Kivo can use for local LLMs. */
+export interface LocalAiServerInfo {
+  id: string;
+  name: string;
+  baseUrl: string;
+  running: boolean;
+  models: string[];
+}
+
+export interface LocalAiInstallProgress {
+  downloaded: number;
+  total: number;
+}
+
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
@@ -67,6 +100,9 @@ export interface AppSettings {
   dictationTapEnabled: boolean;
   dictationHoldEnabled: boolean;
   dictationHoldThresholdMs: number;
+  speechEngine: SpeechEngineId;
+  /** On-device model id; null means the recommended model. */
+  localSpeechModel: string | null;
   writingShortcut: string;
   enabledWritingActions: WritingActionId[];
   aiProvider: AiProviderId;
@@ -222,6 +258,8 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationTapEnabled: true,
     dictationHoldEnabled: true,
     dictationHoldThresholdMs: 350,
+    speechEngine: "system",
+    localSpeechModel: null,
     writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
     aiProvider: DEFAULT_AI_PROVIDER,

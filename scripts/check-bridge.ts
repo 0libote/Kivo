@@ -42,6 +42,8 @@ const nativeTs = read("src/platform/native.ts");
 const typesTs = read("src/types.ts");
 const commandsRs = read("src-tauri/src/commands/mod.rs");
 const shellRs = read("src-tauri/src/shell.rs");
+const modelStoreRs = read("src-tauri/src/speech/model_store.rs");
+const localAiRs = read("src-tauri/src/ai/local.rs");
 const libRs = read("src-tauri/src/lib.rs");
 
 // --- 1. Every invoked command exists in Rust --------------------------------
@@ -57,7 +59,9 @@ if (invoked.size > 0) {
   fail("frontend invokes at least one command", "invoke() call sites not found in native.ts");
 }
 
-const rustSources = `${commandsRs}\n${shellRs}`;
+// The on-device model store and local-AI installer own their own events even
+// though their commands live in commands/mod.rs, so their emit()s count too.
+const rustSources = `${commandsRs}\n${shellRs}\n${modelStoreRs}\n${localAiRs}`;
 // Read the fn name off the lines right after each attribute instead of
 // matching across newlines (`\s*\n\s*` backtracks super-linearly).
 const defined = new Set<string>();

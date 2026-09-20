@@ -18,6 +18,7 @@ Physical testing on both systems is required before a release, especially for Fn
 1. Install [Bun](https://bun.com/docs/installation).
 2. Install stable Rust with [rustup](https://rustup.rs/).
 3. Install the current [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
+4. Install CMake and a C++ toolchain (Visual Studio Build Tools with Desktop development with C++ on Windows, Xcode command-line tools on macOS, `build-essential` on Linux). The on-device speech runtime (whisper.cpp, via the `transcribe-cpp` crate) is compiled from source on the first build; no model files are downloaded at build time.
 
 ### macOS
 
@@ -31,6 +32,8 @@ Physical testing on both systems is required before a release, especially for Fn
 - Windows 11 SDK 10.0.26100 or newer. SignTool is optional for Authenticode signing.
 - WebView2 Runtime (included with current Windows 11 installations).
 - An installed desktop speech language for dictation. A signing certificate is optional for building and sharing the `.exe`.
+
+If more than one Visual Studio install is present (for example Build Tools 2026 plus VS 2022), CMake may default to one without the C++ workload. Point it at a complete install for the build shell, e.g. `$env:CMAKE_GENERATOR = "Visual Studio 17 2022"` in PowerShell before `bun tauri dev`.
 
 ## Development
 
@@ -52,7 +55,8 @@ Open `http://127.0.0.1:1420/?surface=gallery&harness=1` for the test bench: one 
 Linux runs the full app against a simulated adapter, so the shared core (state machines, IPC, settings, AI failover) is exercised exactly as on macOS and Windows. Only macOS and Windows ship; Linux exists so every flow is verifiable without those machines.
 
 ```sh
-# Tauri system prerequisites for your distro, then:
+# Tauri system prerequisites for your distro, plus ALSA headers for the
+# on-device microphone capture (cpal): libasound2-dev on Debian/Ubuntu, then:
 bun install
 bun tauri dev
 ```
@@ -79,7 +83,7 @@ Pick a provider under Settings → AI (or during onboarding), save its key, then
 - **Gemini** (default): create a key in [Google AI Studio](https://aistudio.google.com/app/apikey). The picker lists the text models available to your key via Google's ListModels API (blocklist only — speech/audio, image, video, music, computer-use, and agent families are hidden), falling back to curated suggestions offline or without a key. Test connection sends a short generation request to the first queued model, consuming API quota, then checks backup models against the listing. Slow generation can fall through to the next queued model after the request timeout. Costs are billed by Google.
 - **OpenCode Zen**: pay-as-you-go credits from [opencode.ai/auth](https://opencode.ai/auth) at cost (see [Zen pricing](https://opencode.ai/docs/zen#pricing)). The picker pulls the live model list from `https://opencode.ai/zen/v1/models` and prices every entry from a curated table (`src-tauri/src/ai/providers.rs`), so free trial models show `Free` and paid ones show `$X in / $Y out per 1M`. Test connection sends a one-token request, so it costs a fraction of a cent.
 - **OpenCode Go**: the `$10/month` subscription from [opencode.ai/auth](https://opencode.ai/auth) (see [Go limits](https://opencode.ai/docs/go#usage-limits)). Same live listing as Zen via `https://opencode.ai/zen/go/v1/models`, with each option showing its token rate plus the monthly allowance included in the subscription (e.g. `$0.95 in / $4.00 out per 1M · $60/mo incl.`).
-- **Custom (OpenAI-compatible)**: any OpenAI-style endpoint — Ollama (`http://localhost:11434/v1`, the default), LM Studio (`http://127.0.0.1:1234/v1`), llama.cpp, OpenRouter, or any other "normal" OpenCode-style provider from the [provider directory](https://opencode.ai/docs/providers). Enter the base URL, pull a model first (e.g. `ollama pull llama3.1`), then Refresh the model list — models are pulled from your server's `/models` list. No key is needed for local servers; hosted endpoints use the saved key. Local models show `Local · free`.
+- **Custom (OpenAI-compatible)**: any OpenAI-style endpoint — Ollama (`http://localhost:11434/v1`, the default), LM Studio (`http://127.0.0.1:1234/v1`), llama.cpp, OpenRouter, or any other "normal" OpenCode-style provider from the [provider directory](https://opencode.ai/docs/providers). Enter the base URL, pull a model first (e.g. `ollama pull llama3.1`), then Refresh the model list — models are pulled from your server's `/models` list. No key is needed for local servers; hosted endpoints use the saved key. Local models show `Local · free`. Kivo checks this computer for a running Ollama, LM Studio, or llama.cpp server and offers a one-click **Use** for each one it finds; when none is running it offers to download and launch the official Ollama installer.
 
 Go requests use each model's supported API: Chat Completions for Kimi, Messages for MiniMax/Qwen/Union, and Responses for GPT/Grok/Muse. Kivo identifies itself with its app version and sends a separate OpenCode session header for each stateless request. Sampling parameters use the model defaults so models that reject custom temperature values can work.
 
@@ -88,6 +92,19 @@ The native client defaults to `gemini-3.8-flash` with low thinking for latency-s
 Link summaries (webpages via URL context, YouTube via video input) need the Gemini provider. With Zen, Go, or Custom, summarize pasted text instead — the app says so when a link is used there.
 
 Without a key, native dictation still works and inserts the raw operating-system transcript; writing actions with a hosted provider display a concise configuration error.
+
+## On-device transcription
+
+Dictation can run either on the operating-system speech engine or entirely on this computer. Choose the engine under Settings → Dictation → Transcription engine:
+
+- **System** (default) uses the OS engine. On macOS that is Apple's on-device `SpeechAnalyzer`; on Windows it is the installed desktop SAPI engine.
+- **On-device** records the default microphone, resamples it to 16 kHz, and transcribes with a Whisper model downloaded into Kivo's app-data `models` folder. Audio never leaves the machine.
+
+On-device models are multilingual Whisper GGML conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0), the same files the `transcribe-cpp` runtime is built for. Kivo offers Tiny, Base, Small (recommended), Medium, and Large v3 Turbo; each is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
+
+The runtime is compiled into Kivo, not shipped as a separate server: Metal on macOS, static CPU on Windows (no extra DLLs or runtime to install). A user who wants GPU acceleration on Windows can add `features = ["vulkan"]` to the Windows `transcribe-cpp` dependency, which requires the Vulkan SDK at build time and shipping the ggml DLLs.
+
+On-device transcription uses the default microphone unless the selected device can be matched by name; a platform-specific device id that has no matching capture device falls back to the default. Only the latest dictation is kept in memory, as with the system engine.
 
 ## Website and YouTube summaries
 
@@ -118,7 +135,7 @@ The app is one Tauri process with four pre-created webview surfaces:
 
 React owns presentation and transient UI state. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle. Sensitive text and keys are intentionally absent from serializable types wherever the UI does not need them. The latest completed dictation is kept only in memory for the current app session and can be copied or cleared from Home. Cancelled dictations are discarded.
 
-Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free AX/UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
+Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. The optional on-device engine lives under `src-tauri/src/speech/` (`local.rs` capture and inference, `model_store.rs` catalog/downloads, `router.rs` per-session engine selection) and is shared by both desktops. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free AX/UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
 
 ## Permissions
 
@@ -127,7 +144,7 @@ Kivo asks only in onboarding or when a feature is invoked:
 - Accessibility reads the current selection and inserts or replaces text.
 - Input Monitoring observes and suppresses the modifier-only dictation gesture.
 - Microphone records only while dictation is active.
-- Speech Recognition sends audio only to the operating-system speech engine. Microphone audio is never sent to Gemini.
+- Speech Recognition sends audio only to the operating-system speech engine. With the on-device engine, microphone audio is transcribed locally and never sent off the device. Microphone audio is never sent to Gemini.
 
 On Windows there is no in-app consent prompt: the microphone row reads
 granted (capture problems surface when dictation starts, pointing back at

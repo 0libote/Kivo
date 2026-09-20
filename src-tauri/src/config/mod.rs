@@ -192,6 +192,11 @@ pub struct DictationSettings {
     pub tap_enabled: bool,
     pub hold_enabled: bool,
     pub hold_threshold_ms: u64,
+    /// Which recognizer to use. `System` keeps the OS engine (the default so
+    /// existing installs are unchanged); `Local` runs a downloaded model.
+    pub speech_engine: SpeechEnginePreference,
+    /// Selected on-device model id. `None` resolves to the recommended model.
+    pub local_speech_model: Option<String>,
 }
 
 impl Default for DictationSettings {
@@ -205,6 +210,8 @@ impl Default for DictationSettings {
             tap_enabled: true,
             hold_enabled: true,
             hold_threshold_ms: 350,
+            speech_engine: SpeechEnginePreference::System,
+            local_speech_model: None,
         }
     }
 }
@@ -227,6 +234,11 @@ impl DictationSettings {
         // A zero threshold would classify every press as a hold and break
         // tap-to-dictate; 50 ms is the smallest distinguishable hold.
         self.hold_threshold_ms = self.hold_threshold_ms.clamp(50, 5000);
+        if let Some(id) = self.local_speech_model.as_deref()
+            && id.trim().is_empty()
+        {
+            self.local_speech_model = None;
+        }
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
@@ -241,8 +253,22 @@ impl DictationSettings {
         {
             return Err(SettingsError::InvalidLanguage);
         }
+        if let Some(id) = &self.local_speech_model
+            && id.len() > 128
+        {
+            return Err(SettingsError::InvalidLocalModel);
+        }
         Ok(())
     }
+}
+
+/// Which recognizer powers dictation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeechEnginePreference {
+    #[default]
+    System,
+    Local,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -416,6 +442,7 @@ pub enum SettingsError {
     InvalidShortcut,
     InvalidMicrophone,
     InvalidLanguage,
+    InvalidLocalModel,
     InvalidAiModel,
 }
 
@@ -433,6 +460,7 @@ impl fmt::Display for SettingsError {
             Self::InvalidShortcut => "The configured shortcut is invalid.",
             Self::InvalidMicrophone => "The configured microphone is invalid.",
             Self::InvalidLanguage => "The configured language is invalid.",
+            Self::InvalidLocalModel => "The configured speech model is invalid.",
             Self::InvalidAiModel => "The configured AI model is not supported.",
         };
         formatter.write_str(message)

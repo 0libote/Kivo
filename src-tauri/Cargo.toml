@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
-reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "system-proxy"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "stream", "system-proxy"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon", "image-png"] }
@@ -24,6 +24,24 @@ tauri-plugin-single-instance = "2.4.4"
 tauri-plugin-updater = "2.11.0"
 thiserror = "2.0"
 tokio = { version = "1.53.1", features = ["fs", "macros", "rt-multi-thread", "sync", "time"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+sha2 = "0.10"
+# On-device speech capture. cpal records the default input device into memory;
+# rubato resamples it to the 16 kHz mono f32 the local models expect.
+cpal = "0.16"
+rubato = "0.16"
+
+# On-device transcription runtime (whisper-family GGML/GGUF). The default
+# backend is enabled per target below: Metal on macOS, static CPU elsewhere.
+# Windows x86_64 could opt into `vulkan` + `dynamic-backends`, but that needs
+# the Vulkan SDK at build time and shipping the ggml DLLs; CPU keeps the
+# installer self-contained. Add `features = ["vulkan"]` there when GPU
+# transcription is worth the packaging cost.
+[target.'cfg(target_os = "macos")'.dependencies]
+transcribe-cpp = { version = "0.2.3", default-features = false, features = ["metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+transcribe-cpp = { version = "0.2.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [

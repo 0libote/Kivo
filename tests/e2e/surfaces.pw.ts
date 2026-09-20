@@ -71,6 +71,28 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   assertNoErrors();
 });
 
+test("on-device dictation models and local AI setup work", async ({ page }) => {
+  const assertNoErrors = failOnConsoleErrors(page);
+  await page.setViewportSize({ width: 820, height: 600 });
+  await page.goto("/?surface=settings&harness=1");
+  await page.getByRole("button", { name: "Dictation", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Dictation" })).toBeVisible();
+  await page.getByRole("radio", { name: "On-device", exact: true }).click();
+  await expect(page.getByText("Models run entirely on this device", { exact: false })).toBeVisible();
+  // Small is the recommended model and is pre-selected by the harness.
+  await expect(page.getByText("Recommended", { exact: true })).toBeVisible();
+  // Downloading Tiny marks it installed and selects it.
+  const tinyRow = page.locator(".local-model").filter({ hasText: "Tiny" });
+  await tinyRow.getByRole("button", { name: "Download" }).click();
+  await expect(tinyRow.getByRole("button", { name: "Delete" })).toBeVisible();
+  // Local AI detection lives under the Custom provider.
+  await page.getByRole("button", { name: "AI", exact: true }).click();
+  await page.getByLabel("AI provider", { exact: true }).selectOption("custom");
+  await expect(page.getByText("Local servers", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install Ollama", exact: true })).toBeVisible();
+  assertNoErrors();
+});
+
 test("about installs stable updates in-app with restart", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });

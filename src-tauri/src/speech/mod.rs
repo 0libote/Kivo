@@ -2,8 +2,25 @@ use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
 use serde::Serialize;
 
+pub mod local;
+pub mod model_store;
+pub mod router;
+
 pub type SpeechFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type SpeechEventSink = Arc<dyn Fn(SpeechEvent) + Send + Sync>;
+
+/// Which recognizer a dictation should use. `System` is the operating-system
+/// engine (SAPI / SpeechAnalyzer / the Linux test bench); `Local` runs a
+/// downloaded GGML model on-device. The engine behind the trait is chosen per
+/// session so switching never restarts the app.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum SpeechBackend {
+    #[default]
+    System,
+    Local {
+        model_id: String,
+    },
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +34,7 @@ pub struct MicrophoneDevice {
 pub struct SpeechStartOptions {
     pub microphone_id: Option<String>,
     pub locale: Option<String>,
+    pub backend: SpeechBackend,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -67,6 +85,7 @@ pub enum SpeechError {
     AlreadyRunning,
     NotRunning,
     NoSpeechDetected,
+    LocalModelUnavailable,
     Backend,
 }
 
@@ -82,6 +101,9 @@ impl fmt::Display for SpeechError {
             Self::AlreadyRunning => "Dictation is already active.",
             Self::NotRunning => "Dictation is not active.",
             Self::NoSpeechDetected => "No speech was detected.",
+            Self::LocalModelUnavailable => {
+                "Download a local speech model in Settings → Dictation, then try again."
+            }
             Self::Backend => "Dictation stopped. Check your default microphone and microphone access.",
         })
     }
