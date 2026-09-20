@@ -338,7 +338,7 @@ class MockBridge implements NativeBridge {
 
   // Illustrative catalog mirroring src-tauri/src/speech/model_store.rs; the
   // harness never downloads anything.
-  private localModels: LocalSpeechModelInfo[] = [
+  private readonly localModels: LocalSpeechModelInfo[] = [
     { id: "whisper-tiny", name: "Tiny", description: "Fastest and smallest.", sizeBytes: 44_211_616, recommended: false, downloaded: false },
     { id: "whisper-base", name: "Base", description: "A light, responsive model.", sizeBytes: 63_786_048, recommended: false, downloaded: false },
     { id: "whisper-small", name: "Small", description: "Recommended.", sizeBytes: 193_749_056, recommended: true, downloaded: true },

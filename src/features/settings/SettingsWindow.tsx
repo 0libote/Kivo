@@ -450,6 +450,12 @@ function DictationSection({
     context.platform === "macos" && settings.dictationShortcut === "Fn"
       ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
       : undefined;
+  let languageDescription = "Automatic follows the current input language when supported.";
+  if (settings.speechEngine === "local") {
+    languageDescription = "On-device models detect the spoken language automatically; set this only to force one.";
+  } else if (context.platform === "windows") {
+    languageDescription = "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
+  }
   return (
     <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop.">
       <SettingsGroup header="Recognition">
@@ -475,7 +481,7 @@ function DictationSection({
             <LocalSpeechModels save={save} settings={settings} />
           </SettingRow>
         ) : null}
-        <SettingRow label="Language" description={settings.speechEngine === "local" ? "On-device models detect the spoken language automatically; set this only to force one." : context.platform === "windows" ? "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech." : "Automatic follows the current input language when supported."}>
+        <SettingRow label="Language" description={languageDescription}>
           {languages.length === 0 ? (
             <span className="setting-empty">No languages found. Reopen Settings to try again.</span>
           ) : (

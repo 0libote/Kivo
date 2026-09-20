@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Button } from "../../components/Button";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
@@ -13,6 +13,11 @@ interface LocalAiSetupProps {
   readonly settings: AppSettings;
   readonly save: (patch: Partial<AppSettings>) => Promise<void>;
   readonly disabled: boolean;
+}
+
+function modelsLabel(count: number): string {
+  if (count === 0) return "No models pulled yet";
+  return `${count} model${count === 1 ? "" : "s"} ready`;
 }
 
 /**
@@ -47,8 +52,8 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
     setError(null);
     try {
       await save({ aiCustomBaseUrl: server.baseUrl });
-    } catch (caught) {
-      setError(caught instanceof NativeError ? caught.message : "The server couldn’t be selected.");
+    } catch (error_) {
+      setError(error_ instanceof NativeError ? error_.message : "The server couldn’t be selected.");
     }
   }
 
@@ -59,46 +64,53 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
     try {
       await nativeBridge.installLocalAiRuntime();
       setError("Finish the Ollama install, then Refresh to detect it.");
-    } catch (caught) {
-      setError(caught instanceof NativeError ? caught.message : "The installer couldn’t be downloaded.");
+    } catch (error_) {
+      setError(error_ instanceof NativeError ? error_.message : "The installer couldn’t be downloaded.");
     } finally {
       setInstalling(false);
       setProgress(null);
     }
   }
 
+  let body: ReactNode;
+  if (scanning) {
+    body = <p className="settings-note">Checking for local servers…</p>;
+  } else if (running.length > 0) {
+    body = (
+      <div className="local-ai__list">
+        {running.map((server) => {
+          const active = settings.aiCustomBaseUrl === server.baseUrl;
+          return (
+            <div className="local-ai__row" data-active={active} key={server.id}>
+              <span className="local-ai__labels">
+                <strong>{server.name}</strong>
+                <span>{modelsLabel(server.models.length)}</span>
+              </span>
+              <Button compact disabled={disabled || active} onClick={() => void useServer(server)} tone={active ? undefined : "primary"}>
+                {active ? "Selected" : "Use"}
+              </Button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  } else {
+    body = (
+      <div className="local-ai__empty">
+        <p className="settings-note">No local server detected. Install Ollama to run models on this computer for free.</p>
+        <Button compact disabled={disabled || installing} onClick={() => void install()}>
+          {installing ? "Downloading…" : "Install Ollama"}
+        </Button>
+        {progress && progress.total > 0 ? (
+          <progress aria-label="Downloading Ollama" max={progress.total} value={progress.downloaded} />
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div className="local-ai">
-      {scanning ? (
-        <p className="settings-note">Checking for local servers…</p>
-      ) : running.length > 0 ? (
-        <div className="local-ai__list">
-          {running.map((server) => {
-            const active = settings.aiCustomBaseUrl === server.baseUrl;
-            return (
-              <div className="local-ai__row" data-active={active} key={server.id}>
-                <span className="local-ai__labels">
-                  <strong>{server.name}</strong>
-                  <span>{server.models.length > 0 ? `${server.models.length} model${server.models.length === 1 ? "" : "s"} ready` : "No models pulled yet"}</span>
-                </span>
-                <Button compact disabled={disabled || active} onClick={() => void useServer(server)} tone={active ? undefined : "primary"}>
-                  {active ? "Selected" : "Use"}
-                </Button>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="local-ai__empty">
-          <p className="settings-note">No local server detected. Install Ollama to run models on this computer for free.</p>
-          <Button compact disabled={disabled || installing} onClick={() => void install()}>
-            {installing ? "Downloading…" : "Install Ollama"}
-          </Button>
-          {progress && progress.total > 0 ? (
-            <progress aria-label="Downloading Ollama" max={progress.total} value={progress.downloaded} />
-          ) : null}
-        </div>
-      )}
+      {body}
       <div className="local-ai__footer">
         <Button compact disabled={disabled || scanning} onClick={scan}>Refresh</Button>
       </div>

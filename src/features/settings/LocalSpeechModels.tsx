@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../components/Button";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
@@ -70,9 +70,9 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
     try {
       setModels(await nativeBridge.downloadLocalSpeechModel(modelId));
       await save({ localSpeechModel: modelId });
-    } catch (caught) {
+    } catch (error_) {
       if (!cancelled.current.has(modelId)) {
-        setError(caught instanceof NativeError ? caught.message : "The model could not be downloaded.");
+        setError(error_ instanceof NativeError ? error_.message : "The model could not be downloaded.");
       }
     } finally {
       cancelled.current.delete(modelId);
@@ -95,8 +95,8 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
       if ((settings.localSpeechModel ?? null) === modelId) {
         await save({ localSpeechModel: null });
       }
-    } catch (caught) {
-      setError(caught instanceof NativeError ? caught.message : "The model could not be removed.");
+    } catch (error_) {
+      setError(error_ instanceof NativeError ? error_.message : "The model could not be removed.");
     } finally {
       setBusy(null);
     }
@@ -108,6 +108,40 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
         {models.map((model) => {
           const downloading = progress[model.id];
           const selected = activeModel === model.id && model.downloaded;
+          let actions: ReactNode;
+          if (downloading && !model.downloaded) {
+            actions = (
+              <>
+                <progress
+                  aria-label={`Downloading ${model.name}`}
+                  max={downloading.total || model.sizeBytes}
+                  value={downloading.downloaded}
+                />
+                <Button compact onClick={() => cancel(model.id)}>
+                  Cancel
+                </Button>
+              </>
+            );
+          } else if (model.downloaded) {
+            actions = (
+              <>
+                {!selected ? (
+                  <Button compact disabled={busy !== null} onClick={() => void save({ localSpeechModel: model.id })} tone="primary">
+                    Use
+                  </Button>
+                ) : null}
+                <Button compact disabled={busy !== null} onClick={() => void remove(model.id)} tone="danger">
+                  Delete
+                </Button>
+              </>
+            );
+          } else {
+            actions = (
+              <Button compact disabled={busy !== null || !loaded} onClick={() => void download(model.id)}>
+                {busy === model.id ? "Starting…" : "Download"}
+              </Button>
+            );
+          }
           return (
             <div className="local-model" key={model.id} data-selected={selected}>
               <div className="local-model__labels">
@@ -118,35 +152,7 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
                 </span>
                 <span className="local-model__meta">{formatBytes(model.sizeBytes)} · {model.description}</span>
               </div>
-              <div className="local-model__actions">
-                {downloading && !model.downloaded ? (
-                  <>
-                    <progress
-                      aria-label={`Downloading ${model.name}`}
-                      max={downloading.total || model.sizeBytes}
-                      value={downloading.downloaded}
-                    />
-                    <Button compact onClick={() => cancel(model.id)}>
-                      Cancel
-                    </Button>
-                  </>
-                ) : model.downloaded ? (
-                  <>
-                    {!selected ? (
-                      <Button compact disabled={busy !== null} onClick={() => void save({ localSpeechModel: model.id })} tone="primary">
-                        Use
-                      </Button>
-                    ) : null}
-                    <Button compact disabled={busy !== null} onClick={() => void remove(model.id)} tone="danger">
-                      Delete
-                    </Button>
-                  </>
-                ) : (
-                  <Button compact disabled={busy !== null || !loaded} onClick={() => void download(model.id)}>
-                    {busy === model.id ? "Starting…" : "Download"}
-                  </Button>
-                )}
-              </div>
+              <div className="local-model__actions">{actions}</div>
             </div>
           );
         })}
