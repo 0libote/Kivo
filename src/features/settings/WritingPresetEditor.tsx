@@ -43,9 +43,11 @@ export function WritingPresetList({ settings, save }: WritingPresetListProps) {
       <ol className="writing-preset-list__items">
         {presets.map((preset, index) => {
           const editing = editingId === preset.id;
-          const modelSummary = preset.models.length === 0
-            ? "Global AI models"
-            : `${preset.models.length} model${preset.models.length === 1 ? "" : "s"} (custom order)`;
+          let modelSummary = "Global AI models";
+          if (preset.models.length > 0) {
+            const noun = preset.models.length === 1 ? "model" : "models";
+            modelSummary = `${preset.models.length} ${noun} (custom order)`;
+          }
           return (
             <li className="writing-preset" data-editing={editing} key={preset.id}>
               <div className="writing-preset__summary">
@@ -134,6 +136,11 @@ interface WritingPresetFormProps {
   readonly onClose: () => void;
 }
 
+/** Seed a preset's custom priority with its saved list or the global queue. */
+function modelsForPriority(current: string[], fallback: string[]): string[] {
+  return current.length > 0 ? current : fallback;
+}
+
 function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFormProps) {
   const provider = normalizeAiProvider(settings.aiProvider);
   const [draft, setDraft] = useState<WritingPreset>(preset);
@@ -208,7 +215,7 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
         <span>Models</span>
         <SegmentedControl
           ariaLabel="Model priority"
-          onChange={(value) => patch({ models: value === "custom" ? (draft.models.length > 0 ? draft.models : settings.aiModels) : [] })}
+          onChange={(value) => patch({ models: value === "custom" ? modelsForPriority(draft.models, settings.aiModels) : [] })}
           options={[
             { label: "Follow global models", value: "global" },
             { label: "Custom priority", value: "custom" },

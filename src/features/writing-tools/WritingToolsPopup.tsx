@@ -314,9 +314,9 @@ interface MenuViewProps {
 function MenuView(props: MenuViewProps) {
   const { presets, applicationName, close, dispatch, runAction, selectedIndex } = props;
   const renderAction = (action: WritingPreset, index: number) => <button
-    aria-label={action.label} aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
+    aria-label={action.label} className="writing-action" data-selected={index === selectedIndex}
     key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
-    role="option" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
+    role="menuitem" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
   return (
     <div className="writing-menu">
       <div className="writing-popup__top" data-tauri-drag-region>
@@ -328,7 +328,7 @@ function MenuView(props: MenuViewProps) {
           <Icon name="close" size={14} />
         </button>
       </div>
-      <div aria-label="Writing actions" className="writing-actions" role="listbox">
+      <div aria-label="Writing actions" className="writing-actions" role="menu">
         {presets.map((preset, index) => renderAction(preset, index))}
       </div>
     </div>

@@ -161,7 +161,7 @@ test("writing tools supports keyboard custom instructions and informational resu
   await page.keyboard.type("Translate to French");
   await expect(page.getByLabel("Custom writing instruction")).toHaveValue("Translate to French");
   await page.keyboard.press("Escape");
-  await page.getByRole("option", { name: "Summarize" }).click();
+  await page.getByRole("menuitem", { name: "Summarize" }).click();
   await expect(page.getByText(/short greeting/)).toBeVisible({ timeout: 2_000 });
   await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();
   assertNoErrors();
@@ -181,7 +181,7 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
 
   // The new preset reaches the popup menu in the harness.
   await page.goto("/?surface=writing-tools&harness=1");
-  await expect(page.getByRole("option", { name: "Pirate", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Pirate", exact: true })).toBeVisible();
 
   // Editing a built-in renames it in the menu.
   await page.goto("/?surface=settings&harness=1");
