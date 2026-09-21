@@ -6,7 +6,6 @@ import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles/globals.css";
 import "./styles/controls.css";
-import "./styles/flow-bar.css";
 import "./styles/writing-tools.css";
 import "./styles/settings.css";
 import "./styles/onboarding.css";
