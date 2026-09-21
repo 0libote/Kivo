@@ -19,16 +19,23 @@ describe("testFailureConnection", () => {
     expect(testFailureConnection("rate_limited")).toBe("rate-limited");
   });
 
-  it("maps provider account and policy rejections to blocked", () => {
-    for (const code of ["region_unavailable", "account_disabled", "provider_forbidden"]) {
+  it("maps provider and response errors to blocked", () => {
+    for (const code of [
+      "region_unavailable",
+      "account_disabled",
+      "provider_forbidden",
+      "provider_rejected",
+      "api_error",
+      "invalid_response",
+      "incomplete",
+      "empty_response",
+    ]) {
       expect(testFailureConnection(code)).toBe("blocked");
     }
   });
 
-  it("maps reachability and shape problems to offline", () => {
-    for (const code of ["transport", "invalid_response", "api_error", "incomplete", "empty_response"]) {
-      expect(testFailureConnection(code)).toBe("offline");
-    }
+  it("maps only transport failures to offline", () => {
+    expect(testFailureConnection("transport")).toBe("offline");
   });
 
   it("falls back to untested for unknown codes, never testing", () => {

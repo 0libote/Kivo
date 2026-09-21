@@ -946,6 +946,10 @@ pub enum OpencodeError {
 }
 
 impl OpencodeError {
+    fn provider_message(code: Option<&str>) -> Option<&str> {
+        code.and_then(|code| code.strip_prefix("provider_message:"))
+    }
+
     pub fn is_rate_limited(&self) -> bool {
         match self {
             Self::Api { status, code } => {
@@ -1021,27 +1025,27 @@ impl OpencodeError {
         })
     }
 
-    pub fn user_message(&self) -> &'static str {
+    pub fn user_message(&self) -> String {
         match self {
-            Self::InvalidApiKey => "The API key is invalid.",
+            Self::InvalidApiKey => "The API key is invalid.".into(),
             Self::Incomplete => {
-                "The provider stopped before completing the response. Try again or choose another model."
+                "The provider stopped before completing the response. Try again or choose another model.".into()
             }
             Self::InaccessibleSource => {
-                "Link summaries need the Gemini provider. Paste the text or transcript instead."
+                "Link summaries need the Gemini provider. Paste the text or transcript instead.".into()
             }
             Self::Api { code, .. } if Self::is_region_unavailable_code(code.as_deref()) => {
-                "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again."
+                "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again.".into()
             }
             Self::Api { code, .. } if Self::is_account_disabled_code(code.as_deref()) => {
-                "OpenCode Go says this workspace does not have an active Go subscription. Check the Go subscription in the OpenCode console."
+                "OpenCode Go says this workspace does not have an active Go subscription. Check the Go subscription in the OpenCode console.".into()
             }
             Self::Api { status, code }
                 if *status == StatusCode::UNAUTHORIZED || Self::is_auth_code(code.as_deref()) =>
             {
-                "Couldn't connect. OpenCode did not accept this API key."
+                "Couldn't connect. OpenCode did not accept this API key.".into()
             }
-            _ if self.is_out_of_credits() => "The OpenCode balance is empty. Top up to continue.",
+            _ if self.is_out_of_credits() => "The OpenCode balance is empty. Top up to continue.".into(),
             Self::Api { status, code }
                 if *status == StatusCode::TOO_MANY_REQUESTS
                     || matches!(
@@ -1054,16 +1058,22 @@ impl OpencodeError {
                         )
                     ) =>
             {
-                "The provider is temporarily rate limited. Try again shortly."
+                "The provider is temporarily rate limited. Try again shortly.".into()
             }
             Self::Api { .. } if self.is_not_found() => {
-                "That model isn't available. Choose another model under AI → Model."
+                "That model isn't available. Choose another model under AI → Model.".into()
             }
             Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => {
-                "OpenCode rejected this request. The key may be valid, but this workspace, model, or client is not permitted to use the requested Go endpoint."
+                "OpenCode rejected this request. The key may be valid, but this workspace, model, or client is not permitted to use the requested Go endpoint.".into()
             }
-            Self::Transport(_) => "Couldn't reach the AI provider. Check your connection.",
-            _ => "The AI provider couldn't complete that request.",
+            Self::Api { status, code }
+                if Self::provider_message(code.as_deref()).is_some() =>
+            {
+                let detail = Self::provider_message(code.as_deref()).unwrap_or_default();
+                format!("OpenCode returned HTTP {}: {detail}", status.as_u16())
+            }
+            Self::Transport(_) => "Couldn't reach the AI provider. Check your connection.".into(),
+            _ => "The AI provider couldn't complete that request.".into(),
         }
     }
 
@@ -1102,6 +1112,12 @@ impl OpencodeError {
             }
             Self::Api { .. } if self.is_not_found() => "model_not_found",
             Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => "provider_forbidden",
+            Self::Api { status, code }
+                if *status == StatusCode::BAD_REQUEST
+                    && Self::provider_message(code.as_deref()).is_some() =>
+            {
+                "provider_rejected"
+            }
             Self::Api { .. } => "api_error",
             Self::EmptyResponse => "empty_response",
         }
@@ -1110,7 +1126,7 @@ impl OpencodeError {
 
 impl fmt::Display for OpencodeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.user_message())
+        formatter.write_str(&self.user_message())
     }
 }
 
@@ -1141,6 +1157,13 @@ fn is_failover_terminal(error: &OpencodeError) -> bool {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CompatRequestContext<'a> {
+    chat_url: &'a str,
+    api_key: Option<&'a SecretString>,
+    session: Option<&'a str>,
+}
+
 #[derive(Clone)]
 pub struct OpenAiCompatClient {
     http: reqwest::Client,
@@ -1156,24 +1179,34 @@ impl OpenAiCompatClient {
         Ok(Self { http })
     }
 
-    fn chat_request(&self, provider: AiProvider, chat_url: &str) -> reqwest::RequestBuilder {
+    fn next_opencode_session(provider: AiProvider) -> Option<String> {
+        if !matches!(provider, AiProvider::Zen | AiProvider::Go) {
+            return None;
+        }
+        static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Some(format!(
+            "kivo-{}-{}-{sequence}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    fn chat_request(
+        &self,
+        provider: AiProvider,
+        chat_url: &str,
+        session: Option<&str>,
+    ) -> reqwest::RequestBuilder {
         let request = self.http.post(chat_url);
         if matches!(provider, AiProvider::Zen | AiProvider::Go) {
-            // Each stateless writing operation is a separate conversation. Identify
-            // Kivo honestly and provide the routing header required by Go.
-            static NEXT_SESSION: std::sync::atomic::AtomicU64 =
-                std::sync::atomic::AtomicU64::new(0);
-            let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let session = format!(
-                "kivo-{}-{}-{sequence}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            );
+            let session = session.expect("OpenCode requests require a session id");
             request
                 .header("user-agent", concat!("Kivo/", env!("CARGO_PKG_VERSION")))
+                .header("x-opencode-client", "kivo")
                 .header("x-opencode-session", session)
         } else {
             request
@@ -1210,17 +1243,8 @@ impl OpenAiCompatClient {
             request = request.header("authorization", auth);
         }
         let response = request.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         let page = response
             .json::<OpenAiModelList>()
@@ -1244,11 +1268,10 @@ impl OpenAiCompatClient {
         Ok(listed)
     }
 
-    pub async fn generate(
+    async fn generate_one(
         &self,
         provider: AiProvider,
-        chat_url: &str,
-        api_key: Option<&SecretString>,
+        context: CompatRequestContext<'_>,
         model: &str,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
@@ -1269,23 +1292,30 @@ impl OpenAiCompatClient {
             max_tokens: None,
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) =
-            completion_request(protocol, provider, reasoning_mode, chat_url, &request);
-        let mut call = self.chat_request(provider, &url).json(&body);
+        let (url, body) = completion_request(
+            protocol,
+            provider,
+            reasoning_mode,
+            context.chat_url,
+            &request,
+        );
+        let mut call = self
+            .chat_request(provider, &url, context.session)
+            .json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
         }
-        if let Some(auth) = Self::auth_header(api_key)? {
+        if let Some(auth) = Self::auth_header(context.api_key)? {
             call = call.header("authorization", auth);
         }
         if protocol == CompletionProtocol::Messages
-            && let Some(key) = api_key
+            && let Some(key) = context.api_key
         {
             let header =
                 HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
             call = call.header("x-api-key", header);
         } else if protocol == CompletionProtocol::Google
-            && let Some(key) = api_key
+            && let Some(key) = context.api_key
         {
             // OpenCode's Zen Google adapter follows the Google SDK contract
             // and expects the key in x-goog-api-key, unlike its OpenAI and
@@ -1295,17 +1325,8 @@ impl OpenAiCompatClient {
             call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         let completion = response
             .json::<serde_json::Value>()
@@ -1338,14 +1359,25 @@ impl OpenAiCompatClient {
             max_tokens: Some(16),
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) = completion_request(
+        let (url, mut body) = completion_request(
             protocol,
             provider,
             AiReasoningMode::Fast,
             chat_url,
             &request,
         );
-        let mut call = self.chat_request(provider, &url).json(&body);
+        // A connection probe should test auth + routing with the smallest
+        // provider-compatible request, not Kivo's optional generation tuning.
+        // Leaving reasoning controls out also makes failures easier to attribute.
+        if let Some(object) = body.as_object_mut() {
+            object.remove("reasoning_effort");
+            object.remove("thinking");
+            object.remove("output_config");
+        }
+        let session = Self::next_opencode_session(provider);
+        let mut call = self
+            .chat_request(provider, &url, session.as_deref())
+            .json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
         }
@@ -1366,17 +1398,8 @@ impl OpenAiCompatClient {
             call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         Ok(())
     }
@@ -1397,10 +1420,16 @@ impl OpenAiCompatClient {
         reasoning_mode: AiReasoningMode,
     ) -> Result<String, OpencodeError> {
         let normalized = normalize_model_list_for(provider, models);
+        let session = Self::next_opencode_session(provider);
+        let context = CompatRequestContext {
+            chat_url,
+            api_key,
+            session: session.as_deref(),
+        };
         let mut last_error: Option<OpencodeError> = None;
         for model in &normalized {
             match self
-                .generate(provider, chat_url, api_key, model, prompt, reasoning_mode)
+                .generate_one(provider, context, model, prompt, reasoning_mode)
                 .await
             {
                 Ok(output) => return Ok(output),
@@ -1732,6 +1761,26 @@ struct ChatContentPart {
     text: Option<String>,
 }
 
+async fn parse_opencode_api_error(response: reqwest::Response) -> OpencodeError {
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    let code = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|body| parse_openai_error_code(&body))
+        .or_else(|| provider_message_code(&text));
+    OpencodeError::Api { status, code }
+}
+
+fn provider_message_code(message: &str) -> Option<String> {
+    let detail: String = message
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control() || character.is_whitespace())
+        .take(500)
+        .collect();
+    (!detail.is_empty()).then(|| format!("provider_message:{detail}"))
+}
+
 /// Normalize the OpenAI-style error payload into a short machine-readable
 /// code. Gateways answer `{"error": {"message": …, "type": "AuthError"}}`
 /// (Zen/Go use `AuthError` for bad keys) or the OpenAI
@@ -1759,7 +1808,7 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
     if let Some(text) = error.as_str() {
         return classify_message(text)
             .map(str::to_owned)
-            .or_else(|| Some(text.to_owned()));
+            .or_else(|| provider_message_code(text));
     }
     let kind = error.get("type").and_then(serde_json::Value::as_str);
     let code = error.get("code").and_then(|code| match code {
@@ -1803,8 +1852,10 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
     {
         return Some("rate_limited".into());
     }
+    if !message.is_empty() {
+        return provider_message_code(message);
+    }
     code.or_else(|| kind.map(str::to_owned))
-        .or_else(|| (!message.is_empty()).then(|| "api_error".to_owned()))
 }
 
 fn parse_chat_completion(response: ChatCompletionResponse) -> Result<String, OpencodeError> {
@@ -1834,13 +1885,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn go_requests_identify_kivo_and_use_model_sampling_defaults() {
+    async fn go_probe_omits_optional_tuning_but_generation_keeps_it() {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let mut sessions = Vec::new();
-            for _ in 0..2 {
+            for request_index in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -1856,6 +1907,7 @@ mod tests {
                 };
                 let headers = String::from_utf8(bytes.clone()).unwrap().to_lowercase();
                 assert!(headers.contains("user-agent: kivo/"));
+                assert!(headers.contains("x-opencode-client: kivo"));
                 let session = headers
                     .lines()
                     .find_map(|line| line.strip_prefix("x-opencode-session: "))
@@ -1871,17 +1923,36 @@ mod tests {
                 bytes.resize(header_end + length, 0);
                 stream.read_exact(&mut bytes[header_end..]).unwrap();
                 let body: serde_json::Value = serde_json::from_slice(&bytes[header_end..]).unwrap();
-                assert_eq!(body["model"], "kimi-k2.7-code");
                 assert!(body.get("temperature").is_none());
-                let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                match request_index {
+                    0 => {
+                        assert_eq!(body["model"], "glm-5.3-flash");
+                        assert!(body.get("reasoning_effort").is_none());
+                        let response = r#"{"choices":[{"message":{"content":"ok"}}]}"#;
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
+                    1 => {
+                        assert_eq!(body["model"], "glm-5.3-flash");
+                        assert_eq!(body["reasoning_effort"], "low");
+                        let response =
+                            r#"{"error":{"code":"rate_limit_exceeded","message":"try fallback"}}"#;
+                        write!(stream, "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
+                    _ => {
+                        assert_eq!(body["model"], "glm-5.3");
+                        assert_eq!(body["reasoning_effort"], "low");
+                        let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
+                }
             }
             assert_ne!(sessions[0], sessions[1]);
+            assert_eq!(sessions[1], sessions[2]);
         });
         let client = OpenAiCompatClient::new().unwrap();
         let key = SecretString::new("test-key".to_owned()).unwrap();
         client
-            .test_connection(AiProvider::Go, &url, Some(&key), "kimi-k2.7-code")
+            .test_connection(AiProvider::Go, &url, Some(&key), "glm-5.3-flash")
             .await
             .unwrap();
         let prompt = AiPrompt {
@@ -1890,11 +1961,11 @@ mod tests {
         };
         assert_eq!(
             client
-                .generate(
+                .generate_in_order(
                     AiProvider::Go,
                     &url,
                     Some(&key),
-                    "kimi-k2.7-code",
+                    &["glm-5.3-flash".into(), "glm-5.3".into()],
                     &prompt,
                     AiReasoningMode::Fast,
                 )
@@ -1904,7 +1975,7 @@ mod tests {
         );
         server.join().unwrap();
         let custom = client
-            .chat_request(AiProvider::Custom, &url)
+            .chat_request(AiProvider::Custom, &url, None)
             .build()
             .unwrap();
         assert!(!custom.headers().contains_key("x-opencode-session"));
@@ -2649,8 +2720,14 @@ mod tests {
             status: StatusCode::BAD_REQUEST,
             code: parse_openai_error_code(&body),
         };
-        assert_eq!(error.code(), "api_error");
+        assert_eq!(error.code(), "provider_rejected");
         assert!(!is_failover_terminal(&error));
+        assert!(error.user_message().contains("HTTP 400"));
+        assert!(
+            error
+                .user_message()
+                .contains("does not support the requested temperature")
+        );
         assert!(!error.user_message().contains("API key"));
 
         // The same generic error type may accompany genuine HTTP auth errors.
@@ -2666,6 +2743,27 @@ mod tests {
         };
         assert_eq!(invalid_key.code(), "invalid_api_key");
         assert!(is_failover_terminal(&invalid_key));
+
+        let console_go = serde_json::json!({
+            "error": {
+                "type": "server_error",
+                "message": "Error from provider (Console Go): Upstream request failed: [1210] API parameter invalid, please check documentation."
+            }
+        });
+        let console_go_error = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: parse_openai_error_code(&console_go),
+        };
+        assert_eq!(console_go_error.code(), "provider_rejected");
+        assert!(console_go_error.user_message().contains("[1210]"));
+
+        let plain = provider_message_code("gateway exploded").unwrap();
+        let plain_error = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: Some(plain),
+        };
+        assert_eq!(plain_error.code(), "provider_rejected");
+        assert!(plain_error.user_message().contains("gateway exploded"));
     }
 
     #[test]
