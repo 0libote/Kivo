@@ -14,9 +14,9 @@ const CUSTOM_VALUE = "__custom";
  * Shared model list, cached per provider: every queue row on the page reads
  * the same module-level cache, so Settings + Onboarding trigger a single
  * `list_ai_models` call per provider and a manual Refresh updates all of
- * them at once. The backend serves the list for the provider stored in
- * settings; the `provider` arg only selects the fallback, validation rules,
- * and which cache slot to read.
+ * them at once. Model discovery names the provider explicitly, so an
+ * optimistic provider switch cannot race the native settings write and cache
+ * the previous provider's models under the new provider.
  */
 interface ProviderCache {
   models: AiModelInfo[];
@@ -71,7 +71,7 @@ function refreshSharedModels(provider: AiProviderId, silent: boolean): Promise<v
     emitShared();
   }
   const task = nativeBridge
-    .listAiModels()
+    .listAiModels(provider)
     .then(next => {
       if (next.length > 0) {
         cache.models = next;
