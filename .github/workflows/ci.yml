@@ -183,9 +183,17 @@ jobs:
       # Vulkan backend, which needs the SDK's glslc + headers at build time.
       # Uses the official LunarG installer in silent mode (the installer sets
       # no env for this process, so VULKAN_SDK is exported for CMake and the
-      # build script's link search).
-      - name: Install Vulkan SDK (Windows x64)
+      # build script's link search). SDK dir is cached across runs (~30s saved
+      # on cache hit); VULKAN_SDK is exported on every run.
+      - name: Cache Vulkan SDK (Windows x64)
         if: runner.os == 'Windows'
+        id: vulkan-cache-native
+        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        with:
+          path: C:\VulkanSDK\1.4.357.0
+          key: vulkan-sdk-1.4.357.0
+      - name: Install Vulkan SDK (Windows x64)
+        if: runner.os == 'Windows' && steps.vulkan-cache-native.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $version = "1.4.357.0"
@@ -196,11 +204,20 @@ jobs:
           $header = "$sdk\Include\vulkan\vulkan.h"
           for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
           if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
+          Write-Host "Vulkan SDK installed at $sdk"
+      - name: Export VULKAN_SDK (Windows x64)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $sdk = "C:\VulkanSDK\1.4.357.0"
+          $header = "$sdk\Include\vulkan\vulkan.h"
+          if (-not (Test-Path $header)) { throw "Vulkan SDK cache miss without installer output: $header not found" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -406,6 +423,7 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: bun install --frozen-lockfile --ignore-scripts
       # No typecheck/test rerun: this is the same SHA the `frontend` and
       # `native` gates just passed, so rerunning them only burns macOS
@@ -455,7 +473,15 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
+      - name: Cache Vulkan SDK (Windows x64)
+        id: vulkan-cache-beta
+        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        with:
+          path: C:\VulkanSDK\1.4.357.0
+          key: vulkan-sdk-1.4.357.0
       - name: Install Vulkan SDK (Windows x64)
+        if: steps.vulkan-cache-beta.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $version = "1.4.357.0"
@@ -466,6 +492,13 @@ jobs:
           $header = "$sdk\Include\vulkan\vulkan.h"
           for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
           if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
+          Write-Host "Vulkan SDK installed at $sdk"
+      - name: Export VULKAN_SDK (Windows x64)
+        shell: pwsh
+        run: |
+          $sdk = "C:\VulkanSDK\1.4.357.0"
+          $header = "$sdk\Include\vulkan\vulkan.h"
+          if (-not (Test-Path $header)) { throw "Vulkan SDK cache miss without installer output: $header not found" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
       - run: bun install --frozen-lockfile --ignore-scripts
@@ -578,7 +611,15 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
+      - name: Cache Vulkan SDK (Windows x64)
+        id: vulkan-cache-pr
+        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        with:
+          path: C:\VulkanSDK\1.4.357.0
+          key: vulkan-sdk-1.4.357.0
       - name: Install Vulkan SDK (Windows x64)
+        if: steps.vulkan-cache-pr.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $version = "1.4.357.0"
@@ -589,6 +630,13 @@ jobs:
           $header = "$sdk\Include\vulkan\vulkan.h"
           for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
           if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
+          Write-Host "Vulkan SDK installed at $sdk"
+      - name: Export VULKAN_SDK (Windows x64)
+        shell: pwsh
+        run: |
+          $sdk = "C:\VulkanSDK\1.4.357.0"
+          $header = "$sdk\Include\vulkan\vulkan.h"
+          if (-not (Test-Path $header)) { throw "Vulkan SDK cache miss without installer output: $header not found" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
       - run: bun install --frozen-lockfile --ignore-scripts
@@ -653,6 +701,7 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
