@@ -2,7 +2,7 @@ import type { PermissionState } from "../types";
 
 interface StatusIndicatorProps {
   readonly label: string;
-  readonly state: PermissionState | "connected" | "testing" | "invalid" | "untested" | "offline" | "rate-limited" | "model";
+  readonly state: PermissionState | "connected" | "testing" | "invalid" | "untested" | "offline" | "rate-limited" | "model" | "blocked";
 }
 
 function indicatorTone(state: StatusIndicatorProps["state"]): "positive" | "neutral" | "negative" {
@@ -34,5 +34,6 @@ function humanState(state: StatusIndicatorProps["state"]): string {
     case "offline": return "offline";
     case "rate-limited": return "rate limited";
     case "model": return "model unavailable";
+    case "blocked": return "provider rejected";
   }
 }
