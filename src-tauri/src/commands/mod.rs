@@ -366,6 +366,37 @@ impl AppCore {
         self.usage.clear();
     }
 
+    /// Record a completed dictation: word count, engine, and language only.
+    /// The dictated text itself is never stored.
+    fn record_dictation(
+        &self,
+        text: &str,
+        engine: SpeechEnginePreference,
+        language: &LanguagePreference,
+    ) {
+        let words = text.split_whitespace().count() as u64;
+        let engine = match engine {
+            SpeechEnginePreference::System => "system",
+            SpeechEnginePreference::Local => "local",
+        };
+        let language = match language {
+            LanguagePreference::Auto => "auto".to_owned(),
+            LanguagePreference::Locale { tag } => tag.clone(),
+        };
+        self.usage.record(crate::usage::UsageEntry {
+            timestamp_ms: crate::usage::now_ms(),
+            provider: engine.to_owned(),
+            model: language,
+            kind: "dictation".to_owned(),
+            input_tokens: 0,
+            output_tokens: 0,
+            words,
+            estimated: false,
+            cost_usd: 0.0,
+            ok: true,
+        });
+    }
+
     pub async fn microphones(&self) -> Result<Vec<MicrophoneDevice>, AppCoreError> {
         self.speech.microphones().await.map_err(Into::into)
     }
@@ -543,6 +574,7 @@ impl AppCore {
             return Err(error.into());
         }
         machine.complete()?;
+        self.record_dictation(&final_text, dictation.speech_engine, &dictation.language);
         Ok(machine.phase())
     }
 

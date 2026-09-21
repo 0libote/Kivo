@@ -467,6 +467,7 @@ class MockBridge implements NativeBridge {
         failures: index % 6 === 0 ? 1 : 0,
         inputTokens,
         outputTokens,
+        words: requests * 18,
         costUsd: dayCost(inputTokens, outputTokens),
       };
     });
@@ -478,13 +479,15 @@ class MockBridge implements NativeBridge {
     const group = (key: string, share: number): UsageGroup => {
       const input = Math.round(inputTokens * share);
       const output = Math.round(outputTokens * share);
-      return { key, requests: Math.round(requests * share), failures: 0, inputTokens: input, outputTokens: output, costUsd: dayCost(input, output) };
+      return { key, requests: Math.round(requests * share), failures: 0, inputTokens: input, outputTokens: output, words: Math.round(requests * 18 * share), costUsd: dayCost(input, output) };
     };
     return {
       requests,
       failures: sum((day) => day.failures),
       inputTokens,
       outputTokens,
+      dictationWords: requests * 18,
+      dictationSessions: Math.round(requests * 0.25),
       costUsd: sum((day) => day.costUsd),
       estimatedRequests: Math.round(requests * 0.4),
       firstMs: Date.UTC(2026, 8, 8),

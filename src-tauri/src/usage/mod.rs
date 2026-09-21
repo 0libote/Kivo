@@ -67,6 +67,9 @@ pub struct UsageEntry {
     pub input_tokens: u64,
     #[serde(default)]
     pub output_tokens: u64,
+    /// Word count for dictation entries (`kind == "dictation"`), else 0.
+    #[serde(default)]
+    pub words: u64,
     #[serde(default)]
     pub estimated: bool,
     #[serde(default)]
@@ -83,6 +86,8 @@ pub struct UsageGroup {
     pub failures: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub words: u64,
     pub cost_usd: f64,
 }
 
@@ -96,6 +101,8 @@ pub struct UsageDay {
     pub failures: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub words: u64,
     pub cost_usd: f64,
 }
 
@@ -107,6 +114,12 @@ pub struct UsageSummary {
     pub failures: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
+    /// Words dictated (`kind == "dictation"`).
+    #[serde(default)]
+    pub dictation_words: u64,
+    /// Dictation sessions recorded.
+    #[serde(default)]
+    pub dictation_sessions: u64,
     pub cost_usd: f64,
     /// How many recorded requests used estimated rather than reported tokens.
     pub estimated_requests: u64,
@@ -136,6 +149,10 @@ impl UsageSummary {
             summary.input_tokens += entry.input_tokens;
             summary.output_tokens += entry.output_tokens;
             summary.cost_usd += entry.cost_usd;
+            if entry.kind == "dictation" {
+                summary.dictation_sessions += 1;
+                summary.dictation_words += entry.words;
+            }
             if entry.estimated {
                 summary.estimated_requests += 1;
             }
@@ -202,6 +219,7 @@ fn accumulate(group: &mut UsageGroup, entry: &UsageEntry) {
     }
     group.input_tokens += entry.input_tokens;
     group.output_tokens += entry.output_tokens;
+    group.words += entry.words;
     group.cost_usd += entry.cost_usd;
 }
 
@@ -212,6 +230,7 @@ fn accumulate_day(day: &mut UsageDay, entry: &UsageEntry) {
     }
     day.input_tokens += entry.input_tokens;
     day.output_tokens += entry.output_tokens;
+    day.words += entry.words;
     day.cost_usd += entry.cost_usd;
 }
 
@@ -419,6 +438,7 @@ mod tests {
             kind: kind.into(),
             input_tokens: input,
             output_tokens: output,
+            words: 0,
             estimated: false,
             cost_usd: 0.01,
             ok,
@@ -481,6 +501,31 @@ mod tests {
         }
         // The cap is enforced; the in-memory summary sees the trimmed list.
         assert_eq!(store.summary(None).requests, MAX_ENTRIES as u64);
+    }
+
+    #[test]
+    fn tallies_dictation_words_and_sessions() {
+        let store = UsageStore::in_memory();
+        let mut session = entry("system", "en-US", "dictation", true, 0, 0);
+        session.words = 12;
+        session.cost_usd = 0.0;
+        store.record(session);
+        let mut local = entry("local", "auto", "dictation", true, 0, 0);
+        local.words = 8;
+        local.cost_usd = 0.0;
+        store.record(local);
+        let summary = store.summary(None);
+        assert_eq!(summary.dictation_sessions, 2);
+        assert_eq!(summary.dictation_words, 20);
+        assert_eq!(
+            summary
+                .by_kind
+                .iter()
+                .find(|group| group.key == "dictation")
+                .unwrap()
+                .words,
+            20
+        );
     }
 
     #[test]

@@ -55,6 +55,8 @@ test("home shows the local AI usage dashboard", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "AI usage" })).toBeVisible();
   await expect(page.getByText("On this device", { exact: true })).toBeVisible();
   await expect(page.getByText("Est. cost", { exact: true })).toBeVisible();
+  await expect(page.getByText("This month", { exact: true })).toBeVisible();
+  await expect(page.getByText("Words dictated", { exact: true })).toBeVisible();
   await expect(page.getByText("By model", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear usage history", exact: true })).toBeVisible();
   assertNoErrors();

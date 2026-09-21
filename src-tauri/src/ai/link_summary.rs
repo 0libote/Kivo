@@ -170,7 +170,17 @@ impl GeminiClient {
             .json::<LinkSummaryResponse>()
             .await
             .map_err(GeminiError::InvalidResponse)?;
-        parse_link_summary(interaction, &validated)
+        let reported = interaction.reported_usage();
+        let output = parse_link_summary(interaction, &validated)?;
+        self.record_generation(
+            &model,
+            super::AiTaskKind::LinkSummary,
+            reported,
+            0,
+            output.chars().count(),
+            true,
+        );
+        Ok(output)
     }
 
     /// Same ordered-failover rule as text generation: each model is tried in
@@ -192,8 +202,18 @@ impl GeminiClient {
                 .await
             {
                 Ok(output) => return Ok(output),
-                Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
+                    self.record_generation(
+                        &current,
+                        super::AiTaskKind::LinkSummary,
+                        None,
+                        0,
+                        0,
+                        false,
+                    );
+                    if error.is_failover_terminal() {
+                        return Err(error);
+                    }
                     let Some(next) = models.next() else {
                         return Err(error);
                     };
@@ -269,6 +289,20 @@ struct LinkSummaryResponse {
     status: String,
     #[serde(default)]
     steps: Vec<LinkSummaryStep>,
+    /// Provider-reported usage when present (schema-tolerant).
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+    #[serde(default, rename = "usageMetadata")]
+    usage_metadata: Option<serde_json::Value>,
+}
+
+impl LinkSummaryResponse {
+    fn reported_usage(&self) -> Option<crate::usage::TokenUsage> {
+        self.usage
+            .as_ref()
+            .or(self.usage_metadata.as_ref())
+            .and_then(crate::usage::parse_token_usage_object)
+    }
 }
 
 #[derive(Deserialize)]

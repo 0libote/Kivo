@@ -28,6 +28,7 @@ function formatCost(value: number): string {
 const KIND_LABELS: Record<string, string> = {
   writing: "Writing Tools",
   "dictation-cleanup": "Dictation cleanup",
+  dictation: "Dictation",
   "link-summary": "Link summaries",
   "connection-test": "Connection tests",
 };
@@ -84,6 +85,12 @@ export function UsagePanel() {
     }
   }
 
+  const monthPrefix = new Date().toISOString().slice(0, 7);
+  const monthCost = (summary?.days ?? []).reduce(
+    (total, day) => (day.day.startsWith(monthPrefix) ? total + day.costUsd : total),
+    0,
+  );
+
   return (
     <Card padding={4}>
       <Stack direction="vertical" gap={3}>
@@ -115,6 +122,10 @@ export function UsagePanel() {
               <Metric label="Requests" value={numberFormat.format(summary.requests)} />
               <Metric label="Tokens" value={numberFormat.format(summary.inputTokens + summary.outputTokens)} />
               <Metric label="Est. cost" value={formatCost(summary.costUsd)} />
+              <Metric label="This month" value={formatCost(monthCost)} />
+              {summary.dictationWords > 0 ? (
+                <Metric label="Words dictated" value={numberFormat.format(summary.dictationWords)} />
+              ) : null}
             </div>
             <div {...stylex.props(styles.footnoteRow)}>
               <Text color="secondary" size="2xs">
@@ -188,7 +199,7 @@ function Breakdown({ title, groups }: { readonly title: string; readonly groups:
 const styles = stylex.create({
   metrics: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
     gap: "12px",
   },
   metric: {

@@ -1210,6 +1210,7 @@ impl OpenAiCompatClient {
             kind: prompt.kind.as_str().to_owned(),
             input_tokens: tokens.input_tokens,
             output_tokens: tokens.output_tokens,
+            words: 0,
             estimated: tokens.estimated,
             cost_usd: super::estimate_cost(provider, model, &tokens),
             ok,

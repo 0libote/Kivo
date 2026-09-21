@@ -565,6 +565,34 @@ impl GeminiClient {
     }
 
     /// Record one generation attempt (success or failure) for the dashboard.
+    fn record_generation(
+        &self,
+        model: &str,
+        kind: AiTaskKind,
+        reported: Option<crate::usage::TokenUsage>,
+        input_chars: usize,
+        output_chars: usize,
+        ok: bool,
+    ) {
+        let Some(store) = &self.usage else {
+            return;
+        };
+        let tokens = reported
+            .unwrap_or_else(|| crate::usage::TokenUsage::estimate(input_chars, output_chars));
+        store.record(crate::usage::UsageEntry {
+            timestamp_ms: crate::usage::now_ms(),
+            provider: AiProvider::Gemini.as_str().to_owned(),
+            model: model.to_owned(),
+            kind: kind.as_str().to_owned(),
+            input_tokens: tokens.input_tokens,
+            output_tokens: tokens.output_tokens,
+            words: 0,
+            estimated: tokens.estimated,
+            cost_usd: estimate_cost(AiProvider::Gemini, model, &tokens),
+            ok,
+        });
+    }
+
     fn record_usage(
         &self,
         model: &str,
@@ -573,23 +601,14 @@ impl GeminiClient {
         output_chars: usize,
         ok: bool,
     ) {
-        let Some(store) = &self.usage else {
-            return;
-        };
-        let tokens = reported.unwrap_or_else(|| {
-            crate::usage::TokenUsage::estimate(prompt_chars(prompt), output_chars)
-        });
-        store.record(crate::usage::UsageEntry {
-            timestamp_ms: crate::usage::now_ms(),
-            provider: AiProvider::Gemini.as_str().to_owned(),
-            model: model.to_owned(),
-            kind: prompt.kind.as_str().to_owned(),
-            input_tokens: tokens.input_tokens,
-            output_tokens: tokens.output_tokens,
-            estimated: tokens.estimated,
-            cost_usd: estimate_cost(AiProvider::Gemini, model, &tokens),
+        self.record_generation(
+            model,
+            prompt.kind,
+            reported,
+            prompt_chars(prompt),
+            output_chars,
             ok,
-        });
+        );
     }
 
     fn resolve_model(model: &str) -> String {

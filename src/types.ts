@@ -202,6 +202,7 @@ export interface UsageDay {
   failures: number;
   inputTokens: number;
   outputTokens: number;
+  words: number;
   costUsd: number;
 }
 
@@ -212,6 +213,7 @@ export interface UsageGroup {
   failures: number;
   inputTokens: number;
   outputTokens: number;
+  words: number;
   costUsd: number;
 }
 
@@ -224,6 +226,10 @@ export interface UsageSummary {
   failures: number;
   inputTokens: number;
   outputTokens: number;
+  /** Words dictated across all dictation sessions in range. */
+  dictationWords: number;
+  /** Dictation sessions in range. */
+  dictationSessions: number;
   costUsd: number;
   /** Requests whose token counts were estimated rather than provider-reported. */
   estimatedRequests: number;
