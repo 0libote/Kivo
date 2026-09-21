@@ -1,0 +1,46 @@
+name: Install Vulkan SDK (Windows x64)
+description: >-
+  Provides the LunarG Vulkan SDK that the on-device speech runtime's build
+  script needs on Windows x86_64. The SDK install is ~30-60s, so it is cached
+  by version; VULKAN_SDK is exported on every run (cache hit or miss).
+
+inputs:
+  version:
+    description: LunarG Vulkan SDK version to install.
+    required: false
+    default: "1.4.357.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Cache the Vulkan SDK
+      id: cache
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+      with:
+        path: C:\VulkanSDK\${{ inputs.version }}
+        key: vulkan-sdk-${{ inputs.version }}-windows-x64
+
+    - name: Install the Vulkan SDK (cache miss)
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      env:
+        VULKAN_VERSION: ${{ inputs.version }}
+      run: |
+        $version = $env:VULKAN_VERSION
+        $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
+        curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+        Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
+        $header = "C:\VulkanSDK\$version\Include\vulkan\vulkan.h"
+        for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
+        if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
+
+    - name: Export VULKAN_SDK
+      shell: pwsh
+      env:
+        VULKAN_VERSION: ${{ inputs.version }}
+      run: |
+        $sdk = "C:\VulkanSDK\$env:VULKAN_VERSION"
+        $header = "$sdk\Include\vulkan\vulkan.h"
+        if (-not (Test-Path $header)) { throw "Vulkan SDK not found at $header after cache/install" }
+        "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+        Write-Host "Vulkan SDK ready at $sdk"

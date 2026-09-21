@@ -41,8 +41,9 @@ function stylexPlugins(): Record<string, unknown>[] {
   const plugins = [stylex.vite(stylexOptions)].flat() as unknown as Record<string, unknown>[];
   if (!process.env.VITEST) return plugins;
   return plugins.map((plugin) => {
-    const { configureServer: _configureServer, ...rest } = plugin;
-    return rest;
+    const testPlugin = { ...plugin };
+    delete testPlugin.configureServer;
+    return testPlugin;
   });
 }
 

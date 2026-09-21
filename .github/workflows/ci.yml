@@ -28,11 +28,14 @@ name: CI & Build
 # that can comment.
 #
 # Speed shape (deliberate):
-# - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
-#   `e2e`, `codeql`, `audit` and `dep-review` all start immediately. There
-#   are no `needs` chains between independent checks, so the slow native
-#   builds never gate the fast static gates (previously audit/codeql waited
-#   ~30min on `native` before even starting).
+# - `rust-static`, `frontend`, `frontend-windows`, `native`, `e2e`, `codeql`,
+#   `audit` and `dep-review` all start immediately. There are no `needs`
+#   chains between independent checks, so the slow native builds never gate
+#   the fast static gates (previously audit/codeql waited ~30min on `native`
+#   before even starting).
+# - The static packaging/parity/bridge gate scripts run inside `frontend`
+#   (ubuntu) and `frontend-windows` (Windows paths) rather than as their own
+#   job, so the same checks are not paid for in a third place.
 # - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
 #   the `native` matrix (macOS + Windows) owns clippy + tests, so each
 #   desktop's `#[cfg(target_os)]` sources still compile on every PR. The
@@ -79,46 +82,22 @@ jobs:
       - run: bun lint
       - run: bun run test
       - run: bun run check:bridge
-      - run: bun run build
+      - run: bun run check:packaging
+      - run: bun run check:platform-parity
+      - run: bun run build:app
 
   frontend-windows:
     name: Frontend checks (Windows)
     if: github.event_name != 'pull_request' || github.event.action != 'closed'
-    # JavaScript is portable, but paths, line endings, and toolchain behavior
-    # still differ on Windows. Typecheck + unit tests only; lint and the web
-    # build stay on the ubuntu `frontend` job so they are not paid for twice.
-    # The static gates also run here (seconds, no extra install) to prove the
-    # gate scripts themselves work with Windows paths/line endings.
+    # The static gate scripts run on Windows to prove they handle Windows
+    # paths/line endings. They use Node builtins only, so there is no install
+    # step, and the portable typecheck/unit-test/build work is not duplicated
+    # here (it is covered by the ubuntu `frontend` job and the `native` matrix,
+    # since JavaScript behaviour does not change across these hosts).
     runs-on: windows-latest
     timeout-minutes: 15
     concurrency:
       group: ci-frontend-windows-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun typecheck
-      - run: bun run test
-      - run: bun run check:packaging
-      - run: bun run check:platform-parity
-      - run: bun run check:bridge
-
-  packaging:
-    name: Packaging + platform parity gates
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
-    # Fast static checks (seconds, no compile): packaging metadata agreement
-    # plus macOS/Windows branch parity (shortcut defaults, native-shortcut
-    # strings, permission requirements, harness matrix). The real bundle
-    # builds only run on main/tags, so these gates are what stop packaging
-    # or single-OS breakage from merging in a PR.
-    # No install step: both scripts use node builtins only.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: ci-packaging-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -144,7 +123,7 @@ jobs:
     # by the per-OS `native` matrix (every PR compiles both desktops), and
     # foreign-target *logic* is covered without compiling by the
     # host-parameterized unit tests (config/shell/commands) plus
-    # `check:platform-parity` in the `packaging` job.
+    # `check:platform-parity` in the ubuntu `frontend` job.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -181,26 +160,13 @@ jobs:
           components: clippy
       # The Windows x86_64 build compiles the on-device speech runtime with its
       # Vulkan backend, which needs the SDK's glslc + headers at build time.
-      # Uses the official LunarG installer in silent mode (the installer sets
-      # no env for this process, so VULKAN_SDK is exported for CMake and the
-      # build script's link search).
-      - name: Install Vulkan SDK (Windows x64)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
+      # The composite caches the SDK by version and exports VULKAN_SDK.
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/install-vulkan-windows
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -322,15 +288,15 @@ jobs:
       - if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
-  # Aggregator: keeps one required check and one `needs` target for the beta
-  # builds. codeql/audit/e2e/packaging run on every event and must be
-  # `success` — a `skipped` there means an upstream CI job failed and must
-  # not look green. dep-review completes (never skips) on every event:
-  # success on PRs, no-op success elsewhere — see its note about downstream
-  # outputs.
+  # Aggregator: one required check and one `needs` target for the beta builds.
+  # It aggregates every PR-relevant gate, not just the security ones: the
+  # required check must go red when any core job fails, otherwise a broken
+  # compile or frontend gate could merge behind a green security gate.
+  # frontend/frontend-windows/native/rust-static/codeql/audit/e2e must be
+  # `success`; dep-review is PR-only and completes (never skips) elsewhere.
   security-gate:
     name: Code review / security gate
-    needs: [codeql, audit, e2e, dep-review, packaging]
+    needs: [frontend, frontend-windows, native, rust-static, codeql, audit, e2e, dep-review]
     if: always() && (github.event_name != 'pull_request' || github.event.action != 'closed')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -340,7 +306,14 @@ jobs:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}" "packaging:${{ needs.packaging.result }}"; do
+          for gate in \
+            "frontend:${{ needs.frontend.result }}" \
+            "frontend-windows:${{ needs.frontend-windows.result }}" \
+            "native:${{ needs.native.result }}" \
+            "rust-static:${{ needs.rust-static.result }}" \
+            "codeql:${{ needs.codeql.result }}" \
+            "audit:${{ needs.audit.result }}" \
+            "e2e:${{ needs.e2e.result }}"; do
             echo "$gate"
             result="${gate##*:}"
             if [ "$result" != "success" ]; then
@@ -406,6 +379,7 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: bun install --frozen-lockfile --ignore-scripts
       # No typecheck/test rerun: this is the same SHA the `frontend` and
       # `native` gates just passed, so rerunning them only burns macOS
@@ -455,19 +429,8 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-      - name: Install Vulkan SDK (Windows x64)
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
+          cache-on-failure: true
+      - uses: ./.github/actions/install-vulkan-windows
       - run: bun install --frozen-lockfile --ignore-scripts
       # No signing keys: the NSIS .exe installs with a bypassable
       # SmartScreen warning ("More info" -> "Run anyway").
@@ -548,7 +511,7 @@ jobs:
     # windows-beta. No secrets are used, so this is safe on forks (forks get
     # the run artifacts page; the sticky comment with direct links is
     # same-repo only, see `publish-pr`).
-    needs: [frontend, frontend-windows, native, rust-static, packaging]
+    needs: [frontend, frontend-windows, native, rust-static]
     if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
     outputs:
       exe_name: ${{ steps.names.outputs.exe_name }}
@@ -578,19 +541,8 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-      - name: Install Vulkan SDK (Windows x64)
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
+          cache-on-failure: true
+      - uses: ./.github/actions/install-vulkan-windows
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
@@ -620,7 +572,7 @@ jobs:
     # entitlements, Swift bridge, dmg config) merges and fails the beta on
     # main instead of the PR. No secrets are used, so this is also safe on
     # forks.
-    needs: [frontend, frontend-windows, native, rust-static, packaging]
+    needs: [frontend, frontend-windows, native, rust-static]
     if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
     outputs:
       dmg_name: ${{ steps.names.outputs.dmg_name }}
@@ -653,6 +605,7 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: bun install --frozen-lockfile --ignore-scripts
       - run: bun run check:packaging
       - run: bun run check:platform-parity
