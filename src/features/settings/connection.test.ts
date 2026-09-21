@@ -20,7 +20,7 @@ describe("testFailureConnection", () => {
   });
 
   it("maps provider account and policy rejections to blocked", () => {
-    for (const code of ["region_unavailable", "account_disabled", "provider_forbidden"]) {
+    for (const code of ["region_unavailable", "account_disabled", "provider_forbidden", "provider_rejected"]) {
       expect(testFailureConnection(code)).toBe("blocked");
     }
   });
