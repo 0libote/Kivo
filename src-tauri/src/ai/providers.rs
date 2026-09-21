@@ -84,7 +84,10 @@ impl AiProvider {
             key_optional: self.key_optional(),
             default_model: self.default_model().to_owned(),
             default_base_url: self.default_base_url().map(str::to_owned),
-            supports_link_summary: matches!(self, Self::Gemini),
+            // Gemini retrieves links server-side (URL context / video
+            // input); Zen, Go, and Custom fetch readable content locally and
+            // summarize the fetched text.
+            supports_link_summary: true,
             test_uses_quota: true,
         }
     }
@@ -190,7 +193,8 @@ pub struct ProviderInfo {
     pub key_optional: bool,
     pub default_model: String,
     pub default_base_url: Option<String>,
-    /// Only Gemini can retrieve link content (URL context / video input).
+    /// Whether Summarize-link is offered. Gemini retrieves links server-side;
+    /// Zen, Go, and Custom fetch readable content locally first.
     pub supports_link_summary: bool,
     /// Connection tests send a small generation request to validate model access.
     pub test_uses_quota: bool,
@@ -1032,7 +1036,7 @@ impl OpencodeError {
                 "The provider stopped before completing the response. Try again or choose another model.".into()
             }
             Self::InaccessibleSource => {
-                "Link summaries need the Gemini provider. Paste the text or transcript instead.".into()
+                "Couldn't read that source. It may be unavailable or require sign-in. Paste the text or transcript instead.".into()
             }
             Self::Api { code, .. } if Self::is_region_unavailable_code(code.as_deref()) => {
                 "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again.".into()
@@ -2005,13 +2009,14 @@ mod tests {
         assert_eq!(zen.label, "OpenCode Zen");
         assert_eq!(zen.key_url.as_deref(), Some("https://opencode.ai/auth"));
         assert!(!zen.key_optional);
-        assert!(!zen.supports_link_summary);
+        assert!(zen.supports_link_summary);
         assert!(zen.test_uses_quota);
         let gemini = infos.iter().find(|info| info.id == "gemini").unwrap();
         assert!(gemini.supports_link_summary);
         assert!(gemini.test_uses_quota);
         let custom = infos.iter().find(|info| info.id == "custom").unwrap();
         assert!(custom.key_optional);
+        assert!(custom.supports_link_summary);
         assert_eq!(
             custom.default_base_url.as_deref(),
             Some("http://localhost:11434/v1")

@@ -90,7 +90,7 @@ Go requests use each model's supported API: Chat Completions for Kimi, Messages 
 
 The native client defaults to `gemini-3.8-flash` with low thinking for latency-sensitive edits. Requests explicitly set `store: false`. Any well-formed text model id works, so newest models keep working without a Kivo update — only speech/audio, image, video, music, computer-use, and agent families are blocked. Settings files from before the queue store a single `model` plus an optional `backupModel`; they migrate into the queue automatically on first load. To change the Gemini suggestions or blocklist, edit `src-tauri/src/ai/mod.rs` then run `bun run generate:models` (CI fails otherwise); pricing lives in `src-tauri/src/ai/providers.rs` with its offline fallback rows in `src/ai/models.ts`.
 
-Link summaries (webpages via URL context, YouTube via video input) need the Gemini provider. With Zen, Go, or Custom, summarize pasted text instead — the app says so when a link is used there.
+Link summaries work on every provider. Gemini reads webpages via URL context and YouTube via video input server-side. Zen, Go, and Custom fetch the readable article text or video captions locally (public content only, up to 30,000 characters) and summarize the fetched text; when retrieval fails, paste the text or transcript instead.
 
 Without a key, native dictation still works and inserts the raw operating-system transcript; writing actions with a hosted provider display a concise configuration error.
 

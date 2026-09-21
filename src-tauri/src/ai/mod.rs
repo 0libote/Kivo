@@ -5,9 +5,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::security::SecretString;
 
+pub mod link_fetch;
 mod link_summary;
 pub mod local;
 pub mod providers;
+pub use link_fetch::fetch_link_text;
 pub use link_summary::LinkSource;
 pub use local::{LocalAiServer, detect_local_servers, install_runtime};
 pub use providers::{

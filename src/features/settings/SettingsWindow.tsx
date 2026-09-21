@@ -775,9 +775,6 @@ function AiSection({
             value={settings.aiModels}
           />
         </SettingRow>
-        {!info.supportsLinkSummary ? (
-          <p className="settings-note">Link summaries require Gemini. {info.label} can still summarize selected text.</p>
-        ) : null}
       </SettingsGroup>
       <SettingsGroup header="Response">
         <SettingRow label="Thinking level" description="Fast is best for everyday writing. Higher levels can help difficult rewrites, but take longer and may use more quota." stacked>
@@ -821,9 +818,9 @@ function providerBlurb(info: AiProviderInfo): string {
 
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
   { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
-  { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-  { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
+  { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
+  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
+  { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: true, testUsesQuota: true },
 ];
 
 function keyLabel(info: AiProviderInfo): string {

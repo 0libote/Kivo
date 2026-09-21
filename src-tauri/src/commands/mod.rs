@@ -708,20 +708,44 @@ impl AppCore {
             }
             if source_kind == WritingSourceKind::Link {
                 let source = LinkSource::parse(source_text)?;
-                // Link retrieval (URL context / video input) is a Gemini
-                // Interactions API capability. Other providers summarize pasted
-                // text normally; for links they get the paste-instead guidance.
-                if provider != AiProvider::Gemini {
-                    return Err(AppCoreError::Opencode(
-                        crate::ai::OpencodeError::InaccessibleSource,
-                    ));
+                if provider == AiProvider::Gemini {
+                    let api_key = self.require_provider_key(provider)?;
+                    let result = self
+                        .ai
+                        .summarize_link_in_order(&api_key, &models, &source, reasoning_mode)
+                        .await?;
+                    Ok::<_, AppCoreError>((result, Some(source)))
+                } else {
+                    // Zen, Go, and Custom have no URL-context / video-input
+                    // primitive, so fetch the readable content locally and
+                    // summarize the fetched text with the configured provider.
+                    // A fetch failure keeps the paste-instead guidance.
+                    let fetched = crate::ai::fetch_link_text(&source).await.map_err(|_| {
+                        AppCoreError::Opencode(crate::ai::OpencodeError::InaccessibleSource)
+                    })?;
+                    let prompt = match system_instruction.as_deref() {
+                        Some(instruction) if !instruction.trim().is_empty() => {
+                            writing_prompt_from_system(instruction.to_owned(), &fetched)?
+                        }
+                        _ => writing_prompt(action, &fetched, custom_instruction.as_deref())?,
+                    };
+                    let api_key = if provider.key_optional() {
+                        self.load_provider_key(provider)?
+                    } else {
+                        Some(self.require_provider_key(provider)?)
+                    };
+                    let result = self
+                        .generate_text(
+                            provider,
+                            api_key.as_ref(),
+                            &models,
+                            base_url.as_deref(),
+                            &prompt,
+                            reasoning_mode,
+                        )
+                        .await?;
+                    Ok((result, Some(source)))
                 }
-                let api_key = self.require_provider_key(provider)?;
-                let result = self
-                    .ai
-                    .summarize_link_in_order(&api_key, &models, &source, reasoning_mode)
-                    .await?;
-                Ok::<_, AppCoreError>((result, Some(source)))
             } else {
                 let prompt = match system_instruction.as_deref() {
                     Some(instruction) if !instruction.trim().is_empty() => {
