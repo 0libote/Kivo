@@ -19,6 +19,12 @@ describe("testFailureConnection", () => {
     expect(testFailureConnection("rate_limited")).toBe("rate-limited");
   });
 
+  it("maps provider account and policy rejections to blocked", () => {
+    for (const code of ["region_unavailable", "account_disabled", "provider_forbidden"]) {
+      expect(testFailureConnection(code)).toBe("blocked");
+    }
+  });
+
   it("maps reachability and shape problems to offline", () => {
     for (const code of ["transport", "invalid_response", "api_error", "incomplete", "empty_response"]) {
       expect(testFailureConnection(code)).toBe("offline");
