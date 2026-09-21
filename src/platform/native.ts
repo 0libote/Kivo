@@ -503,6 +503,10 @@ class MockBridge implements NativeBridge {
     if (request.action === "key-points") {
       return { kind: "result", text: "- Opens with a casual greeting\n- Asks how the recipient is doing" };
     }
+    // Presets that show a result instead of replacing the selection.
+    if (request.replacesSelection === false) {
+      return { kind: "result", text: "A preview result for this preset." };
+    }
     return { kind: "replaced" };
   }
 

@@ -42,8 +42,8 @@ for (const platform of ["macos", "windows"] as const) {
       await page.addInitScript((value) => localStorage.setItem("kivo-dev-settings", JSON.stringify({ theme: value })), theme);
       await installHarness(page, textSelection);
 
-      await page.getByRole("option", { name: "Summarize", exact: true }).click();
-      await expect.poll(() => page.evaluate(() => window.summaryTest.requests)).toEqual([{ action: "summarize", text: textSelection.initialText, sourceKind: "text" }]);
+      await page.getByRole("menuitem", { name: "Summarize", exact: true }).click();
+      await expect.poll(() => page.evaluate(() => window.summaryTest.requests)).toMatchObject([{ action: "summarize", text: textSelection.initialText, sourceKind: "text" }]);
       await page.evaluate(() => window.summaryTest.pending[0].resolve({ kind: "result", text: "A useful summary.", canReplace: false }));
       await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
 
@@ -52,7 +52,7 @@ for (const platform of ["macos", "windows"] as const) {
       await expect(page.getByRole("textbox")).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("link-confirmation.png") });
       await page.getByRole("button", { name: "Summarize", exact: true }).click();
-      await expect.poll(() => page.evaluate(() => window.summaryTest.requests[1])).toEqual({ action: "summarize", text: linkSelection.initialText, sourceKind: "link" });
+      await expect.poll(() => page.evaluate(() => window.summaryTest.requests[1])).toMatchObject({ action: "summarize", text: linkSelection.initialText, sourceKind: "link" });
       await page.evaluate((url) => window.summaryTest.pending[1].resolve({ kind: "result", text: "A link summary.", source: { kind: "website", url }, canReplace: true }), linkSelection.initialText);
       await expect(page.getByText("A link summary.", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "Replace", exact: true })).toHaveCount(0);
@@ -85,6 +85,6 @@ test("link summary retry keeps the captured URL without editable fallback", asyn
 test("disabling Summarize leaves highlighted links in the normal preset menu", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("kivo-dev-settings", JSON.stringify({ enabledWritingActions: ["proofread", "custom"] })));
   await installHarness(page, linkSelection);
-  await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Proofread", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Summarize", exact: true })).toHaveCount(0);
 });

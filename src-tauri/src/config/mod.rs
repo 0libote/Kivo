@@ -50,6 +50,16 @@ impl AppSettings {
         self.writing_tools.normalize();
         self.ai.normalize();
         self.ai.validate()?;
+        // Per-preset model priorities live on the same provider as Writing
+        // Tools. A provider switch can leave stored ids unusable, so normalize
+        // them against the active provider (an emptied list follows the global
+        // queue again).
+        let provider = self.ai.provider;
+        for preset in &mut self.writing_tools.presets {
+            if !preset.models.is_empty() {
+                preset.models = crate::ai::normalize_model_list(provider, &preset.models);
+            }
+        }
         // The cleanup override is a model on the same provider as Writing
         // Tools. A provider switch can leave a stored id unusable, so drop it
         // and fall back to the writing queue instead of failing silently on
@@ -340,27 +350,118 @@ impl Default for ShortcutBinding {
     }
 }
 
+/// One user-editable Writing Tools preset. Built-in presets carry a stable id
+/// (`proofread`, …); custom ones use a generated id. Only overridden built-ins
+/// and custom presets are stored — untouched built-ins fall back to the
+/// defaults mirrored in `src/features/writing-tools/presets.ts`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct WritingPresetSettings {
+    pub id: String,
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon: String,
+    /// The task instruction ("what it should do").
+    #[serde(default)]
+    pub instruction: String,
+    /// Advanced override: the full system-prompt template. `None` uses the
+    /// default template with `{{instruction}}` / `{{outputRule}}` placeholders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    #[serde(default)]
+    pub replaces_selection: bool,
+    /// Per-preset model priority. Empty follows the global AI model queue.
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
+/// Caps mirrored by `src/features/writing-tools/presets.ts`.
+pub const MAX_WRITING_PRESETS: usize = 24;
+const MAX_PRESET_LABEL: usize = 60;
+const MAX_PRESET_TEXT: usize = 8_000;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct WritingToolsSettings {
     pub shortcut: ShortcutBinding,
-    pub enabled_actions: Vec<WritingAction>,
+    /// Ordered ids of the presets shown in the popup. Built-in ids are shared
+    /// with the frontend; custom ids index [`Self::presets`].
+    pub enabled_actions: Vec<String>,
+    /// Overridden built-ins and custom presets. Definitions are inert to the
+    /// backend prompt builder (the frontend resolves and sends the system
+    /// instruction), but they persist here so both windows agree.
+    #[serde(default)]
+    pub presets: Vec<WritingPresetSettings>,
 }
 
 impl Default for WritingToolsSettings {
     fn default() -> Self {
         Self {
             shortcut: ShortcutBinding::writing_tools_default(),
-            enabled_actions: WritingAction::all().to_vec(),
+            enabled_actions: default_writing_action_ids(),
+            presets: Vec::new(),
         }
     }
+}
+
+fn default_writing_action_ids() -> Vec<String> {
+    WritingAction::all()
+        .iter()
+        .map(|action| action.as_str().to_owned())
+        .collect()
 }
 
 impl WritingToolsSettings {
     fn normalize(&mut self) {
         let mut seen = HashSet::new();
-        self.enabled_actions.retain(|action| seen.insert(*action));
+        self.enabled_actions = self
+            .enabled_actions
+            .drain(..)
+            .map(|id| WritingAction::canonical_id(&id))
+            .filter(|id| !id.is_empty() && seen.insert(id.clone()))
+            .take(MAX_WRITING_PRESETS)
+            .collect();
+
+        let mut seen_presets = HashSet::new();
+        self.presets = self
+            .presets
+            .drain(..)
+            .filter_map(|mut preset| {
+                preset.id = preset.id.trim().to_owned();
+                preset.label = truncate(preset.label.trim(), MAX_PRESET_LABEL);
+                preset.description = truncate(preset.description.trim(), MAX_PRESET_LABEL);
+                preset.icon = truncate(preset.icon.trim(), MAX_PRESET_LABEL);
+                preset.instruction = truncate(preset.instruction.trim(), MAX_PRESET_TEXT);
+                preset.template = preset
+                    .template
+                    .take()
+                    .map(|value| truncate(value.trim(), MAX_PRESET_TEXT))
+                    .filter(|value| !value.is_empty());
+                let mut seen_models = HashSet::new();
+                preset.models = preset
+                    .models
+                    .drain(..)
+                    .map(|model| model.trim().to_owned())
+                    .filter(|model| !model.is_empty() && seen_models.insert(model.clone()))
+                    .take(crate::ai::MAX_AI_MODELS)
+                    .collect();
+                if preset.id.is_empty() || !seen_presets.insert(preset.id.clone()) {
+                    return None;
+                }
+                Some(preset)
+            })
+            .take(MAX_WRITING_PRESETS)
+            .collect();
     }
+}
+
+fn truncate(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_owned();
+    }
+    value.chars().take(max_chars).collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -586,7 +687,6 @@ mod tests {
         AppSettings, HostPlatform, SettingsRepository, ShortcutBinding, ThemePreference,
         dictation_default_for, foreign_default_replacement, writing_tools_default_for,
     };
-    use crate::ai::WritingAction;
 
     fn temporary_settings_path() -> std::path::PathBuf {
         let unique = SystemTime::now()
@@ -609,7 +709,7 @@ mod tests {
         let repository = SettingsRepository::new(&path);
         let mut settings = AppSettings::default();
         settings.general.theme = ThemePreference::Dark;
-        settings.writing_tools.enabled_actions = vec![WritingAction::Proofread];
+        settings.writing_tools.enabled_actions = vec!["proofread".to_owned()];
 
         repository.save(&settings).unwrap();
         assert_eq!(repository.load().unwrap(), settings);
@@ -728,16 +828,49 @@ mod tests {
     fn duplicate_actions_are_normalized() {
         let mut settings = AppSettings::default();
         settings.writing_tools.enabled_actions = vec![
-            WritingAction::Proofread,
-            WritingAction::Proofread,
-            WritingAction::Concise,
+            "proofread".to_owned(),
+            "proofread".to_owned(),
+            "concise".to_owned(),
+            // Legacy enum camelCase spelling folds onto the wire id.
+            "keyPoints".to_owned(),
         ];
 
         let settings = settings.validate_and_normalize().unwrap();
         assert_eq!(
             settings.writing_tools.enabled_actions,
-            vec![WritingAction::Proofread, WritingAction::Concise]
+            vec![
+                "proofread".to_owned(),
+                "concise".to_owned(),
+                "key-points".to_owned()
+            ]
         );
+    }
+
+    #[test]
+    fn writing_presets_normalize_and_pin_models_per_provider() {
+        use super::WritingPresetSettings;
+        let mut settings = AppSettings::default();
+        settings.writing_tools.presets = vec![
+            WritingPresetSettings {
+                id: "  custom-1 ".into(),
+                label: "  Pirate  ".into(),
+                instruction: "Rewrite like a pirate.".into(),
+                replaces_selection: true,
+                models: vec!["  gemini-2.5-flash  ".into(), "gemini-2.5-flash".into()],
+                ..WritingPresetSettings::default()
+            },
+            // Duplicate id: the first occurrence wins.
+            WritingPresetSettings {
+                id: "custom-1".into(),
+                ..WritingPresetSettings::default()
+            },
+        ];
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.writing_tools.presets.len(), 1);
+        let preset = &settings.writing_tools.presets[0];
+        assert_eq!(preset.id, "custom-1");
+        assert_eq!(preset.label, "Pirate");
+        assert_eq!(preset.models, vec!["gemini-2.5-flash".to_owned()]);
     }
 
     #[test]

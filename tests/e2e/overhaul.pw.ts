@@ -58,11 +58,11 @@ for (const platform of ["windows", "macos"] as const) {
 test("Every writing action is visible and recording can finish from its indicator", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 380, height: 460 });
   await page.goto("/?surface=writing-tools");
-  await expect(page.getByRole("option", { name: "Proofread", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Proofread", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("writing-menu.png") });
-  await expect(page.getByRole("option", { name: "Summarize", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Summarize", exact: true })).toBeVisible();
   for (let index = 0; index < 5; index++) await page.keyboard.press("ArrowDown");
-  await expect(page.getByRole("option", { name: "Summarize", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Summarize", exact: true })).toBeVisible();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 164, height: 48 });
@@ -83,11 +83,11 @@ test("writing settings stay focused on actions and navigation resets scroll", as
   await page.setViewportSize({ width: 900, height: 650 });
   await page.goto("/?surface=settings");
   await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Reset actions", exact: true })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "Reset all to defaults", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("writing-settings.png") });
   await expect(page.getByText("Popup appearance", { exact: true })).toHaveCount(0);
   await page.setViewportSize({ width: 620, height: 500 });
-  await page.getByRole("button", { name: "Reset actions", exact: true }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: "Reset all to defaults", exact: true }).scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.getByRole("heading", { name: "AI", exact: true })).toBeInViewport();
 });

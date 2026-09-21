@@ -4,9 +4,9 @@ import { Icon } from "../../components/Icon";
 import { Spinner } from "../../components/Spinner";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type SummarySource, type WritingActionId, type WritingRequest } from "../../types";
+import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type SummarySource, type WritingPreset, type WritingRequest } from "../../types";
 import { SafeMarkdown } from "./SafeMarkdown";
-import { WRITING_ACTIONS, writingAction } from "./actions";
+import { builtinActionFor, resolvePresetPrompt, resolveWritingPresets } from "./presets";
 import { initialWritingToolsState, writingToolsReducer, type WritingToolsEvent, type WritingToolsState } from "./state";
 
 interface WritingToolsPopupProps {
@@ -14,12 +14,12 @@ interface WritingToolsPopupProps {
   readonly settings: AppSettings;
 }
 
-type RunAction = (actionId: WritingActionId) => Promise<void>;
+type RunAction = (presetId: string) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
 
-function getActiveDefinition(activeAction: WritingActionId | null): { label: string } | null {
+function getActiveDefinition(activeAction: string | null, presets: WritingPreset[]): WritingPreset | null {
   if (activeAction === null) return null;
-  return writingAction(activeAction);
+  return presets.find((preset) => preset.id === activeAction) ?? null;
 }
 
 const MENU_MOVEMENT: Readonly<Record<string, number>> = {
@@ -47,7 +47,7 @@ function handleEscape(
 
 function handleMenuKey(
   event: KeyboardEvent,
-  enabledActions: WritingActionId[],
+  enabledActions: string[],
   selectedIndex: number,
   runAction: RunAction,
   dispatch: PopupDispatch,
@@ -75,7 +75,7 @@ function handleMenuKey(
 function useWritingHotkeys(options: {
   readonly mode: WritingToolsState["mode"];
   readonly hasSelection: boolean;
-  readonly enabledActions: WritingActionId[];
+  readonly enabledActions: string[];
   readonly selectedIndex: number;
   readonly close: () => void;
   readonly runAction: RunAction;
@@ -109,18 +109,18 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   const requestInFlight = useRef(false);
   const popup = useRef<HTMLDialogElement>(null);
   const summarizeEnabled = settings.enabledWritingActions.includes("summarize");
-  const actions = useMemo(
-    () => WRITING_ACTIONS.filter((action) => settings.enabledWritingActions.includes(action.id)),
-    [settings.enabledWritingActions],
+  const presets = useMemo(
+    () => resolveWritingPresets(settings),
+    [settings.enabledWritingActions, settings.writingPresets],
   );
 
   const openWithContext = useCallback(
     (context: SelectionContext) => {
       requestGeneration.current += 1;
       requestInFlight.current = false;
-      dispatch({ type: "OPEN", context, enabledActions: actions.map((action) => action.id) });
+      dispatch({ type: "OPEN", context, enabledActions: presets.map((preset) => preset.id) });
     },
-    [actions],
+    [presets],
   );
 
   useNativeEvent<SelectionContext>("writing-context", openWithContext);
@@ -181,20 +181,22 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     });
   }, []);
 
-  const runAction = useCallback(async (actionId: WritingActionId) => {
+  const runAction = useCallback(async (presetId: string) => {
     if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
-    if (actionId === "summarize" && !summarizeEnabled) return;
-    if (actionId === "custom" && state.mode !== "custom" && state.mode !== "error") {
+    if (presetId === "summarize" && !summarizeEnabled) return;
+    const preset = presets.find((candidate) => candidate.id === presetId);
+    if (!preset) return;
+    if (presetId === "custom" && state.mode !== "custom" && state.mode !== "error") {
       dispatch({ type: "OPEN_CUSTOM" });
       return;
     }
-    const request = prepareWritingRequest(state, actionId);
+    const request = prepareWritingRequest(state, preset);
     if (!request) return;
 
     const generation = ++requestGeneration.current;
     requestInFlight.current = true;
 
-    dispatch({ type: "RUN", action: actionId });
+    dispatch({ type: "RUN", action: presetId });
     try {
       const response = await nativeBridge.runWritingAction(request);
       if (generation !== requestGeneration.current) return;
@@ -214,7 +216,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     } finally {
       if (generation === requestGeneration.current) requestInFlight.current = false;
     }
-  }, [state, summarizeEnabled]);
+  }, [state, summarizeEnabled, presets]);
 
   useWritingHotkeys({
     mode: state.mode,
@@ -236,7 +238,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         open
         ref={popup}
       >
-        <PopupContent state={state} actions={actions} close={close} dispatch={dispatch} runAction={runAction} />
+        <PopupContent state={state} presets={presets} close={close} dispatch={dispatch} runAction={runAction} />
       </dialog>
     </main>
   );
@@ -244,21 +246,21 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
 
 interface PopupContentProps {
   readonly state: WritingToolsState;
-  readonly actions: typeof WRITING_ACTIONS;
+  readonly presets: WritingPreset[];
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
 }
 
-function PopupContent({ state, actions, close, dispatch, runAction }: PopupContentProps) {
-  const activeDefinition = getActiveDefinition(state.activeAction);
+function PopupContent({ state, presets, close, dispatch, runAction }: PopupContentProps) {
+  const activeDefinition = getActiveDefinition(state.activeAction, presets);
   switch (state.mode) {
     case "closed":
       return <OpeningView />;
     case "menu":
       return (
         <MenuView
-          actions={actions}
+          presets={presets}
           applicationName={state.context?.applicationName}
           close={close}
           dispatch={dispatch}
@@ -301,7 +303,7 @@ function PopupContent({ state, actions, close, dispatch, runAction }: PopupConte
 }
 
 interface MenuViewProps {
-  readonly actions: typeof WRITING_ACTIONS;
+  readonly presets: WritingPreset[];
   readonly applicationName: string | undefined;
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
@@ -310,11 +312,11 @@ interface MenuViewProps {
 }
 
 function MenuView(props: MenuViewProps) {
-  const { actions, applicationName, close, dispatch, runAction, selectedIndex } = props;
-  const renderAction = (action: typeof actions[number], index: number) => <button
-    aria-label={action.label} aria-selected={index === selectedIndex} className="writing-action" data-selected={index === selectedIndex}
+  const { presets, applicationName, close, dispatch, runAction, selectedIndex } = props;
+  const renderAction = (action: WritingPreset, index: number) => <button
+    aria-label={action.label} className="writing-action" data-selected={index === selectedIndex}
     key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
-    role="option" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
+    role="menuitem" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
   return (
     <div className="writing-menu">
       <div className="writing-popup__top" data-tauri-drag-region>
@@ -326,8 +328,8 @@ function MenuView(props: MenuViewProps) {
           <Icon name="close" size={14} />
         </button>
       </div>
-      <div aria-label="Writing actions" className="writing-actions" role="listbox">
-        {actions.map((action, index) => renderAction(action, index))}
+      <div aria-label="Writing actions" className="writing-actions" role="menu">
+        {presets.map((preset, index) => renderAction(preset, index))}
       </div>
     </div>
   );
@@ -474,7 +476,7 @@ function ResultView({ close, canReplace, dispatch, label, resultText, source }: 
 }
 
 interface ErrorViewProps {
-  readonly activeAction: WritingActionId | null;
+  readonly activeAction: string | null;
   readonly canRetry: boolean;
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
@@ -546,15 +548,24 @@ function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewPro
   );
 }
 
-function prepareWritingRequest(state: WritingToolsState, action: WritingActionId): WritingRequest | undefined {
-  if (action === "custom" && !state.customInstruction.trim()) return undefined;
+function prepareWritingRequest(state: WritingToolsState, preset: WritingPreset): WritingRequest | undefined {
+  const typed = state.customInstruction.trim();
+  const isQuickCustom = preset.id === "custom";
+  if (isQuickCustom && !typed) return undefined;
   const text = state.sourceText.trim();
   if (!text) return undefined;
   let sourceKind: WritingRequest["sourceKind"];
-  if (action === "summarize") sourceKind = state.isLinkSummary ? "link" : "text";
+  if (preset.id === "summarize") sourceKind = state.isLinkSummary ? "link" : "text";
+  // The quick "custom" entry folds the typed text into the preset's
+  // instruction, so an edited custom template still applies.
+  const effective: WritingPreset = isQuickCustom ? { ...preset, instruction: typed } : preset;
   return {
-    action,
-    instruction: action === "custom" ? state.customInstruction.trim() : undefined,
+    action: builtinActionFor(preset.id),
+    presetId: preset.id,
+    instruction: isQuickCustom ? typed : undefined,
+    systemInstruction: resolvePresetPrompt(effective),
+    replacesSelection: preset.replacesSelection,
+    models: preset.models,
     text,
     sourceKind,
   };
