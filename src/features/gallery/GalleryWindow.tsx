@@ -45,7 +45,7 @@ export function GalleryWindow({
           nativeBridge.getPermissions(),
           nativeBridge.listMicrophones(),
           nativeBridge.listSpeechLanguages(),
-          nativeBridge.listAiModels(),
+          nativeBridge.listAiModels(settings.aiProvider),
           nativeBridge.getApiKeyStatus(),
           nativeBridge.getDictationRecovery(),
         ]);
@@ -61,7 +61,7 @@ export function GalleryWindow({
         setError(error instanceof Error ? error.message : "The probe failed.");
       }
     })();
-  }, []);
+  }, [settings.aiProvider]);
 
   useEffect(() => {
     refresh();
