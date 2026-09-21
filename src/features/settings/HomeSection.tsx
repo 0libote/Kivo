@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Button } from "../../components/Button";
 import { DictationPractice } from "../../components/DictationPractice";
 import { Icon } from "../../components/Icon";
@@ -6,6 +6,11 @@ import { formatShortcut } from "../../components/ShortcutRecorder";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import type { AppContext, AppSettings } from "../../types";
+
+// The usage dashboard pulls in the design system and chart renderer, which the
+// compact dictation/writing surfaces must never pay for. Load it only when
+// Home is actually shown.
+const UsagePanel = lazy(() => import("../usage/UsagePanel").then((module) => ({ default: module.UsagePanel })));
 
 export function HomeSection({ context, settings, onWriting, onDictation }: { readonly context: AppContext; readonly settings: AppSettings; readonly onWriting: () => void; readonly onDictation: () => void }) {
   const [recovery, setRecovery] = useState<string | null>(null);
@@ -23,6 +28,7 @@ export function HomeSection({ context, settings, onWriting, onDictation }: { rea
       <button className="home-shortcut" type="button" onClick={onWriting} aria-label="Change Writing Tools shortcut"><Icon name="pencil" size={19} /><div className="home-shortcut__copy"><strong>Writing Tools</strong><span>Select text, then press your shortcut</span></div><div className="home-shortcut__tail"><div className="shortcut-summary">{formatShortcut(settings.writingShortcut, context.platform).map((key, index) => <kbd key={index}>{key}</kbd>)}</div><span className="home-shortcut__edit">Edit</span></div></button>
     </div>
     <DictationPractice platform={context.platform} shortcut={settings.dictationShortcut} />
+    <Suspense fallback={null}><UsagePanel /></Suspense>
     {recovery ? <section className="dictation-recovery" aria-label="Last dictation"><div className="dictation-practice__header"><strong>Your last dictation</strong><span>Kept for this session</span></div><p>{recovery}</p><div className="recovery-actions"><Button compact onClick={() => void nativeBridge.copyText(recovery).then(() => setNotice("Copied to clipboard.")).catch(() => setNotice("The clipboard is unavailable. Try again."))}>Copy text</Button><Button compact onClick={() => void nativeBridge.clearDictationRecovery().then(() => setRecovery(null)).catch(() => setNotice("The dictation could not be cleared."))}>Clear</Button></div></section> : null}
     <p className="home-footnote">Close this window to keep Kivo in {context.platform === "windows" ? "the system tray" : "the menu bar"}.</p>
     {notice ? <p role="status" className="section-feedback">{notice}</p> : null}

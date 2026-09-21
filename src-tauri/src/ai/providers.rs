@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use reqwest::{StatusCode, header::HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -1167,6 +1167,8 @@ struct CompatRequestContext<'a> {
 #[derive(Clone)]
 pub struct OpenAiCompatClient {
     http: reqwest::Client,
+    /// Local usage ledger; `None` disables accounting (tests, headless).
+    usage: Option<Arc<crate::usage::UsageStore>>,
 }
 
 impl OpenAiCompatClient {
@@ -1176,7 +1178,42 @@ impl OpenAiCompatClient {
             .timeout(Duration::from_secs(90))
             .build()
             .map_err(OpencodeError::Transport)?;
-        Ok(Self { http })
+        Ok(Self { http, usage: None })
+    }
+
+    /// Attach the local usage ledger. Accounting is best-effort and never
+    /// affects the request.
+    pub fn set_usage_store(&mut self, usage: Arc<crate::usage::UsageStore>) {
+        self.usage = Some(usage);
+    }
+
+    /// Record one generation attempt (success or failure) for the dashboard.
+    fn record_usage(
+        &self,
+        provider: AiProvider,
+        model: &str,
+        prompt: &AiPrompt,
+        reported: Option<crate::usage::TokenUsage>,
+        output_chars: usize,
+        ok: bool,
+    ) {
+        let Some(store) = &self.usage else {
+            return;
+        };
+        let tokens = reported.unwrap_or_else(|| {
+            crate::usage::TokenUsage::estimate(super::prompt_chars(prompt), output_chars)
+        });
+        store.record(crate::usage::UsageEntry {
+            timestamp_ms: crate::usage::now_ms(),
+            provider: provider.as_str().to_owned(),
+            model: model.to_owned(),
+            kind: prompt.kind.as_str().to_owned(),
+            input_tokens: tokens.input_tokens,
+            output_tokens: tokens.output_tokens,
+            estimated: tokens.estimated,
+            cost_usd: super::estimate_cost(provider, model, &tokens),
+            ok,
+        });
     }
 
     fn next_opencode_session(provider: AiProvider) -> Option<String> {
@@ -1332,7 +1369,17 @@ impl OpenAiCompatClient {
             .json::<serde_json::Value>()
             .await
             .map_err(OpencodeError::InvalidResponse)?;
-        parse_completion(protocol, completion)
+        let reported = crate::usage::parse_provider_usage(&completion);
+        let output = parse_completion(protocol, completion)?;
+        self.record_usage(
+            provider,
+            &model,
+            prompt,
+            reported,
+            output.chars().count(),
+            true,
+        );
+        Ok(output)
     }
 
     /// Authenticated generation probe: public model listings cannot validate a key.
@@ -1428,13 +1475,21 @@ impl OpenAiCompatClient {
         };
         let mut last_error: Option<OpencodeError> = None;
         for model in &normalized {
+            let resolved = Self::resolve_model(provider, model);
             match self
                 .generate_one(provider, context, model, prompt, reasoning_mode)
                 .await
             {
                 Ok(output) => return Ok(output),
-                Err(error) if is_failover_terminal(&error) => return Err(error),
-                Err(error) => last_error = Some(error),
+                Err(error) => {
+                    // Failover burns an attempt per model; record each so the
+                    // dashboard shows real request/failure counts.
+                    self.record_usage(provider, &resolved, prompt, None, 0, false);
+                    if is_failover_terminal(&error) {
+                        return Err(error);
+                    }
+                    last_error = Some(error);
+                }
             }
         }
         Err(last_error.unwrap_or(OpencodeError::EmptyResponse))
@@ -1958,6 +2013,7 @@ mod tests {
         let prompt = AiPrompt {
             system_instruction: "Correct spelling".into(),
             input: "helo world".into(),
+            kind: crate::ai::AiTaskKind::Writing,
         };
         assert_eq!(
             client

@@ -312,6 +312,8 @@ fn parse_link_summary(
     let output = parse_interaction(InteractionResponse {
         status: response.status,
         steps: response.steps.into_iter().map(|step| step.output).collect(),
+        usage: None,
+        usage_metadata: None,
     })?;
     if output.contains(UNAVAILABLE_SENTINEL) {
         return Err(GeminiError::InaccessibleSource);

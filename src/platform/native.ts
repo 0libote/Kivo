@@ -29,6 +29,8 @@ import {
   type SelectionContext,
   type SpeechLanguage,
   type Surface,
+  type UsageGroup,
+  type UsageSummary,
   type WritingRequest,
   type WritingResponse,
   defaultSettings,
@@ -84,6 +86,8 @@ export interface NativeBridge {
   saveApiKey(apiKey: string): Promise<ApiKeyStatus>;
   clearApiKey(): Promise<ApiKeyStatus>;
   testApiKey(): Promise<ApiKeyStatus>;
+  getUsageStats(days?: number): Promise<UsageSummary>;
+  clearUsageStats(): Promise<void>;
   startDictation(): Promise<void>;
   stopDictation(): Promise<void>;
   cancelDictation(): Promise<void>;
@@ -180,6 +184,8 @@ class TauriBridge implements NativeBridge {
   saveApiKey = (apiKey: string) => call<ApiKeyStatus>("store_api_key", { apiKey });
   clearApiKey = () => call<ApiKeyStatus>("remove_api_key");
   testApiKey = () => call<ApiKeyStatus>("test_api_key");
+  getUsageStats = (days?: number) => call<UsageSummary>("get_usage_stats", { days: days ?? null });
+  clearUsageStats = () => call<void>("clear_usage_stats");
   startDictation = () => call<void>("start_dictation");
   stopDictation = () => call<void>("stop_dictation");
   cancelDictation = () => call<void>("cancel_dictation");
@@ -443,6 +449,59 @@ class MockBridge implements NativeBridge {
       connection: this.apiKeyStatuses[provider].configured ? "connected" : "invalid",
     };
     return this.currentKeyStatus();
+  }
+
+  // Illustrative local usage for the browser harness only. The real ledger is
+  // produced in Rust, stored on this machine, and never contains text.
+  private mockUsage(): UsageSummary {
+    const dayCost = (inputTokens: number, outputTokens: number) =>
+      (inputTokens / 1_000_000) * 0.95 + (outputTokens / 1_000_000) * 4;
+    const days = Array.from({ length: 14 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 8, 8 + index));
+      const requests = 3 + ((index * 7) % 9);
+      const inputTokens = requests * (220 + (index % 5) * 40);
+      const outputTokens = requests * (90 + (index % 4) * 25);
+      return {
+        day: date.toISOString().slice(0, 10),
+        requests,
+        failures: index % 6 === 0 ? 1 : 0,
+        inputTokens,
+        outputTokens,
+        costUsd: dayCost(inputTokens, outputTokens),
+      };
+    });
+    const sum = (pick: (day: (typeof days)[number]) => number) =>
+      days.reduce((total, day) => total + pick(day), 0);
+    const requests = sum((day) => day.requests);
+    const inputTokens = sum((day) => day.inputTokens);
+    const outputTokens = sum((day) => day.outputTokens);
+    const group = (key: string, share: number): UsageGroup => {
+      const input = Math.round(inputTokens * share);
+      const output = Math.round(outputTokens * share);
+      return { key, requests: Math.round(requests * share), failures: 0, inputTokens: input, outputTokens: output, costUsd: dayCost(input, output) };
+    };
+    return {
+      requests,
+      failures: sum((day) => day.failures),
+      inputTokens,
+      outputTokens,
+      costUsd: sum((day) => day.costUsd),
+      estimatedRequests: Math.round(requests * 0.4),
+      firstMs: Date.UTC(2026, 8, 8),
+      lastMs: Date.UTC(2026, 8, 21),
+      days,
+      byProvider: [group("gemini", 0.7), group("zen", 0.3)],
+      byModel: [group("gemini-3.8-flash", 0.5), group("gemini-3.5-flash", 0.2), group("kimi-k2", 0.3)],
+      byKind: [group("writing", 0.6), group("dictation-cleanup", 0.3), group("link-summary", 0.1)],
+    };
+  }
+
+  async getUsageStats() {
+    return structuredClone(this.mockUsage());
+  }
+
+  async clearUsageStats() {
+    // Intentional no-op: the harness usage is illustrative and regenerated.
   }
 
   async startDictation() {

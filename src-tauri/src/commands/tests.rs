@@ -129,6 +129,7 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
         last_cursor: Mutex::new(None),
         writing_generation: AtomicU64::new(0),
         writing_cancel: tokio::sync::watch::channel(()).0,
+        usage: crate::usage::UsageStore::in_memory(),
     };
     (Arc::new(core), text)
 }
@@ -1136,6 +1137,7 @@ async fn gemini_generation_timeout_tries_the_next_model() {
             &AiPrompt {
                 input: "Reply with OK.".into(),
                 system_instruction: "Return only OK.".into(),
+                kind: crate::ai::AiTaskKind::Writing,
             },
             AiReasoningMode::Fast,
         )

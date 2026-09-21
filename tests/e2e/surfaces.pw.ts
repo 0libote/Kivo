@@ -48,6 +48,18 @@ test("settings navigation and controls work", async ({ page }) => {
   assertNoErrors();
 });
 
+test("home shows the local AI usage dashboard", async ({ page }) => {
+  const assertNoErrors = failOnConsoleErrors(page);
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.goto("/?surface=settings&harness=1");
+  await expect(page.getByRole("heading", { name: "AI usage" })).toBeVisible();
+  await expect(page.getByText("On this device", { exact: true })).toBeVisible();
+  await expect(page.getByText("Est. cost", { exact: true })).toBeVisible();
+  await expect(page.getByText("By model", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear usage history", exact: true })).toBeVisible();
+  assertNoErrors();
+});
+
 test("AI provider switch shows per-provider keys and model costs", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });

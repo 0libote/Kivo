@@ -1,5 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { Theme } from "@astryxdesign/core/theme";
+import { neutralTheme } from "@astryxdesign/theme-neutral";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles/globals.css";
@@ -14,6 +16,8 @@ if (!root) throw new Error("Kivo root element is missing");
 
 createRoot(root).render(
   <StrictMode>
-    <ErrorBoundary><App /></ErrorBoundary>
+    <Theme theme={neutralTheme}>
+      <ErrorBoundary><App /></ErrorBoundary>
+    </Theme>
   </StrictMode>,
 );

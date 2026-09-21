@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     ai::{
-        AiPrompt, AiProvider, AiReasoningMode, GeminiClient, GeminiError, LinkSource,
+        AiPrompt, AiProvider, AiReasoningMode, AiTaskKind, GeminiClient, GeminiError, LinkSource,
         ListedAiModel, OpenAiCompatClient, OpencodeError, PromptError, WritingAction,
         canonical_model_id_for, curated_models_for, dictation_cleanup_prompt, writing_prompt,
         writing_prompt_from_system,
@@ -55,6 +55,8 @@ pub struct AppCore {
     last_cursor: Mutex<Option<ScreenPoint>>,
     writing_generation: AtomicU64,
     writing_cancel: tokio::sync::watch::Sender<()>,
+    /// Local AI usage ledger (counts and identifiers only).
+    usage: Arc<crate::usage::UsageStore>,
 }
 
 impl AppCore {
@@ -89,7 +91,17 @@ impl AppCore {
             last_cursor: Mutex::new(None),
             writing_generation: AtomicU64::new(0),
             writing_cancel: tokio::sync::watch::channel(()).0,
+            usage: crate::usage::UsageStore::in_memory(),
         })
+    }
+
+    /// Attach the persistent usage ledger to the AI clients. Called once at
+    /// startup; tests and headless setups keep the in-memory default so
+    /// generation behaviour is unchanged.
+    pub fn attach_usage_store(&mut self, usage: Arc<crate::usage::UsageStore>) {
+        self.ai.set_usage_store(Arc::clone(&usage));
+        self.compat.set_usage_store(Arc::clone(&usage));
+        self.usage = usage;
     }
 
     pub fn settings(&self) -> Result<AppSettings, AppCoreError> {
@@ -181,6 +193,7 @@ impl AppCore {
                         &AiPrompt {
                             input: "Reply with OK.".into(),
                             system_instruction: "Return only OK.".into(),
+                            kind: AiTaskKind::ConnectionTest,
                         },
                         AiReasoningMode::Fast,
                     )
@@ -341,6 +354,16 @@ impl AppCore {
             .lock()
             .map_err(|_| AppCoreError::Unavailable)?
             .phase())
+    }
+
+    /// Aggregated AI usage newer than `since_ms` (all entries when `None`).
+    pub fn usage_summary(&self, since_ms: Option<i64>) -> crate::usage::UsageSummary {
+        self.usage.summary(since_ms)
+    }
+
+    /// Delete the local usage ledger.
+    pub fn clear_usage_stats(&self) {
+        self.usage.clear();
     }
 
     pub async fn microphones(&self) -> Result<Vec<MicrophoneDevice>, AppCoreError> {
@@ -1819,6 +1842,22 @@ pub async fn test_api_key(core: State<'_, AppCore>) -> Result<ApiKeyStatus, Comm
         configured: status.configured,
         connection: "connected",
     })
+}
+
+/// Aggregated AI usage for the dashboard. `days` limits the window (e.g. 30);
+/// omitted or `0` returns the whole local ledger. Only counts and identifiers
+/// are stored, so this payload never contains prompt or response text.
+#[tauri::command]
+pub fn get_usage_stats(core: State<'_, AppCore>, days: Option<u32>) -> crate::usage::UsageSummary {
+    let since = days
+        .filter(|days| *days > 0)
+        .map(|days| crate::usage::since_ms(crate::usage::now_ms(), days));
+    core.usage_summary(since)
+}
+
+#[tauri::command]
+pub fn clear_usage_stats(core: State<'_, AppCore>) {
+    core.clear_usage_stats();
 }
 
 #[tauri::command]

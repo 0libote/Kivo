@@ -195,6 +195,46 @@ export interface AiModelInfo {
   billing?: string | null;
 }
 
+/** One UTC day of AI usage. Counts and identifiers only, never text. */
+export interface UsageDay {
+  day: string;
+  requests: number;
+  failures: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+/** Usage grouped by provider, model, or task kind. */
+export interface UsageGroup {
+  key: string;
+  requests: number;
+  failures: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+}
+
+/**
+ * Aggregated local AI usage for the dashboard. Mirrors `UsageSummary` in
+ * `src-tauri/src/usage/mod.rs` (camelCase over IPC).
+ */
+export interface UsageSummary {
+  requests: number;
+  failures: number;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  /** Requests whose token counts were estimated rather than provider-reported. */
+  estimatedRequests: number;
+  firstMs: number | null;
+  lastMs: number | null;
+  days: UsageDay[];
+  byProvider: UsageGroup[];
+  byModel: UsageGroup[];
+  byKind: UsageGroup[];
+}
+
 export interface SelectionContext {
   hasSelection: boolean;
   applicationName: string;

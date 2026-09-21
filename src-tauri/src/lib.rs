@@ -6,6 +6,7 @@ mod security;
 mod shell;
 mod speech;
 mod text;
+mod usage;
 
 use std::sync::Arc;
 
@@ -36,12 +37,15 @@ pub fn run() {
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
+            // Local usage ledger: counts and identifiers only, never text.
+            let usage_store =
+                crate::usage::UsageStore::load(app.path().app_config_dir()?.join("usage.json"));
             // On-device models live in the app data directory and are managed
             // by Kivo (downloaded, verified, deleted); nothing is bundled.
             let model_store = Arc::new(ModelStore::new(app.path().app_data_dir()?.join("models")));
             let system_speech = Arc::new(PlatformSpeechEngine::new(Arc::clone(&platform)));
             let local_speech = Arc::new(LocalSpeechEngine::new(Arc::clone(&model_store)));
-            let core = AppCore::new(
+            let mut core = AppCore::new(
                 SettingsRepository::new(settings_path),
                 Arc::new(ShellSettingsRuntime(handle.clone())),
                 Arc::new(PlatformCredentialStore::new(Arc::clone(&platform))),
@@ -49,6 +53,7 @@ pub fn run() {
                 Arc::new(SelectableSpeechEngine::new(system_speech, local_speech)),
                 Arc::new(PlatformTextService::new(Arc::clone(&platform))),
             )?;
+            core.attach_usage_store(usage_store);
             let settings = commands::FrontendSettings::from(core.settings()?);
             app.manage(model_store);
             app.manage(platform);
@@ -110,6 +115,8 @@ pub fn run() {
             commands::store_api_key,
             commands::remove_api_key,
             commands::test_api_key,
+            commands::get_usage_stats,
+            commands::clear_usage_stats,
             commands::start_dictation,
             commands::stop_dictation,
             commands::cancel_dictation,

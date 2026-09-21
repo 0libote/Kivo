@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use reqwest::{StatusCode, header::HeaderValue};
 use serde::{Deserialize, Serialize};
@@ -369,9 +369,33 @@ impl WritingAction {
     }
 }
 
+/// What a generation is for. Used only for local usage accounting; it never
+/// changes the request itself.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiTaskKind {
+    #[default]
+    Writing,
+    DictationCleanup,
+    LinkSummary,
+    ConnectionTest,
+}
+
+impl AiTaskKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Writing => "writing",
+            Self::DictationCleanup => "dictation-cleanup",
+            Self::LinkSummary => "link-summary",
+            Self::ConnectionTest => "connection-test",
+        }
+    }
+}
+
 pub struct AiPrompt {
     pub system_instruction: String,
     pub input: String,
+    pub kind: AiTaskKind,
 }
 
 pub fn writing_prompt(
@@ -425,6 +449,7 @@ pub fn writing_prompt(
             "{WRITING_SYSTEM_PREFIX}\n\nTask: {instruction}\n{output_rule}"
         ),
         input: format!("<source_text>\n{source_text}\n</source_text>"),
+        kind: AiTaskKind::Writing,
     })
 }
 
@@ -442,6 +467,7 @@ pub fn writing_prompt_from_system(
     Ok(AiPrompt {
         system_instruction,
         input: format!("<source_text>\n{source_text}\n</source_text>"),
+        kind: AiTaskKind::Writing,
     })
 }
 
@@ -459,6 +485,7 @@ pub fn dictation_cleanup_prompt(transcript: &str) -> Result<AiPrompt, PromptErro
         )
         .into(),
         input: format!("<transcript>\n{transcript}\n</transcript>"),
+        kind: AiTaskKind::DictationCleanup,
     })
 }
 
@@ -486,6 +513,8 @@ pub struct GeminiClient {
     http: reqwest::Client,
     endpoint: String,
     models_endpoint: String,
+    /// Local usage ledger; `None` disables accounting (tests, headless).
+    usage: Option<Arc<crate::usage::UsageStore>>,
 }
 
 impl GeminiClient {
@@ -525,7 +554,42 @@ impl GeminiClient {
             http,
             endpoint: GEMINI_INTERACTIONS_ENDPOINT.into(),
             models_endpoint: GEMINI_MODELS_ENDPOINT.into(),
+            usage: None,
         })
+    }
+
+    /// Attach the local usage ledger. Accounting is best-effort and never
+    /// affects the request.
+    pub fn set_usage_store(&mut self, usage: Arc<crate::usage::UsageStore>) {
+        self.usage = Some(usage);
+    }
+
+    /// Record one generation attempt (success or failure) for the dashboard.
+    fn record_usage(
+        &self,
+        model: &str,
+        prompt: &AiPrompt,
+        reported: Option<crate::usage::TokenUsage>,
+        output_chars: usize,
+        ok: bool,
+    ) {
+        let Some(store) = &self.usage else {
+            return;
+        };
+        let tokens = reported.unwrap_or_else(|| {
+            crate::usage::TokenUsage::estimate(prompt_chars(prompt), output_chars)
+        });
+        store.record(crate::usage::UsageEntry {
+            timestamp_ms: crate::usage::now_ms(),
+            provider: AiProvider::Gemini.as_str().to_owned(),
+            model: model.to_owned(),
+            kind: prompt.kind.as_str().to_owned(),
+            input_tokens: tokens.input_tokens,
+            output_tokens: tokens.output_tokens,
+            estimated: tokens.estimated,
+            cost_usd: estimate_cost(AiProvider::Gemini, model, &tokens),
+            ok,
+        });
     }
 
     fn resolve_model(model: &str) -> String {
@@ -605,7 +669,10 @@ impl GeminiClient {
             .json::<InteractionResponse>()
             .await
             .map_err(GeminiError::InvalidResponse)?;
-        parse_interaction(interaction)
+        let reported = interaction.reported_usage();
+        let output = parse_interaction(interaction)?;
+        self.record_usage(&model, prompt, reported, output.chars().count(), true);
+        Ok(output)
     }
 
     /// Dynamic model picker source: `GET /v1beta/models?pageSize=1000`
@@ -693,8 +760,13 @@ impl GeminiClient {
                 .await
             {
                 Ok(output) => return Ok(output),
-                Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
+                    // Failover burns an attempt per model; record each so the
+                    // dashboard shows real request/failure counts.
+                    self.record_usage(&current, prompt, None, 0, false);
+                    if error.is_failover_terminal() {
+                        return Err(error);
+                    }
                     let Some(next) = models.next() else {
                         return Err(error);
                     };
@@ -803,6 +875,21 @@ struct InteractionResponse {
     status: String,
     #[serde(default)]
     steps: Vec<InteractionStep>,
+    /// Provider-reported usage when present (schema-tolerant: the field name
+    /// has varied across API revisions).
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+    #[serde(default, rename = "usageMetadata")]
+    usage_metadata: Option<serde_json::Value>,
+}
+
+impl InteractionResponse {
+    fn reported_usage(&self) -> Option<crate::usage::TokenUsage> {
+        self.usage
+            .as_ref()
+            .or(self.usage_metadata.as_ref())
+            .and_then(crate::usage::parse_token_usage_object)
+    }
 }
 
 #[derive(Deserialize)]
@@ -915,6 +1002,28 @@ fn parse_interaction(response: InteractionResponse) -> Result<String, GeminiErro
         return Err(GeminiError::EmptyResponse);
     }
     Ok(output.to_owned())
+}
+
+/// Character count of a prompt, used only for token estimation when the
+/// provider reports no usage.
+pub(crate) fn prompt_chars(prompt: &AiPrompt) -> usize {
+    prompt.system_instruction.chars().count() + prompt.input.chars().count()
+}
+
+/// Estimated USD cost from the curated price table (`0.0` when unknown, e.g.
+/// Gemini, which is billed directly by Google).
+pub(crate) fn estimate_cost(
+    provider: AiProvider,
+    model: &str,
+    usage: &crate::usage::TokenUsage,
+) -> f64 {
+    match providers::price_for(provider, model) {
+        Some(price) => {
+            usage.input_tokens as f64 / 1_000_000.0 * price.input_per_1m
+                + usage.output_tokens as f64 / 1_000_000.0 * price.output_per_1m
+        }
+        None => 0.0,
+    }
 }
 
 #[derive(Debug)]
