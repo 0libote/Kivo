@@ -1176,8 +1176,7 @@ impl OpenAiCompatClient {
         if !matches!(provider, AiProvider::Zen | AiProvider::Go) {
             return None;
         }
-        static NEXT_SESSION: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
+        static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Some(format!(
             "kivo-{}-{}-{sequence}",
@@ -1948,7 +1947,8 @@ mod tests {
                     1 => {
                         assert_eq!(body["model"], "glm-5.3-flash");
                         assert_eq!(body["reasoning_effort"], "low");
-                        let response = r#"{"error":{"code":"rate_limit_exceeded","message":"try fallback"}}"#;
+                        let response =
+                            r#"{"error":{"code":"rate_limit_exceeded","message":"try fallback"}}"#;
                         write!(stream, "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
                     }
                     _ => {
