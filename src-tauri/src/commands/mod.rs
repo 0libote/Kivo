@@ -194,8 +194,8 @@ impl AppCore {
             }
             AiProvider::Zen | AiProvider::Go | AiProvider::Custom => {
                 // Zen/Go list their models publicly, so a metadata GET cannot
-                // validate the key: send a one-token completion on the first
-                // queue entry (the cheapest possible authenticated call), then
+                // validate the key: send a tiny completion on the first
+                // queue entry (a minimal authenticated call), then
                 // verify the remaining entries against the public listing
                 // without spending further quota.
                 let chat_url = provider
