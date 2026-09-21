@@ -946,6 +946,10 @@ pub enum OpencodeError {
 }
 
 impl OpencodeError {
+    fn provider_message(code: Option<&str>) -> Option<&str> {
+        code.and_then(|code| code.strip_prefix("provider_message:"))
+    }
+
     pub fn is_rate_limited(&self) -> bool {
         match self {
             Self::Api { status, code } => {
@@ -1021,27 +1025,27 @@ impl OpencodeError {
         })
     }
 
-    pub fn user_message(&self) -> &'static str {
+    pub fn user_message(&self) -> String {
         match self {
-            Self::InvalidApiKey => "The API key is invalid.",
+            Self::InvalidApiKey => "The API key is invalid.".into(),
             Self::Incomplete => {
-                "The provider stopped before completing the response. Try again or choose another model."
+                "The provider stopped before completing the response. Try again or choose another model.".into()
             }
             Self::InaccessibleSource => {
-                "Link summaries need the Gemini provider. Paste the text or transcript instead."
+                "Link summaries need the Gemini provider. Paste the text or transcript instead.".into()
             }
             Self::Api { code, .. } if Self::is_region_unavailable_code(code.as_deref()) => {
-                "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again."
+                "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again.".into()
             }
             Self::Api { code, .. } if Self::is_account_disabled_code(code.as_deref()) => {
-                "OpenCode Go says this workspace does not have an active Go subscription. Check the Go subscription in the OpenCode console."
+                "OpenCode Go says this workspace does not have an active Go subscription. Check the Go subscription in the OpenCode console.".into()
             }
             Self::Api { status, code }
                 if *status == StatusCode::UNAUTHORIZED || Self::is_auth_code(code.as_deref()) =>
             {
-                "Couldn't connect. OpenCode did not accept this API key."
+                "Couldn't connect. OpenCode did not accept this API key.".into()
             }
-            _ if self.is_out_of_credits() => "The OpenCode balance is empty. Top up to continue.",
+            _ if self.is_out_of_credits() => "The OpenCode balance is empty. Top up to continue.".into(),
             Self::Api { status, code }
                 if *status == StatusCode::TOO_MANY_REQUESTS
                     || matches!(
@@ -1054,16 +1058,22 @@ impl OpencodeError {
                         )
                     ) =>
             {
-                "The provider is temporarily rate limited. Try again shortly."
+                "The provider is temporarily rate limited. Try again shortly.".into()
             }
             Self::Api { .. } if self.is_not_found() => {
-                "That model isn't available. Choose another model under AI → Model."
+                "That model isn't available. Choose another model under AI → Model.".into()
             }
             Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => {
-                "OpenCode rejected this request. The key may be valid, but this workspace, model, or client is not permitted to use the requested Go endpoint."
+                "OpenCode rejected this request. The key may be valid, but this workspace, model, or client is not permitted to use the requested Go endpoint.".into()
             }
-            Self::Transport(_) => "Couldn't reach the AI provider. Check your connection.",
-            _ => "The AI provider couldn't complete that request.",
+            Self::Api { status, code }
+                if Self::provider_message(code.as_deref()).is_some() =>
+            {
+                let detail = Self::provider_message(code.as_deref()).unwrap_or_default();
+                format!("OpenCode returned HTTP {}: {detail}", status.as_u16())
+            }
+            Self::Transport(_) => "Couldn't reach the AI provider. Check your connection.".into(),
+            _ => "The AI provider couldn't complete that request.".into(),
         }
     }
 
@@ -1102,6 +1112,12 @@ impl OpencodeError {
             }
             Self::Api { .. } if self.is_not_found() => "model_not_found",
             Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => "provider_forbidden",
+            Self::Api { status, code }
+                if *status == StatusCode::BAD_REQUEST
+                    && Self::provider_message(code.as_deref()).is_some() =>
+            {
+                "provider_rejected"
+            }
             Self::Api { .. } => "api_error",
             Self::EmptyResponse => "empty_response",
         }
@@ -1110,7 +1126,7 @@ impl OpencodeError {
 
 impl fmt::Display for OpencodeError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.user_message())
+        formatter.write_str(&self.user_message())
     }
 }
 
@@ -1338,13 +1354,21 @@ impl OpenAiCompatClient {
             max_tokens: Some(16),
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) = completion_request(
+        let (url, mut body) = completion_request(
             protocol,
             provider,
             AiReasoningMode::Fast,
             chat_url,
             &request,
         );
+        // A connection probe should test auth + routing with the smallest
+        // provider-compatible request, not Kivo's optional generation tuning.
+        // Leaving reasoning controls out also makes failures easier to attribute.
+        if let Some(object) = body.as_object_mut() {
+            object.remove("reasoning_effort");
+            object.remove("thinking");
+            object.remove("output_config");
+        }
         let mut call = self.chat_request(provider, &url).json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
@@ -1803,8 +1827,15 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
     {
         return Some("rate_limited".into());
     }
+    if !message.is_empty() {
+        let detail: String = message
+            .chars()
+            .filter(|character| !character.is_control() || character.is_whitespace())
+            .take(500)
+            .collect();
+        return Some(format!("provider_message:{detail}"));
+    }
     code.or_else(|| kind.map(str::to_owned))
-        .or_else(|| (!message.is_empty()).then(|| "api_error".to_owned()))
 }
 
 fn parse_chat_completion(response: ChatCompletionResponse) -> Result<String, OpencodeError> {
