@@ -1,0 +1,25 @@
+/*
+ * Tailwind v4 entry for the static website.
+ *
+ * Preflight is intentionally NOT imported: the marketing/docs pages ship a
+ * complete hand-written stylesheet (`styles.css`), and Tailwind's reset would
+ * fight it. Only the theme layer and utilities are imported, so the site can
+ * use Tailwind utilities alongside the existing CSS. The compiled output
+ * (`tailwind.generated.css`) is committed so the site stays deploy-ready
+ * without a build step; run `bun run build:website` after changing markup.
+ */
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@source "./index.html";
+@source "./docs.html";
+@source "./dev.html";
+
+@theme {
+  --color-kivo-bg: #f5f5f3;
+  --color-kivo-surface: #ffffff;
+  --color-kivo-ink: #1c1c1e;
+  --color-kivo-muted: #626267;
+  --color-kivo-accent: #0869d7;
+}

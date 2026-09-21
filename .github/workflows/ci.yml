@@ -84,6 +84,7 @@ jobs:
       - run: bun run check:bridge
       - run: bun run check:packaging
       - run: bun run check:platform-parity
+      - run: bun run check:website
       - run: bun run build:app
 
   frontend-windows:
