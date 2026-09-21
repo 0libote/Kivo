@@ -233,3 +233,12 @@ The updater checks `https://github.com/0libote/Kivo/releases/latest/download/lat
 ## Privacy and diagnostics
 
 Do not add logs containing selected text, transcripts, Gemini responses, clipboard contents, or credentials. User-facing errors are deliberately short; local diagnostics should record only operation names, error categories, and non-sensitive OS codes.
+
+### Local usage statistics
+
+Home shows an **AI usage** panel (requests, tokens, estimated cost, per-day trend, and breakdowns by provider/model/task, plus words dictated and this month's spend). It is built from a local ledger in the app config directory (`usage.json`) that records, per generation attempt and per completed dictation, only counts and identifiers: provider, model, task kind, token totals (provider-reported where available, otherwise a marked estimate), an estimated cost from the curated price table, a word count for dictation, and success/failure. It never contains selected text, prompts, responses, transcripts, or keys, and it is never sent anywhere. The panel can clear it at any time.
+
+## Styling
+
+The React surfaces are styled with [StyleX](https://stylexjs.com) bundled through Vite, using [Astryx](https://github.com/facebook/astryx) as the theme foundation and component source for new UI. The static `website/` folder uses Tailwind v4 utilities alongside its hand-written stylesheet; run `bun run build:website` after changing its markup (CI's `check:website` keeps the committed CSS in sync). Tailwind's preflight is intentionally not imported so it cannot fight the existing site design.
+
