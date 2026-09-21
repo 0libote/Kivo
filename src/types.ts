@@ -1,3 +1,5 @@
+import type { IconName } from "./components/Icon";
+
 /**
  * Every OS runs one shared AppCore; only a thin adapter differs per host.
  * `linux` is the dev/test bench (simulated speech + file vault) so the full
@@ -37,6 +39,30 @@ export type WritingActionId =
   | "summarize"
   | "key-points"
   | "custom";
+
+/**
+ * A user-editable Writing Tools preset. Built-in presets keep their stable id
+ * (`proofread`, …); custom presets use a generated `custom-…` id and always
+ * run through the native `custom` action with an explicit system prompt.
+ *
+ * `template` is the advanced override of the full system prompt. `null` uses
+ * the default template with `{{instruction}}` / `{{outputRule}}` placeholders,
+ * so the easy "what should it do?" field keeps working even after edits.
+ */
+export interface WritingPreset {
+  id: string;
+  label: string;
+  description: string;
+  icon: IconName;
+  /** The task instruction — the easy "what it should do" field. */
+  instruction: string;
+  /** Advanced: the full system-prompt template, or null for the default. */
+  template: string | null;
+  /** Whether the result replaces the selection (false shows an informational result). */
+  replacesSelection: boolean;
+  /** Per-preset model priority; empty follows the global AI model queue. */
+  models: string[];
+}
 
 
 /** AI backends (mirrors `AiProvider` in `src-tauri/src/ai/providers.rs`). */
@@ -118,7 +144,10 @@ export interface AppSettings {
   /** Model used to clean up dictated text; null follows the Writing Tools queue. */
   dictationCleanupModel: string | null;
   writingShortcut: string;
-  enabledWritingActions: WritingActionId[];
+  /** Ordered ids of the enabled Writing Tools presets (built-in or custom). */
+  enabledWritingActions: string[];
+  /** Overridden built-ins and custom presets. Untouched built-ins use defaults. */
+  writingPresets: WritingPreset[];
   aiProvider: AiProviderId;
   /** Ordered failover queue: tried top to bottom until one succeeds. */
   aiModels: string[];
@@ -176,8 +205,17 @@ export interface SelectionContext {
 }
 
 export interface WritingRequest {
+  /** Built-in action id; custom presets send `custom`. */
   action: WritingActionId;
+  /** The preset that triggered the request (for the enabled check). */
+  presetId?: string;
   instruction?: string;
+  /** Fully resolved system prompt for editable presets. */
+  systemInstruction?: string;
+  /** Overrides the built-in replace/show-result behavior. */
+  replacesSelection?: boolean;
+  /** Per-preset model priority; empty/omitted follows the global queue. */
+  models?: string[];
   /** Captured selection sent to the requested action. */
   text?: string;
   sourceKind?: "text" | "link";
@@ -277,6 +315,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationCleanupModel: null,
     writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
+    writingPresets: [],
     aiProvider: DEFAULT_AI_PROVIDER,
     aiModels: [DEFAULT_AI_MODEL],
     aiReasoningMode: "fast",

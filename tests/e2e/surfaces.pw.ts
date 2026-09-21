@@ -167,6 +167,38 @@ test("writing tools supports keyboard custom instructions and informational resu
   assertNoErrors();
 });
 
+test("writing presets can be added, edited, and reset", async ({ page }) => {
+  const assertNoErrors = failOnConsoleErrors(page);
+  await page.setViewportSize({ width: 900, height: 720 });
+  await page.goto("/?surface=settings&harness=1");
+  await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
+
+  await page.getByRole("button", { name: "Add preset", exact: true }).click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Pirate");
+  await page.getByRole("textbox", { name: "What it should do", exact: true }).fill("Rewrite the text like a pirate.");
+  await page.getByRole("button", { name: "Save preset", exact: true }).click();
+  await expect(page.getByText("Pirate", { exact: true })).toBeVisible();
+
+  // The new preset reaches the popup menu in the harness.
+  await page.goto("/?surface=writing-tools&harness=1");
+  await expect(page.getByRole("option", { name: "Pirate", exact: true })).toBeVisible();
+
+  // Editing a built-in renames it in the menu.
+  await page.goto("/?surface=settings&harness=1");
+  await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
+  await page.getByRole("button", { name: "Edit", exact: true }).first().click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("Spellcheck");
+  await page.getByRole("button", { name: "Save preset", exact: true }).click();
+  await expect(page.getByText("Spellcheck", { exact: true })).toBeVisible();
+
+  // Reset restores the built-in defaults and drops the custom preset.
+  await page.getByRole("button", { name: "Reset all to defaults", exact: true }).click();
+  await expect(page.getByText("Spellcheck", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Proofread", { exact: true })).toBeVisible();
+  await expect(page.getByText("Pirate", { exact: true })).toHaveCount(0);
+  assertNoErrors();
+});
+
 test("flow bar exposes calm listening, processing, and error states", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 260, height: 72 });

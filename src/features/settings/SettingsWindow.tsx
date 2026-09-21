@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ModelQueueEditor } from "./ModelQueueEditor";
+import { WritingPresetList } from "./WritingPresetEditor";
 import { LocalSpeechModels } from "./LocalSpeechModels";
 import { DictationCleanupModel } from "./DictationCleanupModel";
 import { LocalAiSetup } from "./LocalAiSetup";
@@ -13,7 +14,6 @@ import { StatusIndicator } from "../../components/StatusIndicator";
 import { Switch } from "../../components/Switch";
 import { nativeBridge, type UpdateResult } from "../../platform/native";
 import {
-  DEFAULT_WRITING_ACTIONS,
   NativeError,
   type AiProviderId,
   type AiProviderInfo,
@@ -26,7 +26,6 @@ import {
   type SpeechLanguage,
 } from "../../types";
 import { normalizeAiProvider } from "../../ai/models";
-import { writingAction } from "../writing-tools/actions";
 
 type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "permissions" | "about";
 
@@ -575,27 +574,8 @@ function WritingSection({
           <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
         </SettingRow>
       </SettingsGroup>
-      <SettingsGroup header="Actions">
-        <div className="writing-preferences-actions">{DEFAULT_WRITING_ACTIONS.map((id) => {
-          const action = writingAction(id);
-          const checked = settings.enabledWritingActions.includes(id);
-          return (
-            <SettingRow key={id} label={action.label} description={action.description}>
-              <Switch
-                checked={checked}
-                disabled={checked && settings.enabledWritingActions.length === 1}
-                label={`Show ${action.label}`}
-                onChange={(enabled) => {
-                  const next = enabled
-                    ? [...settings.enabledWritingActions, id]
-                    : settings.enabledWritingActions.filter((actionId) => actionId !== id);
-                  void save({ enabledWritingActions: next });
-                }}
-              />
-            </SettingRow>
-          );
-        })}
-        </div><div className="settings-group__footer"><Button compact onClick={() => void save({ enabledWritingActions: [...DEFAULT_WRITING_ACTIONS] })}>Reset actions</Button></div>
+      <SettingsGroup header="Presets" className="writing-presets-group">
+        <WritingPresetList save={save} settings={settings} />
       </SettingsGroup>
     </SettingsContent>
   );

@@ -12,6 +12,7 @@ use crate::{
         AiPrompt, AiProvider, AiReasoningMode, GeminiClient, GeminiError, LinkSource,
         ListedAiModel, OpenAiCompatClient, OpencodeError, PromptError, WritingAction,
         canonical_model_id_for, curated_models_for, dictation_cleanup_prompt, writing_prompt,
+        writing_prompt_from_system,
     },
     config::{
         AppSettings, LanguagePreference, SettingsError, SettingsRepository, SettingsRuntime,
@@ -619,6 +620,10 @@ impl AppCore {
         }
     }
 
+    /// Run a built-in action with its default prompt. Kept for tests that
+    /// predate editable presets; the command layer uses
+    /// [`Self::run_writing_action_with`].
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub async fn run_writing_action(
         &self,
         action: WritingAction,
@@ -626,11 +631,43 @@ impl AppCore {
         source_override: Option<String>,
         source_kind: WritingSourceKind,
     ) -> Result<WritingOutcome, AppCoreError> {
+        self.run_writing_action_with(
+            action,
+            None,
+            custom_instruction,
+            source_override,
+            source_kind,
+            None,
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Full Writing Tools invocation used by the command layer. User-editable
+    /// presets resolve their prompt in the frontend and pass it as
+    /// `system_instruction`; `preset_id` is the id used for the enabled check
+    /// (custom presets reuse [`WritingAction::Custom`]). `models_override`
+    /// pins a per-preset model priority instead of the global queue.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn run_writing_action_with(
+        &self,
+        action: WritingAction,
+        preset_id: Option<&str>,
+        custom_instruction: Option<String>,
+        source_override: Option<String>,
+        source_kind: WritingSourceKind,
+        system_instruction: Option<String>,
+        replaces_selection: Option<bool>,
+        models_override: Option<Vec<String>>,
+    ) -> Result<WritingOutcome, AppCoreError> {
+        let enabled_id = preset_id.unwrap_or_else(|| action.as_str());
         if !self
             .settings()?
             .writing_tools
             .enabled_actions
-            .contains(&action)
+            .iter()
+            .any(|id| id == enabled_id)
         {
             return Err(AppCoreError::ActionDisabled);
         }
@@ -663,7 +700,12 @@ impl AppCore {
                 .as_deref()
                 .or_else(|| selection.as_ref().map(|value| value.text()))
                 .ok_or(PromptError::EmptySource)?;
-            let (provider, models, base_url, reasoning_mode) = self.ai_config();
+            let (provider, mut models, base_url, reasoning_mode) = self.ai_config();
+            if let Some(override_models) = models_override.as_ref()
+                && !override_models.is_empty()
+            {
+                models = override_models.clone();
+            }
             if source_kind == WritingSourceKind::Link {
                 let source = LinkSource::parse(source_text)?;
                 // Link retrieval (URL context / video input) is a Gemini
@@ -681,7 +723,19 @@ impl AppCore {
                     .await?;
                 Ok::<_, AppCoreError>((result, Some(source)))
             } else {
-                let prompt = writing_prompt(action, source_text, custom_instruction.as_deref())?;
+                let prompt = match system_instruction.as_deref() {
+                    Some(instruction) if !instruction.trim().is_empty() => {
+                        // `writing_prompt` enforces this for built-ins; the
+                        // editable-template path must too.
+                        if action == WritingAction::Summarize
+                            && source_text.chars().count() > 200_000
+                        {
+                            return Err(PromptError::SummaryTooLong.into());
+                        }
+                        writing_prompt_from_system(instruction.to_owned(), source_text)?
+                    }
+                    _ => writing_prompt(action, source_text, custom_instruction.as_deref())?,
+                };
                 let api_key = if provider.key_optional() {
                     self.load_provider_key(provider)?
                 } else {
@@ -719,7 +773,7 @@ impl AppCore {
                 }
             }
         };
-        if action.replaces_selection() {
+        if replaces_selection.unwrap_or_else(|| action.replaces_selection()) {
             // The captured ticket belongs to this request, never a later popup.
             let replacement = match selection.as_deref() {
                 Some(selection) => self
@@ -1144,6 +1198,8 @@ pub struct FrontendSettings {
     pub dictation_cleanup_model: Option<String>,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
+    #[serde(default)]
+    pub writing_presets: Vec<crate::config::WritingPresetSettings>,
     #[serde(default = "default_ai_provider")]
     pub ai_provider: String,
     #[serde(default = "default_ai_models")]
@@ -1201,13 +1257,8 @@ impl From<AppSettings> for FrontendSettings {
             local_speech_model: settings.dictation.local_speech_model,
             dictation_cleanup_model: settings.dictation.cleanup_model,
             writing_shortcut: settings.writing_tools.shortcut.accelerator,
-            enabled_writing_actions: settings
-                .writing_tools
-                .enabled_actions
-                .into_iter()
-                .map(action_id)
-                .map(str::to_owned)
-                .collect(),
+            enabled_writing_actions: settings.writing_tools.enabled_actions,
+            writing_presets: settings.writing_tools.presets,
             ai_provider: settings.ai.provider.as_str().into(),
             ai_models: settings.ai.models,
             ai_reasoning_mode: settings.ai.reasoning_mode.as_str().into(),
@@ -1229,11 +1280,10 @@ impl TryFrom<FrontendSettings> for AppSettings {
             "dark" => crate::config::ThemePreference::Dark,
             _ => return Err(SettingsError::InvalidJson(invalid_settings_json()).into()),
         };
-        let enabled_actions = settings
-            .enabled_writing_actions
-            .iter()
-            .map(|action| parse_action(action))
-            .collect::<Result<Vec<_>, _>>()?;
+        // Enabled ids are canonicalized (legacy `keyPoints` → `key-points`)
+        // and deduped by `WritingToolsSettings::normalize`. Built-in and custom
+        // ids share this list; unknown ids are dropped there.
+        let enabled_actions = settings.enabled_writing_actions;
         // The queue normalizes itself (dedupe, drop unusable, cap, fall
         // back to the provider default) so old settings files and
         // forward-compat payloads never break AI requests. Pre-queue
@@ -1288,6 +1338,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
                 enabled_actions,
+                presets: settings.writing_presets,
             },
             ai: crate::config::AiSettings::new(
                 ai_provider,
@@ -1319,6 +1370,7 @@ pub struct SettingsPatch {
     dictation_cleanup_model: Option<Option<String>>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
+    writing_presets: Option<Vec<crate::config::WritingPresetSettings>>,
     ai_provider: Option<String>,
     ai_models: Option<Vec<String>>,
     ai_reasoning_mode: Option<String>,
@@ -1361,6 +1413,7 @@ impl SettingsPatch {
         assign!(dictation_cleanup_model);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
+        assign!(writing_presets);
         assign!(ai_provider);
         assign!(ai_models);
         assign!(ai_reasoning_mode);
@@ -1418,7 +1471,22 @@ pub struct SelectionContext {
 #[serde(rename_all = "camelCase")]
 pub struct WritingRequest {
     action: String,
+    /// The preset that triggered the request, for the enabled check. Defaults
+    /// to `action`; custom presets send their own id while `action` stays
+    /// `custom` so the backend state machine has a built-in phase.
+    #[serde(default)]
+    preset_id: Option<String>,
     instruction: Option<String>,
+    /// Fully resolved system prompt for user-editable presets. `None` falls
+    /// back to the backend's built-in template for `action`.
+    #[serde(default)]
+    system_instruction: Option<String>,
+    /// Overrides the built-in replace/show-result behavior.
+    #[serde(default)]
+    replaces_selection: Option<bool>,
+    /// Per-preset model priority. Empty follows the global AI queue.
+    #[serde(default)]
+    models: Vec<String>,
     /// Edited manual text-box content, or the explicit summary text / URL.
     text: Option<String>,
     #[serde(default)]
@@ -1802,12 +1870,19 @@ pub async fn run_writing_action(
     request: WritingRequest,
 ) -> Result<WritingResponse, CommandError> {
     let action = parse_action(&request.action)?;
+    let provider = core.ai_provider();
+    let models_override = (!request.models.is_empty())
+        .then(|| crate::ai::normalize_model_list(provider, &request.models));
     match core
-        .run_writing_action(
+        .run_writing_action_with(
             action,
+            request.preset_id.as_deref(),
             request.instruction,
             request.text,
             request.source_kind,
+            request.system_instruction,
+            request.replaces_selection,
+            models_override,
         )
         .await
         .map_err(CommandError::from)?
@@ -2079,30 +2154,7 @@ fn permission_state(status: crate::platform::PermissionStatus) -> &'static str {
 }
 
 fn parse_action(value: &str) -> Result<WritingAction, AppCoreError> {
-    match value {
-        "proofread" => Ok(WritingAction::Proofread),
-        "rewrite" => Ok(WritingAction::Rewrite),
-        "friendly" => Ok(WritingAction::Friendly),
-        "professional" => Ok(WritingAction::Professional),
-        "concise" => Ok(WritingAction::Concise),
-        "custom" => Ok(WritingAction::Custom),
-        "summarize" => Ok(WritingAction::Summarize),
-        "key-points" => Ok(WritingAction::KeyPoints),
-        _ => Err(AppCoreError::ActionDisabled),
-    }
-}
-
-fn action_id(action: WritingAction) -> &'static str {
-    match action {
-        WritingAction::Proofread => "proofread",
-        WritingAction::Rewrite => "rewrite",
-        WritingAction::Friendly => "friendly",
-        WritingAction::Professional => "professional",
-        WritingAction::Concise => "concise",
-        WritingAction::Custom => "custom",
-        WritingAction::Summarize => "summarize",
-        WritingAction::KeyPoints => "key-points",
-    }
+    WritingAction::parse_id(value).ok_or(AppCoreError::ActionDisabled)
 }
 
 fn platform_command_error(error: crate::platform::PlatformError) -> CommandError {

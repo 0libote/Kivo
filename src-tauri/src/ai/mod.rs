@@ -325,6 +325,48 @@ impl WritingAction {
     pub const fn replaces_selection(self) -> bool {
         !matches!(self, Self::Summarize | Self::KeyPoints)
     }
+
+    /// Stable wire id shared with the frontend (`WritingActionId` in
+    /// `src/types.ts`, `WRITING_ACTIONS[].id` in `writing-tools/actions.ts`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proofread => "proofread",
+            Self::Rewrite => "rewrite",
+            Self::Friendly => "friendly",
+            Self::Professional => "professional",
+            Self::Concise => "concise",
+            Self::Custom => "custom",
+            Self::Summarize => "summarize",
+            Self::KeyPoints => "key-points",
+        }
+    }
+
+    /// Parse a built-in action id. Custom (user-defined) presets are not
+    /// represented here: they run through [`Self::Custom`] with an explicit
+    /// system instruction.
+    pub fn parse_id(value: &str) -> Option<Self> {
+        match value {
+            "proofread" => Some(Self::Proofread),
+            "rewrite" => Some(Self::Rewrite),
+            "friendly" => Some(Self::Friendly),
+            "professional" => Some(Self::Professional),
+            "concise" => Some(Self::Concise),
+            "custom" => Some(Self::Custom),
+            "summarize" => Some(Self::Summarize),
+            "key-points" => Some(Self::KeyPoints),
+            _ => None,
+        }
+    }
+
+    /// Canonical wire id for a stored action string. Settings written before
+    /// custom presets stored enum names, whose camelCase serialization differs
+    /// for [`Self::KeyPoints`] (`keyPoints`); fold both onto `key-points`.
+    pub fn canonical_id(value: &str) -> String {
+        match value.trim() {
+            "keyPoints" | "key-points" | "keypoints" => "key-points".to_owned(),
+            other => other.to_owned(),
+        }
+    }
 }
 
 pub struct AiPrompt {
@@ -382,6 +424,23 @@ pub fn writing_prompt(
         system_instruction: format!(
             "{WRITING_SYSTEM_PREFIX}\n\nTask: {instruction}\n{output_rule}"
         ),
+        input: format!("<source_text>\n{source_text}\n</source_text>"),
+    })
+}
+
+/// Build a prompt from a fully resolved system instruction. Used by
+/// user-editable Writing Tools presets, which supply their own template (the
+/// built-in templates are mirrored by `writing_prompt`). The source text is
+/// still wrapped so the model can tell content from instructions.
+pub fn writing_prompt_from_system(
+    system_instruction: String,
+    source_text: &str,
+) -> Result<AiPrompt, PromptError> {
+    if source_text.trim().is_empty() {
+        return Err(PromptError::EmptySource);
+    }
+    Ok(AiPrompt {
+        system_instruction,
         input: format!("<source_text>\n{source_text}\n</source_text>"),
     })
 }
@@ -1054,6 +1113,7 @@ mod tests {
         curated_listed_models, dictation_cleanup_prompt, filter_api_models, is_blocked_model,
         is_usable_model, normalize_model, parse_api_error_code, parse_api_error_detail,
         parse_interaction, supported_models, thinking_level_for, writing_prompt,
+        writing_prompt_from_system,
     };
 
     #[test]
@@ -1064,6 +1124,33 @@ mod tests {
         assert!(prompt.system_instruction.contains("without jargon"));
         assert!(prompt.system_instruction.contains("plain text only"));
         assert!(prompt.input.contains("hey can you send it"));
+    }
+
+    #[test]
+    fn custom_system_instruction_is_used_verbatim_and_wraps_the_source() {
+        let prompt =
+            writing_prompt_from_system("Do exactly this.".to_owned(), "the source").unwrap();
+        assert_eq!(prompt.system_instruction, "Do exactly this.");
+        assert!(
+            prompt
+                .input
+                .contains("<source_text>\nthe source\n</source_text>")
+        );
+        assert!(matches!(
+            writing_prompt_from_system("x".to_owned(), "   "),
+            Err(super::PromptError::EmptySource)
+        ));
+    }
+
+    #[test]
+    fn action_ids_round_trip_and_fold_legacy_spellings() {
+        for action in WritingAction::all() {
+            assert_eq!(WritingAction::parse_id(action.as_str()), Some(*action));
+        }
+        assert_eq!(WritingAction::canonical_id("keyPoints"), "key-points");
+        assert_eq!(WritingAction::canonical_id("key-points"), "key-points");
+        assert_eq!(WritingAction::canonical_id("proofread"), "proofread");
+        assert_eq!(WritingAction::parse_id("not-an-action"), None);
     }
 
     #[test]

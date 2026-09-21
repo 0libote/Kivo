@@ -1,13 +1,14 @@
-import type { SelectionContext, SummarySource, WritingActionId } from "../../types";
+import type { SelectionContext, SummarySource } from "../../types";
 
 export type WritingMode = "closed" | "menu" | "custom" | "summary" | "processing" | "result" | "error";
 
 export interface WritingToolsState {
   mode: WritingMode;
   context: SelectionContext | null;
-  enabledActions: WritingActionId[];
+  enabledActions: string[];
   selectedIndex: number;
-  activeAction: WritingActionId | null;
+  /** Preset id, not necessarily a built-in action. */
+  activeAction: string | null;
   customInstruction: string;
   sourceText: string;
   isLinkSummary: boolean;
@@ -19,12 +20,12 @@ export interface WritingToolsState {
 }
 
 export type WritingToolsEvent =
-  | { type: "OPEN"; context: SelectionContext; enabledActions: WritingActionId[] }
+  | { type: "OPEN"; context: SelectionContext; enabledActions: string[] }
   | { type: "MOVE"; delta: number }
   | { type: "SELECT"; index: number }
   | { type: "OPEN_CUSTOM"; initialValue?: string }
   | { type: "SET_CUSTOM"; value: string }
-  | { type: "RUN"; action: WritingActionId }
+  | { type: "RUN"; action: string }
   | { type: "RESULT"; text: string; source?: SummarySource; canReplace?: boolean }
   | { type: "REPLACED" }
   | { type: "FAIL"; message: string; canRetry?: boolean }

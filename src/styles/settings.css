@@ -92,12 +92,31 @@
 .dictation-practice .text-link { font-size: 12px; }
 .dictation-practice .dictation-practice__status { min-height: 18px; color: var(--text-tertiary); font-size: 11px; }
 .home-footnote { color: var(--text-tertiary); margin: 28px 0 0; padding-left: 2px; font-size: 11px; }
-.writing-preferences-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); display: grid; }
-.writing-preferences-actions .setting-row { border-top: 1px solid var(--border); min-height: 60px; padding: 11px 15px; }
-.writing-preferences-actions .setting-row:nth-child(-n+2) { border-top: 0; }
-.writing-preferences-actions .setting-row:nth-child(2n) { border-left: 1px solid var(--border); }
-.writing-preferences-actions .setting-row__label strong { font-size: 13px; }
-.writing-preferences-actions .setting-row__label span { font-size: 11px; }
+.writing-preset-list { gap: 10px; padding: 12px; display: grid; }
+.writing-preset-list__items { gap: 8px; margin: 0; padding: 0; list-style: none; display: grid; }
+.writing-preset { border: 1px solid var(--border); background: var(--surface-strong); border-radius: 9px; overflow: hidden; }
+.writing-preset[data-editing="true"] { border-color: var(--accent); }
+.writing-preset__summary { align-items: center; gap: 10px; padding: 10px 12px; display: flex; }
+.writing-preset__position { background: var(--surface-muted); width: 24px; height: 24px; color: var(--text-secondary); font-variant-numeric: tabular-nums; border-radius: 50%; flex: none; place-items: center; font-size: 11px; font-weight: 650; display: grid; }
+.writing-preset__position[data-first="true"] { background: var(--accent); color: var(--accent-text); }
+.writing-preset__icon { color: var(--text-secondary); flex: none; display: grid; place-items: center; }
+.writing-preset__copy { flex: 1; gap: 2px; min-width: 0; display: grid; }
+.writing-preset__copy strong { font-size: 13px; font-weight: 620; }
+.writing-preset__copy small { color: var(--text-secondary); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; overflow: hidden; }
+.writing-preset__actions { flex: none; gap: 4px; display: flex; }
+.writing-preset__actions .button { padding: 0 7px; }
+.writing-preset-form { border-top: 1px solid var(--border); background: var(--surface-muted); gap: 12px; padding: 14px; display: grid; }
+.writing-preset-form__field { gap: 5px; display: grid; }
+.writing-preset-form__field > span { color: var(--text-secondary); font-size: 11px; font-weight: 650; }
+.writing-preset-form__field input, .writing-preset-form__field textarea { width: 100%; }
+.writing-preset-form__field textarea { resize: vertical; line-height: 1.5; }
+.writing-preset-form__hint { color: var(--text-tertiary); margin: 0; font-size: 11px; line-height: 1.4; }
+.writing-preset-form__template { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; }
+.writing-preset-form__advanced { gap: 10px; display: grid; }
+.writing-preset-form__advanced .text-link { justify-self: start; font-size: 12px; }
+.writing-preset-form__footer { justify-content: space-between; align-items: center; gap: 8px; display: flex; }
+.writing-preset-form__footer-actions { gap: 7px; display: flex; }
+.writing-preset-list__footer { justify-content: space-between; gap: 7px; display: flex; }
 .dictation-recovery { border: 1px solid var(--border); background: color-mix(in srgb, var(--surface-strong) 72%, transparent); box-shadow: var(--shadow-panel); border-radius: 11px; margin-top: 22px; padding: 18px; }
 .dictation-recovery span { color: var(--text-secondary); font-size: 11px; }
 .dictation-recovery > p { white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 150px; overflow: auto; }
@@ -111,9 +130,8 @@
   .setting-row__control { max-width: 100%; }
   .home-shortcut, .dictation-practice__header { flex-wrap: wrap; align-items: flex-start; }
   .home-shortcut__tail { justify-content: space-between; width: auto; margin-left: auto; }
-  .writing-preferences-actions { grid-template-columns: 1fr; }
-  .writing-preferences-actions .setting-row { border-left: 0; flex-direction: row; align-items: center; }
-  .writing-preferences-actions .setting-row:nth-child(2) { border-top: 1px solid var(--border); }
+  .writing-preset__summary { flex-wrap: wrap; }
+  .writing-preset__actions { margin-left: auto; }
   .writing-shortcut-group .setting-row { flex-direction: row; align-items: center; }
   .settings-sidebar { padding-inline: 8px; }
   .home-shortcut { flex-wrap: wrap; min-height: 72px; }

@@ -19,7 +19,3 @@ export const WRITING_ACTIONS: WritingActionDefinition[] = [
   { id: "key-points", label: "Key Points", description: "Extract the essentials", icon: "key-points", resultOnly: true },
   { id: "custom", label: "Custom", description: "Describe another change", icon: "pencil", resultOnly: false },
 ];
-
-export function writingAction(id: WritingActionId) {
-  return WRITING_ACTIONS.find((action) => action.id === id) ?? WRITING_ACTIONS[0];
-}

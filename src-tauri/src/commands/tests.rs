@@ -690,7 +690,7 @@ async fn disabled_actions_and_link_rewrites_are_rejected_without_changing_popup(
         .unwrap()
         .writing_tools
         .enabled_actions
-        .retain(|action| *action != WritingAction::Summarize);
+        .retain(|action| action != "summarize");
     for (action, kind) in [
         (WritingAction::Summarize, WritingSourceKind::Text),
         (WritingAction::Summarize, WritingSourceKind::Link),
