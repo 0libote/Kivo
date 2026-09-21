@@ -1,3 +1,4 @@
+import stylex from "@stylexjs/eslint-plugin";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -11,6 +12,18 @@ export default tseslint.config(
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+    },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    plugins: {
+      "@stylexjs": stylex,
+    },
+    rules: {
+      "@stylexjs/valid-styles": "error",
+      "@stylexjs/no-unused": "error",
+      "@stylexjs/valid-shorthands": "error",
+      "@stylexjs/sort-keys": "error",
     },
   },
 );
