@@ -2680,8 +2680,14 @@ mod tests {
             status: StatusCode::BAD_REQUEST,
             code: parse_openai_error_code(&body),
         };
-        assert_eq!(error.code(), "api_error");
+        assert_eq!(error.code(), "provider_rejected");
         assert!(!is_failover_terminal(&error));
+        assert!(error.user_message().contains("HTTP 400"));
+        assert!(
+            error
+                .user_message()
+                .contains("does not support the requested temperature")
+        );
         assert!(!error.user_message().contains("API key"));
 
         // The same generic error type may accompany genuine HTTP auth errors.
@@ -2697,6 +2703,19 @@ mod tests {
         };
         assert_eq!(invalid_key.code(), "invalid_api_key");
         assert!(is_failover_terminal(&invalid_key));
+
+        let console_go = serde_json::json!({
+            "error": {
+                "type": "server_error",
+                "message": "Error from provider (Console Go): Upstream request failed: [1210] API parameter invalid, please check documentation."
+            }
+        });
+        let console_go_error = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: parse_openai_error_code(&console_go),
+        };
+        assert_eq!(console_go_error.code(), "provider_rejected");
+        assert!(console_go_error.user_message().contains("[1210]"));
     }
 
     #[test]
