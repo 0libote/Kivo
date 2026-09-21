@@ -3,14 +3,18 @@
  *
  * Preflight is intentionally NOT imported: the marketing/docs pages ship a
  * complete hand-written stylesheet (`styles.css`), and Tailwind's reset would
- * fight it. Only the theme layer and utilities are imported, so the site can
- * use Tailwind utilities alongside the existing CSS. The compiled output
- * (`tailwind.generated.css`) is committed so the site stays deploy-ready
- * without a build step; run `bun run build:website` after changing markup.
+ * fight it. Only the theme layer and utilities are imported.
+ *
+ * `source(none)` disables Tailwind's automatic project-wide source detection,
+ * which otherwise treats arbitrary strings in `src/**` (StyleX values like
+ * `display: "flex"`) as class names and emits junk utilities. Sources are
+ * listed explicitly below. The compiled output (`tailwind.generated.css`) is
+ * committed so the site stays deploy-ready without a build step; run
+ * `bun run build:website` after changing markup.
  */
 @layer theme, utilities;
 @import "tailwindcss/theme.css" layer(theme);
-@import "tailwindcss/utilities.css" layer(utilities);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
 
 @source "./index.html";
 @source "./docs.html";
