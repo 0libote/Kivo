@@ -1,8 +1,23 @@
 # Kivo website
 
-Static landing page + docs. No build step, no dependencies, no framework — the
+Static landing page + docs. No framework and no runtime dependencies — the
 folder is deploy-ready as-is on Cloudflare Pages, GitHub Pages, Netlify, or
 any other static host.
+
+## Tailwind
+
+Tailwind v4 utilities are available alongside the hand-written `styles.css`.
+The compiled output is committed as `tailwind.generated.css`, so deploys still
+need no build step. After changing the markup, regenerate it from the repo
+root:
+
+```sh
+bun run build:website   # tailwindcss -i website/tailwind.css -o website/tailwind.generated.css
+```
+
+`bun run check:website` (run in CI) rebuilds and fails if the committed file is
+stale. Tailwind's preflight is intentionally not imported so the library cannot
+override the existing site design; see `tailwind.css`.
 
 ## Pages
 
