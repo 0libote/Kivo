@@ -1157,6 +1157,13 @@ fn is_failover_terminal(error: &OpencodeError) -> bool {
     }
 }
 
+#[derive(Clone, Copy)]
+struct CompatRequestContext<'a> {
+    chat_url: &'a str,
+    api_key: Option<&'a SecretString>,
+    session: Option<&'a str>,
+}
+
 #[derive(Clone)]
 pub struct OpenAiCompatClient {
     http: reqwest::Client,
@@ -1261,37 +1268,13 @@ impl OpenAiCompatClient {
         Ok(listed)
     }
 
-    pub async fn generate(
+    async fn generate_one(
         &self,
         provider: AiProvider,
-        chat_url: &str,
-        api_key: Option<&SecretString>,
+        context: CompatRequestContext<'_>,
         model: &str,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, OpencodeError> {
-        let session = Self::next_opencode_session(provider);
-        self.generate_with_session(
-            provider,
-            chat_url,
-            api_key,
-            model,
-            prompt,
-            reasoning_mode,
-            session.as_deref(),
-        )
-        .await
-    }
-
-    async fn generate_with_session(
-        &self,
-        provider: AiProvider,
-        chat_url: &str,
-        api_key: Option<&SecretString>,
-        model: &str,
-        prompt: &AiPrompt,
-        reasoning_mode: AiReasoningMode,
-        session: Option<&str>,
     ) -> Result<String, OpencodeError> {
         let model = Self::resolve_model(provider, model);
         let request = ChatCompletionRequest {
@@ -1309,23 +1292,30 @@ impl OpenAiCompatClient {
             max_tokens: None,
         };
         let protocol = completion_protocol(provider, &model);
-        let (url, body) =
-            completion_request(protocol, provider, reasoning_mode, chat_url, &request);
-        let mut call = self.chat_request(provider, &url, session).json(&body);
+        let (url, body) = completion_request(
+            protocol,
+            provider,
+            reasoning_mode,
+            context.chat_url,
+            &request,
+        );
+        let mut call = self
+            .chat_request(provider, &url, context.session)
+            .json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
         }
-        if let Some(auth) = Self::auth_header(api_key)? {
+        if let Some(auth) = Self::auth_header(context.api_key)? {
             call = call.header("authorization", auth);
         }
         if protocol == CompletionProtocol::Messages
-            && let Some(key) = api_key
+            && let Some(key) = context.api_key
         {
             let header =
                 HeaderValue::from_str(key.expose()).map_err(|_| OpencodeError::InvalidApiKey)?;
             call = call.header("x-api-key", header);
         } else if protocol == CompletionProtocol::Google
-            && let Some(key) = api_key
+            && let Some(key) = context.api_key
         {
             // OpenCode's Zen Google adapter follows the Google SDK contract
             // and expects the key in x-goog-api-key, unlike its OpenAI and
@@ -1431,18 +1421,15 @@ impl OpenAiCompatClient {
     ) -> Result<String, OpencodeError> {
         let normalized = normalize_model_list_for(provider, models);
         let session = Self::next_opencode_session(provider);
+        let context = CompatRequestContext {
+            chat_url,
+            api_key,
+            session: session.as_deref(),
+        };
         let mut last_error: Option<OpencodeError> = None;
         for model in &normalized {
             match self
-                .generate_with_session(
-                    provider,
-                    chat_url,
-                    api_key,
-                    model,
-                    prompt,
-                    reasoning_mode,
-                    session.as_deref(),
-                )
+                .generate_one(provider, context, model, prompt, reasoning_mode)
                 .await
             {
                 Ok(output) => return Ok(output),
