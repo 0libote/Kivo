@@ -1172,24 +1172,35 @@ impl OpenAiCompatClient {
         Ok(Self { http })
     }
 
-    fn chat_request(&self, provider: AiProvider, chat_url: &str) -> reqwest::RequestBuilder {
+    fn next_opencode_session(provider: AiProvider) -> Option<String> {
+        if !matches!(provider, AiProvider::Zen | AiProvider::Go) {
+            return None;
+        }
+        static NEXT_SESSION: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Some(format!(
+            "kivo-{}-{}-{sequence}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    fn chat_request(
+        &self,
+        provider: AiProvider,
+        chat_url: &str,
+        session: Option<&str>,
+    ) -> reqwest::RequestBuilder {
         let request = self.http.post(chat_url);
         if matches!(provider, AiProvider::Zen | AiProvider::Go) {
-            // Each stateless writing operation is a separate conversation. Identify
-            // Kivo honestly and provide the routing header required by Go.
-            static NEXT_SESSION: std::sync::atomic::AtomicU64 =
-                std::sync::atomic::AtomicU64::new(0);
-            let sequence = NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let session = format!(
-                "kivo-{}-{}-{sequence}",
-                std::process::id(),
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-            );
+            let session = session.expect("OpenCode requests require a session id");
             request
                 .header("user-agent", concat!("Kivo/", env!("CARGO_PKG_VERSION")))
+                .header("x-opencode-client", "kivo")
                 .header("x-opencode-session", session)
         } else {
             request
@@ -1260,6 +1271,29 @@ impl OpenAiCompatClient {
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
     ) -> Result<String, OpencodeError> {
+        let session = Self::next_opencode_session(provider);
+        self.generate_with_session(
+            provider,
+            chat_url,
+            api_key,
+            model,
+            prompt,
+            reasoning_mode,
+            session.as_deref(),
+        )
+        .await
+    }
+
+    async fn generate_with_session(
+        &self,
+        provider: AiProvider,
+        chat_url: &str,
+        api_key: Option<&SecretString>,
+        model: &str,
+        prompt: &AiPrompt,
+        reasoning_mode: AiReasoningMode,
+        session: Option<&str>,
+    ) -> Result<String, OpencodeError> {
         let model = Self::resolve_model(provider, model);
         let request = ChatCompletionRequest {
             model: model.as_str(),
@@ -1278,7 +1312,7 @@ impl OpenAiCompatClient {
         let protocol = completion_protocol(provider, &model);
         let (url, body) =
             completion_request(protocol, provider, reasoning_mode, chat_url, &request);
-        let mut call = self.chat_request(provider, &url).json(&body);
+        let mut call = self.chat_request(provider, &url, session).json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
         }
@@ -1351,7 +1385,10 @@ impl OpenAiCompatClient {
             object.remove("thinking");
             object.remove("output_config");
         }
-        let mut call = self.chat_request(provider, &url).json(&body);
+        let session = Self::next_opencode_session(provider);
+        let mut call = self
+            .chat_request(provider, &url, session.as_deref())
+            .json(&body);
         if protocol == CompletionProtocol::Messages {
             call = call.header("anthropic-version", "2023-06-01");
         }
@@ -1394,10 +1431,19 @@ impl OpenAiCompatClient {
         reasoning_mode: AiReasoningMode,
     ) -> Result<String, OpencodeError> {
         let normalized = normalize_model_list_for(provider, models);
+        let session = Self::next_opencode_session(provider);
         let mut last_error: Option<OpencodeError> = None;
         for model in &normalized {
             match self
-                .generate(provider, chat_url, api_key, model, prompt, reasoning_mode)
+                .generate_with_session(
+                    provider,
+                    chat_url,
+                    api_key,
+                    model,
+                    prompt,
+                    reasoning_mode,
+                    session.as_deref(),
+                )
                 .await
             {
                 Ok(output) => return Ok(output),
@@ -1928,7 +1974,7 @@ mod tests {
         );
         server.join().unwrap();
         let custom = client
-            .chat_request(AiProvider::Custom, &url)
+            .chat_request(AiProvider::Custom, &url, None)
             .build()
             .unwrap();
         assert!(!custom.headers().contains_key("x-opencode-session"));
