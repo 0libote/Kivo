@@ -188,7 +188,7 @@ jobs:
       - name: Cache Vulkan SDK (Windows x64)
         if: runner.os == 'Windows'
         id: vulkan-cache-native
-        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\VulkanSDK\1.4.357.0
           key: vulkan-sdk-1.4.357.0
@@ -476,7 +476,7 @@ jobs:
           cache-on-failure: true
       - name: Cache Vulkan SDK (Windows x64)
         id: vulkan-cache-beta
-        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\VulkanSDK\1.4.357.0
           key: vulkan-sdk-1.4.357.0
@@ -614,7 +614,7 @@ jobs:
           cache-on-failure: true
       - name: Cache Vulkan SDK (Windows x64)
         id: vulkan-cache-pr
-        uses: actions/cache@8b402f58fbc361d7e53393f7d119f2a3303262613 # v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: C:\VulkanSDK\1.4.357.0
           key: vulkan-sdk-1.4.357.0
