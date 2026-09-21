@@ -328,6 +328,7 @@ function apiConnectionLabel(connection: ApiKeyStatus["connection"]): string {
     case "model": return "Model unavailable — pick another in Settings → AI";
     case "rate-limited": return "Rate limited — try again shortly";
     case "offline": return "Offline — key saved but not verified";
+    case "blocked": return "Provider rejected the request — check Settings → AI for details";
     case "untested": return "API key saved — use Test connection in Settings → AI to verify";
   }
 }
