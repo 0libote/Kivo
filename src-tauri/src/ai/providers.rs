@@ -1226,17 +1226,8 @@ impl OpenAiCompatClient {
             request = request.header("authorization", auth);
         }
         let response = request.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         let page = response
             .json::<OpenAiModelList>()
@@ -1311,17 +1302,8 @@ impl OpenAiCompatClient {
             call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         let completion = response
             .json::<serde_json::Value>()
@@ -1390,17 +1372,8 @@ impl OpenAiCompatClient {
             call = call.header("x-goog-api-key", header);
         }
         let response = call.send().await.map_err(OpencodeError::Transport)?;
-        let status = response.status();
-        if !status.is_success() {
-            let error_code = response
-                .json::<serde_json::Value>()
-                .await
-                .ok()
-                .and_then(|body| parse_openai_error_code(&body));
-            return Err(OpencodeError::Api {
-                status,
-                code: error_code,
-            });
+        if !response.status().is_success() {
+            return Err(parse_opencode_api_error(response).await);
         }
         Ok(())
     }
@@ -1756,6 +1729,26 @@ struct ChatContentPart {
     text: Option<String>,
 }
 
+async fn parse_opencode_api_error(response: reqwest::Response) -> OpencodeError {
+    let status = response.status();
+    let text = response.text().await.unwrap_or_default();
+    let code = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|body| parse_openai_error_code(&body))
+        .or_else(|| provider_message_code(&text));
+    OpencodeError::Api { status, code }
+}
+
+fn provider_message_code(message: &str) -> Option<String> {
+    let detail: String = message
+        .trim()
+        .chars()
+        .filter(|character| !character.is_control() || character.is_whitespace())
+        .take(500)
+        .collect();
+    (!detail.is_empty()).then(|| format!("provider_message:{detail}"))
+}
+
 /// Normalize the OpenAI-style error payload into a short machine-readable
 /// code. Gateways answer `{"error": {"message": …, "type": "AuthError"}}`
 /// (Zen/Go use `AuthError` for bad keys) or the OpenAI
@@ -1783,7 +1776,7 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
     if let Some(text) = error.as_str() {
         return classify_message(text)
             .map(str::to_owned)
-            .or_else(|| Some(text.to_owned()));
+            .or_else(|| provider_message_code(text));
     }
     let kind = error.get("type").and_then(serde_json::Value::as_str);
     let code = error.get("code").and_then(|code| match code {
@@ -1828,12 +1821,7 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
         return Some("rate_limited".into());
     }
     if !message.is_empty() {
-        let detail: String = message
-            .chars()
-            .filter(|character| !character.is_control() || character.is_whitespace())
-            .take(500)
-            .collect();
-        return Some(format!("provider_message:{detail}"));
+        return provider_message_code(message);
     }
     code.or_else(|| kind.map(str::to_owned))
 }
