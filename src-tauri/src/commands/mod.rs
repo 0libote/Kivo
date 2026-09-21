@@ -1020,7 +1020,7 @@ impl AppCoreError {
                 "The AI took too long to respond. Try again or choose a faster model.".into()
             }
             Self::Gemini(error) => error.user_message(),
-            Self::Opencode(error) => error.user_message().into(),
+            Self::Opencode(error) => error.user_message(),
             Self::Settings(error) => error.to_string(),
             Self::SettingsRuntime(error) => error.to_string(),
             Self::Credential(error) => error.to_string(),
