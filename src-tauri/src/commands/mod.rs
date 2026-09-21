@@ -1695,6 +1695,7 @@ pub fn list_ai_providers() -> Vec<crate::ai::ProviderInfo> {
 #[tauri::command]
 pub async fn list_ai_models(
     core: State<'_, AppCore>,
+    provider: Option<AiProvider>,
 ) -> Result<Vec<crate::ai::ListedAiModel>, CommandError> {
     // Dynamic source of truth per provider (Gemini ListModels filtered by the
     // blocklist; Zen/Go/Custom OpenAI-style listings with curated pricing),
@@ -1702,7 +1703,10 @@ pub async fn list_ai_models(
     // curated list when no key is stored or the fetch fails (offline /
     // invalid key), so the selector never appears empty. Identical on macOS
     // and Windows: keys stay in the Rust process and are sent via header.
-    let (provider, _, base_url, _) = core.ai_config();
+    // The frontend passes the provider it is currently rendering so model
+    // discovery cannot race an in-flight provider settings save.
+    let (configured_provider, _, base_url, _) = core.ai_config();
+    let provider = provider.unwrap_or(configured_provider);
     Ok(core
         .list_provider_models(provider, base_url.as_deref())
         .await)
