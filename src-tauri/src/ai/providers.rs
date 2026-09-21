@@ -986,9 +986,14 @@ impl OpencodeError {
 
     fn is_auth_code(code: Option<&str>) -> bool {
         code.is_some_and(|code| {
-            ["authentication", "invalid_api_key", "AuthError", "unauthorized"]
-                .iter()
-                .any(|known| code.eq_ignore_ascii_case(known))
+            [
+                "authentication",
+                "invalid_api_key",
+                "AuthError",
+                "unauthorized",
+            ]
+            .iter()
+            .any(|known| code.eq_ignore_ascii_case(known))
         })
     }
 
@@ -1006,9 +1011,13 @@ impl OpencodeError {
 
     fn is_account_disabled_code(code: Option<&str>) -> bool {
         code.is_some_and(|code| {
-            ["Account.Disabled", "account_disabled", "subscription_required"]
-                .iter()
-                .any(|known| code.eq_ignore_ascii_case(known))
+            [
+                "Account.Disabled",
+                "account_disabled",
+                "subscription_required",
+            ]
+            .iter()
+            .any(|known| code.eq_ignore_ascii_case(known))
         })
     }
 
@@ -2290,7 +2299,11 @@ mod tests {
             code: parse_openai_error_code(&disabled),
         };
         assert_eq!(disabled_error.code(), "account_disabled");
-        assert!(disabled_error.user_message().contains("active Go subscription"));
+        assert!(
+            disabled_error
+                .user_message()
+                .contains("active Go subscription")
+        );
         assert!(is_failover_terminal(&disabled_error));
 
         let forbidden = serde_json::json!({
