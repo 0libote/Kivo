@@ -1114,8 +1114,8 @@ impl std::error::Error for OpencodeError {
     }
 }
 
-/// Failures shared by every queue entry: the key is wrong, the balance is
-/// empty, or the host is unreachable, so trying the next model cannot help
+/// Failures shared by every queue entry: the key/account is unusable, the
+/// balance is empty, or the host is unreachable, so trying the next model cannot help
 /// (and must not burn quota).
 fn is_failover_terminal(error: &OpencodeError) -> bool {
     match error {
@@ -1667,7 +1667,7 @@ struct ChatCompletionRequest<'a> {
     messages: &'a [ChatMessage<'a>],
     // No output cap on writing requests: prompt budgets were dropped alongside
     // the Gemini `max_output_tokens` (same reasoning — small sources produce
-    // small outputs). Only the connection probe caps to one token.
+    // small outputs). Only the connection probe uses a tiny output cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
