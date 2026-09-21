@@ -1853,13 +1853,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn go_requests_identify_kivo_and_use_model_sampling_defaults() {
+    async fn go_probe_omits_optional_tuning_but_generation_keeps_it() {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let mut sessions = Vec::new();
-            for _ in 0..2 {
+            for request_index in 0..2 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -1890,8 +1890,13 @@ mod tests {
                 bytes.resize(header_end + length, 0);
                 stream.read_exact(&mut bytes[header_end..]).unwrap();
                 let body: serde_json::Value = serde_json::from_slice(&bytes[header_end..]).unwrap();
-                assert_eq!(body["model"], "kimi-k2.7-code");
+                assert_eq!(body["model"], "glm-5.3-flash");
                 assert!(body.get("temperature").is_none());
+                if request_index == 0 {
+                    assert!(body.get("reasoning_effort").is_none());
+                } else {
+                    assert_eq!(body["reasoning_effort"], "low");
+                }
                 let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
                 write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
             }
@@ -1900,7 +1905,7 @@ mod tests {
         let client = OpenAiCompatClient::new().unwrap();
         let key = SecretString::new("test-key".to_owned()).unwrap();
         client
-            .test_connection(AiProvider::Go, &url, Some(&key), "kimi-k2.7-code")
+            .test_connection(AiProvider::Go, &url, Some(&key), "glm-5.3-flash")
             .await
             .unwrap();
         let prompt = AiPrompt {
@@ -1913,7 +1918,7 @@ mod tests {
                     AiProvider::Go,
                     &url,
                     Some(&key),
-                    "kimi-k2.7-code",
+                    "glm-5.3-flash",
                     &prompt,
                     AiReasoningMode::Fast,
                 )
@@ -2704,6 +2709,14 @@ mod tests {
         };
         assert_eq!(console_go_error.code(), "provider_rejected");
         assert!(console_go_error.user_message().contains("[1210]"));
+
+        let plain = provider_message_code("gateway exploded").unwrap();
+        let plain_error = OpencodeError::Api {
+            status: StatusCode::BAD_REQUEST,
+            code: Some(plain),
+        };
+        assert_eq!(plain_error.code(), "provider_rejected");
+        assert!(plain_error.user_message().contains("gateway exploded"));
     }
 
     #[test]
