@@ -77,7 +77,7 @@ export interface NativeBridge {
   cancelLocalSpeechModelDownload(modelId: string): Promise<void>;
   deleteLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
   listAiProviders(): Promise<AiProviderInfo[]>;
-  listAiModels(): Promise<AiModelInfo[]>;
+  listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]>;
   detectLocalAiServers(): Promise<LocalAiServerInfo[]>;
   installLocalAiRuntime(): Promise<void>;
   getApiKeyStatus(): Promise<ApiKeyStatus>;
@@ -173,7 +173,7 @@ class TauriBridge implements NativeBridge {
   cancelLocalSpeechModelDownload = (modelId: string) => call<void>("cancel_local_speech_model_download", { modelId });
   deleteLocalSpeechModel = (modelId: string) => call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
-  listAiModels = () => call<AiModelInfo[]>("list_ai_models");
+  listAiModels = (provider?: AiProviderId) => call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
   detectLocalAiServers = () => call<LocalAiServerInfo[]>("detect_local_ai_servers");
   installLocalAiRuntime = () => call<void>("install_local_ai_runtime");
   getApiKeyStatus = () => call<ApiKeyStatus>("get_api_key_status");
@@ -398,8 +398,8 @@ class MockBridge implements NativeBridge {
     ];
   }
 
-  async listAiModels(): Promise<AiModelInfo[]> {
-    return structuredClone(fallbackAiModels(this.settings.aiProvider));
+  async listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]> {
+    return structuredClone(fallbackAiModels(provider ?? this.settings.aiProvider));
   }
 
   async detectLocalAiServers(): Promise<LocalAiServerInfo[]> {
