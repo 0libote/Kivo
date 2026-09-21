@@ -150,7 +150,7 @@ export interface SpeechLanguage {
 
 export interface ApiKeyStatus {
   configured: boolean;
-  connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline" | "model";
+  connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline" | "model" | "blocked";
 }
 
 export interface AiModelInfo {
