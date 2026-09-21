@@ -82,9 +82,17 @@ test("on-device dictation models and local AI setup work", async ({ page }) => {
   // Small is the recommended model and is pre-selected by the harness.
   await expect(page.getByText("Recommended", { exact: true })).toBeVisible();
   // Downloading Tiny marks it installed and selects it.
-  const tinyRow = page.locator(".local-model").filter({ hasText: "Tiny" });
+  const tinyRow = page.locator(".local-model").filter({ hasText: "Whisper Tiny" });
+  await expect(tinyRow.locator(".local-model__bar")).toHaveCount(2);
   await tinyRow.getByRole("button", { name: "Download" }).click();
   await expect(tinyRow.getByRole("button", { name: "Delete" })).toBeVisible();
+  // Dictation cleanup can be pinned to its own model instead of the queue.
+  const cleanupSelect = page.getByLabel("Dictation cleanup model", { exact: true });
+  await expect(cleanupSelect).toBeVisible();
+  await cleanupSelect.selectOption("gemini-3.6-flash");
+  await expect(cleanupSelect).toHaveValue("gemini-3.6-flash");
+  await cleanupSelect.selectOption("");
+  await expect(cleanupSelect).toHaveValue("");
   // Local AI detection lives under the Custom provider.
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await page.getByLabel("AI provider", { exact: true }).selectOption("custom");

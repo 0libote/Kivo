@@ -50,6 +50,15 @@ impl AppSettings {
         self.writing_tools.normalize();
         self.ai.normalize();
         self.ai.validate()?;
+        // The cleanup override is a model on the same provider as Writing
+        // Tools. A provider switch can leave a stored id unusable, so drop it
+        // and fall back to the writing queue instead of failing silently on
+        // every dictation.
+        self.dictation.cleanup_model = self
+            .dictation
+            .cleanup_model
+            .take()
+            .filter(|id| crate::ai::is_usable_model_for(self.ai.provider, id));
         Ok(self)
     }
 
@@ -197,6 +206,10 @@ pub struct DictationSettings {
     pub speech_engine: SpeechEnginePreference,
     /// Selected on-device model id. `None` resolves to the recommended model.
     pub local_speech_model: Option<String>,
+    /// Optional model id for the AI dictation cleanup. `None` uses the Writing
+    /// Tools ordered queue; a value pins cleanup to one model (typically a
+    /// smaller/cheaper one) on the same AI provider.
+    pub cleanup_model: Option<String>,
 }
 
 impl Default for DictationSettings {
@@ -212,6 +225,7 @@ impl Default for DictationSettings {
             hold_threshold_ms: 350,
             speech_engine: SpeechEnginePreference::System,
             local_speech_model: None,
+            cleanup_model: None,
         }
     }
 }
@@ -239,6 +253,10 @@ impl DictationSettings {
         {
             self.local_speech_model = None;
         }
+        if let Some(id) = self.cleanup_model.as_deref() {
+            let trimmed = id.trim();
+            self.cleanup_model = (!trimmed.is_empty()).then(|| trimmed.to_owned());
+        }
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
@@ -257,6 +275,11 @@ impl DictationSettings {
             && id.len() > 128
         {
             return Err(SettingsError::InvalidLocalModel);
+        }
+        if let Some(id) = &self.cleanup_model
+            && id.len() > 128
+        {
+            return Err(SettingsError::InvalidAiModel);
         }
         Ok(())
     }
@@ -918,5 +941,49 @@ mod tests {
         settings.ai.custom_base_url = Some("notaurl".into());
         let settings = settings.validate_and_normalize().unwrap();
         assert_eq!(settings.ai.custom_base_url, None);
+    }
+
+    #[test]
+    fn dictation_cleanup_model_follows_the_provider() {
+        // Unset by default: cleanup follows the Writing Tools queue.
+        assert_eq!(AppSettings::default().dictation.cleanup_model, None);
+
+        // A model usable on the current provider survives normalization.
+        let mut settings = AppSettings::default();
+        settings.dictation.cleanup_model = Some("gemini-2.5-flash-lite".into());
+        assert_eq!(
+            settings
+                .validate_and_normalize()
+                .unwrap()
+                .dictation
+                .cleanup_model
+                .as_deref(),
+            Some("gemini-2.5-flash-lite")
+        );
+
+        // A model only valid on another provider is dropped, so cleanup falls
+        // back to the queue instead of failing on every dictation.
+        let mut settings = AppSettings::default();
+        settings.dictation.cleanup_model = Some("google/gemma-3n-e4b".into());
+        assert_eq!(
+            settings
+                .validate_and_normalize()
+                .unwrap()
+                .dictation
+                .cleanup_model,
+            None
+        );
+
+        // Blank overrides normalize away.
+        let mut settings = AppSettings::default();
+        settings.dictation.cleanup_model = Some("   ".into());
+        assert_eq!(
+            settings
+                .validate_and_normalize()
+                .unwrap()
+                .dictation
+                .cleanup_model,
+            None
+        );
     }
 }

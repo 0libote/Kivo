@@ -53,6 +53,18 @@ export interface LocalSpeechModelInfo {
   sizeBytes: number;
   recommended: boolean;
   downloaded: boolean;
+  /** 0–100 quality score (higher is more accurate), for the comparison bars. */
+  accuracy: number;
+  /** 0–100 speed score (higher is faster), for the comparison bars. */
+  speed: number;
+  /** Model family, e.g. "Whisper" or "Parakeet". */
+  family: string;
+  /** Parameter count label, e.g. "0.6B". */
+  parameters: string;
+  /** Number of languages the model can transcribe. */
+  languageCount: number;
+  /** Whether the model can stream partial results. */
+  streaming: boolean;
 }
 
 export interface LocalModelProgress {
@@ -103,6 +115,8 @@ export interface AppSettings {
   speechEngine: SpeechEngineId;
   /** On-device model id; null means the recommended model. */
   localSpeechModel: string | null;
+  /** Model used to clean up dictated text; null follows the Writing Tools queue. */
+  dictationCleanupModel: string | null;
   writingShortcut: string;
   enabledWritingActions: WritingActionId[];
   aiProvider: AiProviderId;
@@ -260,6 +274,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationHoldThresholdMs: 350,
     speechEngine: "system",
     localSpeechModel: null,
+    dictationCleanupModel: null,
     writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
     aiProvider: DEFAULT_AI_PROVIDER,

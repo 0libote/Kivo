@@ -18,7 +18,7 @@ Physical testing on both systems is required before a release, especially for Fn
 1. Install [Bun](https://bun.com/docs/installation).
 2. Install stable Rust with [rustup](https://rustup.rs/).
 3. Install the current [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
-4. Install CMake and a C++ toolchain (Visual Studio Build Tools with Desktop development with C++ on Windows, Xcode command-line tools on macOS, `build-essential` on Linux). The on-device speech runtime (whisper.cpp, via the `transcribe-cpp` crate) is compiled from source on the first build; no model files are downloaded at build time.
+4. Install CMake and a C++ toolchain (Visual Studio Build Tools with Desktop development with C++ on Windows, Xcode command-line tools on macOS, `build-essential` on Linux). The on-device speech runtime (`transcribe.cpp`, via the `transcribe-cpp` crate) is compiled from source on the first build; no model files are downloaded at build time.
 
 ### macOS
 
@@ -99,9 +99,9 @@ Without a key, native dictation still works and inserts the raw operating-system
 Dictation can run either on the operating-system speech engine or entirely on this computer. Choose the engine under Settings → Dictation → Transcription engine:
 
 - **System** (default) uses the OS engine. On macOS that is Apple's on-device `SpeechAnalyzer`; on Windows it is the installed desktop SAPI engine.
-- **On-device** records the default microphone, resamples it to 16 kHz, and transcribes with a Whisper model downloaded into Kivo's app-data `models` folder. Audio never leaves the machine.
+- **On-device** records the default microphone, resamples it to 16 kHz, and transcribes with a downloaded model. Audio never leaves the machine.
 
-On-device models are multilingual Whisper GGML conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0), the same files the `transcribe-cpp` runtime is built for. Kivo offers Tiny, Base, Small (recommended), Medium, and Large v3 Turbo; each is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
+On-device models are GGML/GGUF conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0 and model-specific licenses), the same files the `transcribe-cpp` runtime is built for. The catalog spans Whisper plus Parakeet, Canary, Moonshine, SenseVoice, Qwen3-ASR, Cohere Transcribe, Nemotron, Granite, Voxtral, GigaAM, and Fun-ASR, so you can trade accuracy, speed, language coverage, and size. Each card shows a family, parameter count, language coverage, and relative accuracy/speed bars. Every model is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
 
 The runtime is compiled into Kivo, not shipped as a separate server, and links statically on every platform (no extra DLLs to ship): Metal on macOS, Vulkan on Windows x86_64, CPU on Windows-on-ARM and Linux. On Windows the GPU backend is used when a Vulkan-capable driver is present and falls back to CPU otherwise. Building the Windows Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on the build machine; the SDK installer sets `VULKAN_SDK`, which the build script reads to find `vulkan-1.lib`. End users do not need the SDK.
 

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   fallbackAiModels,
+  isUsableAiModelIdFor,
   migrateAiModels,
   normalizeAiModelList,
   normalizeAiProvider,
@@ -282,6 +283,14 @@ class MockBridge implements NativeBridge {
         this.settings.aiModels ?? [],
       );
     }
+    // Mirror the native normalization: a cleanup override that no longer fits
+    // the selected provider is dropped so cleanup falls back to the queue.
+    if (
+      this.settings.dictationCleanupModel &&
+      !isUsableAiModelIdFor(this.settings.aiProvider, this.settings.dictationCleanupModel)
+    ) {
+      this.settings.dictationCleanupModel = null;
+    }
     window.localStorage.setItem("kivo-dev-settings", JSON.stringify(this.settings));
     this.emit("settings-changed", structuredClone(this.settings));
     return structuredClone(this.settings);
@@ -339,11 +348,16 @@ class MockBridge implements NativeBridge {
   // Illustrative catalog mirroring src-tauri/src/speech/model_store.rs; the
   // harness never downloads anything.
   private readonly localModels: LocalSpeechModelInfo[] = [
-    { id: "whisper-tiny", name: "Tiny", description: "Fastest and smallest.", sizeBytes: 44_211_616, recommended: false, downloaded: false },
-    { id: "whisper-base", name: "Base", description: "A light, responsive model.", sizeBytes: 63_786_048, recommended: false, downloaded: false },
-    { id: "whisper-small", name: "Small", description: "Recommended.", sizeBytes: 193_749_056, recommended: true, downloaded: true },
-    { id: "whisper-medium", name: "Medium", description: "Higher accuracy.", sizeBytes: 504_102_848, recommended: false, downloaded: false },
-    { id: "whisper-large-v3-turbo", name: "Large v3 Turbo", description: "Best quality.", sizeBytes: 536_069_728, recommended: false, downloaded: false },
+    { id: "whisper-tiny", name: "Whisper Tiny", description: "Fastest and smallest.", sizeBytes: 44_211_616, recommended: false, downloaded: false, accuracy: 61, speed: 100, family: "Whisper", parameters: "38M", languageCount: 99, streaming: false },
+    { id: "whisper-base", name: "Whisper Base", description: "A light, responsive model.", sizeBytes: 63_786_048, recommended: false, downloaded: false, accuracy: 71, speed: 99, family: "Whisper", parameters: "73M", languageCount: 99, streaming: false },
+    { id: "whisper-small", name: "Whisper Small", description: "Recommended.", sizeBytes: 193_749_056, recommended: true, downloaded: true, accuracy: 80, speed: 78, family: "Whisper", parameters: "242M", languageCount: 99, streaming: false },
+    { id: "whisper-medium", name: "Whisper Medium", description: "Higher accuracy.", sizeBytes: 504_102_848, recommended: false, downloaded: false, accuracy: 84, speed: 42, family: "Whisper", parameters: "764M", languageCount: 99, streaming: false },
+    { id: "whisper-large-v3-turbo", name: "Whisper Large v3 Turbo", description: "Best quality.", sizeBytes: 536_069_728, recommended: false, downloaded: false, accuracy: 88, speed: 35, family: "Whisper", parameters: "809M", languageCount: 100, streaming: false },
+    { id: "parakeet-tdt-0.6b-v3", name: "Parakeet TDT 0.6B v3", description: "Fast across 25 European languages.", sizeBytes: 739_508_576, recommended: false, downloaded: false, accuracy: 88, speed: 79, family: "Parakeet", parameters: "0.6B", languageCount: 25, streaming: false },
+    { id: "canary-180m-flash", name: "Canary 180M Flash", description: "Tiny and instant.", sizeBytes: 218_447_552, recommended: false, downloaded: false, accuracy: 88, speed: 98, family: "Canary", parameters: "180M", languageCount: 4, streaming: false },
+    { id: "moonshine-base", name: "Moonshine Base", description: "Small English model.", sizeBytes: 77_476_480, recommended: false, downloaded: false, accuracy: 80, speed: 99, family: "Moonshine", parameters: "62M", languageCount: 1, streaming: false },
+    { id: "sensevoice-small", name: "SenseVoice Small", description: "Strong on Asian languages.", sizeBytes: 252_684_608, recommended: false, downloaded: false, accuracy: 81, speed: 98, family: "SenseVoice", parameters: "234M", languageCount: 5, streaming: false },
+    { id: "cohere-transcribe-03-2026", name: "Cohere Transcribe", description: "Highest accuracy, slower.", sizeBytes: 1_770_270_208, recommended: false, downloaded: false, accuracy: 92, speed: 63, family: "Cohere", parameters: "2.0B", languageCount: 14, streaming: false },
   ];
 
   async listLocalSpeechModels() {
