@@ -1905,7 +1905,7 @@ mod tests {
         let url = format!("http://{}/chat/completions", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
             let mut sessions = Vec::new();
-            for request_index in 0..2 {
+            for request_index in 0..3 {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -1921,6 +1921,7 @@ mod tests {
                 };
                 let headers = String::from_utf8(bytes.clone()).unwrap().to_lowercase();
                 assert!(headers.contains("user-agent: kivo/"));
+                assert!(headers.contains("x-opencode-client: kivo"));
                 let session = headers
                     .lines()
                     .find_map(|line| line.strip_prefix("x-opencode-session: "))
@@ -1936,17 +1937,30 @@ mod tests {
                 bytes.resize(header_end + length, 0);
                 stream.read_exact(&mut bytes[header_end..]).unwrap();
                 let body: serde_json::Value = serde_json::from_slice(&bytes[header_end..]).unwrap();
-                assert_eq!(body["model"], "glm-5.3-flash");
                 assert!(body.get("temperature").is_none());
-                if request_index == 0 {
-                    assert!(body.get("reasoning_effort").is_none());
-                } else {
-                    assert_eq!(body["reasoning_effort"], "low");
+                match request_index {
+                    0 => {
+                        assert_eq!(body["model"], "glm-5.3-flash");
+                        assert!(body.get("reasoning_effort").is_none());
+                        let response = r#"{"choices":[{"message":{"content":"ok"}}]}"#;
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
+                    1 => {
+                        assert_eq!(body["model"], "glm-5.3-flash");
+                        assert_eq!(body["reasoning_effort"], "low");
+                        let response = r#"{"error":{"code":"rate_limit_exceeded","message":"try fallback"}}"#;
+                        write!(stream, "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
+                    _ => {
+                        assert_eq!(body["model"], "glm-5.3");
+                        assert_eq!(body["reasoning_effort"], "low");
+                        let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+                    }
                 }
-                let response = r#"{"choices":[{"message":{"content":"hello world"}}]}"#;
-                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
             }
             assert_ne!(sessions[0], sessions[1]);
+            assert_eq!(sessions[1], sessions[2]);
         });
         let client = OpenAiCompatClient::new().unwrap();
         let key = SecretString::new("test-key".to_owned()).unwrap();
@@ -1960,11 +1974,11 @@ mod tests {
         };
         assert_eq!(
             client
-                .generate(
+                .generate_in_order(
                     AiProvider::Go,
                     &url,
                     Some(&key),
-                    "glm-5.3-flash",
+                    &["glm-5.3-flash".into(), "glm-5.3".into()],
                     &prompt,
                     AiReasoningMode::Fast,
                 )
