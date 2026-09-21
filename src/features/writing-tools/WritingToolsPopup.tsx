@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
 import { Button } from "../../components/Button";
 import { Icon } from "../../components/Icon";
+import { IconButton } from "../../components/IconButton";
 import { Spinner } from "../../components/Spinner";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
@@ -324,9 +325,9 @@ function MenuView(props: MenuViewProps) {
           <span className="writing-popup__eyebrow">Writing Tools</span>
           <span className="writing-popup__context">{applicationName ? `Selected text in ${applicationName}` : "Selected text"}</span>
         </span>
-        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
+        <IconButton label="Close Writing Tools" onClick={close}>
           <Icon name="close" size={14} />
-        </button>
+        </IconButton>
       </div>
       <div aria-label="Writing actions" className="writing-actions" role="menu">
         {presets.map((preset, index) => renderAction(preset, index))}
@@ -354,14 +355,13 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
         void runAction("custom");
       }}
     >
-      <button
-        aria-label="Back to writing actions"
-        className="icon-button custom-instruction__back"
+      <IconButton
+        className="custom-instruction__back"
+        label="Back to writing actions"
         onClick={() => dispatch({ type: "BACK" })}
-        type="button"
       >
         <Icon name="arrow-left" size={15} />
-      </button>
+      </IconButton>
       <input
         aria-label="Custom writing instruction"
         autoComplete="off"
@@ -403,9 +403,9 @@ function ProcessingView({ close, label, hint }: { readonly close: () => void; re
       <Spinner label={`Running ${label ?? "writing action"}`} />
       <span>{status}</span>
       {hint || elapsed >= 4 ? <span className="writing-processing__hint">{hint ?? "Still working. Closing cancels the request."}</span> : null}
-      <button aria-label="Cancel" className="icon-button" onClick={close} type="button">
+      <IconButton label="Cancel" onClick={close}>
         <Icon name="close" size={14} />
-      </button>
+      </IconButton>
     </div>
   );
 }
@@ -429,9 +429,9 @@ function ResultView({ close, canReplace, dispatch, label, resultText, source }: 
           <span className="writing-result__eyebrow">Writing Tools</span>
           <h1>{label ?? "Result"}</h1>
         </div>
-        <button aria-label="Close result" className="icon-button" onClick={close} type="button">
+        <IconButton label="Close result" onClick={close}>
           <Icon name="close" size={14} />
-        </button>
+        </IconButton>
       </header>
       {source ? (
         <div className="writing-result__source">
@@ -534,7 +534,7 @@ function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewPro
     <form className="writing-summary" onSubmit={(event) => { event.preventDefault(); void runAction("summarize"); }}>
       <header className="writing-popup__header" data-tauri-drag-region>
         <span>Summarize link</span>
-        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
+        <IconButton label="Close Writing Tools" onClick={close}><Icon name="close" size={14} /></IconButton>
       </header>
       <div className="writing-summary__link">
         <Icon name="connection" size={17} />

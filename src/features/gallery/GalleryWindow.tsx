@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Button, LinkButton } from "../../components/Button";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import type {
@@ -183,9 +184,7 @@ export function GalleryWindow({
               </div>
             </div>
             <div className="settings-group__footer">
-              <button className="button button--compact" onClick={refresh} type="button">
-                Re-run probes
-              </button>
+              <Button compact onClick={refresh}>Re-run probes</Button>
             </div>
           </div>
 
@@ -196,27 +195,15 @@ export function GalleryWindow({
               engine answers; in the mock harness the canned events answer.
             </p>
             <div className="settings-group__footer settings-group__footer--split">
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.startDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "start failed"))}
-                type="button"
-              >
+              <Button compact onClick={() => void nativeBridge.startDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "start failed"))}>
                 Start
-              </button>
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.stopDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "stop failed"))}
-                type="button"
-              >
+              </Button>
+              <Button compact onClick={() => void nativeBridge.stopDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "stop failed"))}>
                 Stop
-              </button>
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.cancelDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "cancel failed"))}
-                type="button"
-              >
+              </Button>
+              <Button compact onClick={() => void nativeBridge.cancelDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "cancel failed"))}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
 
@@ -233,9 +220,7 @@ export function GalleryWindow({
               </div>
             </div>
             <div className="settings-group__footer">
-              <button className="button button--compact" onClick={() => void runWritingProbe()} type="button">
-                Run proofread
-              </button>
+              <Button compact onClick={() => void runWritingProbe()}>Run proofread</Button>
             </div>
           </div>
 
@@ -248,19 +233,17 @@ export function GalleryWindow({
               </div>
             </div>
             <div className="settings-group__footer">
-              <button className="button button--compact" onClick={() => void runSettingsRoundTrip()} type="button">
-                Write + restore
-              </button>
+              <Button compact onClick={() => void runSettingsRoundTrip()}>Write + restore</Button>
             </div>
           </div>
 
           <div className="settings-group">
             <h2>Surfaces</h2>
             <div className="settings-group__footer settings-group__footer--split">
-              <a className="button button--compact" href="?surface=flow-bar&harness=1">Flow Bar</a>
-              <a className="button button--compact" href="?surface=writing-tools&harness=1">Writing Tools</a>
-              <a className="button button--compact" href="?surface=settings&harness=1">Settings</a>
-              <a className="button button--compact" href="?surface=onboarding&harness=1">Onboarding</a>
+              <LinkButton compact href="?surface=flow-bar&harness=1">Flow Bar</LinkButton>
+              <LinkButton compact href="?surface=writing-tools&harness=1">Writing Tools</LinkButton>
+              <LinkButton compact href="?surface=settings&harness=1">Settings</LinkButton>
+              <LinkButton compact href="?surface=onboarding&harness=1">Onboarding</LinkButton>
             </div>
           </div>
         </div>

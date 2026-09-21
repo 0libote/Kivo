@@ -30,7 +30,7 @@
 .shortcut-summary > div { gap: 3px; display: flex; }
 .onboarding-message { color: var(--danger); margin: 7px 22px; font-size: 12px; }
 .onboarding-footer { border-top: 1px solid var(--border); margin: auto 22px 0; grid-template-columns: 1fr auto 1fr; align-items: center; min-height: 68px; margin-inline: 28px; padding: 10px 0 14px; display: grid; }
-.onboarding-footer .button { justify-self: end; }
+.onboarding-footer .kv-button { justify-self: end; }
 .onboarding-back { color: var(--text-secondary); background: none; border: 0; justify-self: start; padding: 6px 0; }
 .onboarding-progress { gap: 6px; display: flex; }
 .onboarding-progress span { background: var(--border-strong); border-radius: 99px; width: 20px; height: 4px; }
