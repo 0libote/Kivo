@@ -34,6 +34,6 @@ function humanState(state: StatusIndicatorProps["state"]): string {
     case "offline": return "offline";
     case "rate-limited": return "rate limited";
     case "model": return "model unavailable";
-    case "blocked": return "provider rejected";
+    case "blocked": return "provider error";
   }
 }
