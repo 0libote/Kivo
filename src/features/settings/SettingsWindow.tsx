@@ -831,7 +831,7 @@ function providerBlurb(info: AiProviderInfo): string {
     case "zen":
       return "OpenCode’s pay-as-you-go service. Model prices appear below.";
     case "go":
-      return "Uses your OpenCode Go subscription. GLM-5.3 Flash is the recommended model.";
+      return "Uses your OpenCode Go subscription. OpenCode designs Go for coding-agent traffic; GLM-5.3 Flash is the recommended model.";
     case "custom":
       return "Connect to Ollama, LM Studio, or another OpenAI-compatible server.";
     default:
@@ -1003,7 +1003,7 @@ function SettingRow({ label, description, children, stacked = false }: { readonl
 function connectionLabel(status: ApiKeyStatus) {
   if (!status.configured) return "Not configured";
   const labels: Record<ApiKeyStatus["connection"], string> = {
-    untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline", model: "Model unavailable",
+    untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline", model: "Model unavailable", blocked: "Provider rejected",
   };
   return labels[status.connection];
 }
@@ -1016,6 +1016,7 @@ export function testFailureConnection(code: string): ApiKeyStatus["connection"] 
   if (code === "invalid_api_key" || code === "credential" || code === "ai_not_configured") return "invalid";
   if (code === "model_unavailable" || code === "model_not_found") return "model";
   if (code === "rate_limited") return "rate-limited";
+  if (code === "region_unavailable" || code === "account_disabled" || code === "provider_forbidden") return "blocked";
   if (code === "transport" || code === "invalid_response" || code === "api_error" || code === "incomplete" || code === "empty_response") return "offline";
   // insufficient_credits (empty Zen balance) keeps the neutral state: the
   // notice text carries the top-up guidance, not the indicator.
@@ -1029,6 +1030,7 @@ function connectionDescription(info: AiProviderInfo, status: ApiKeyStatus) {
   if (status.connection === "invalid") return "Check the key and save it again.";
   if (status.connection === "model") return "A queued model isn’t available to this key. Pick another model above, then test again.";
   if (status.connection === "rate-limited") return `${info.label} is temporarily rate limited. Try again shortly.`;
+  if (status.connection === "blocked") return `${info.label} rejected the request. Read the message above for subscription, region, model, or client-access details.`;
   if (status.connection === "offline") return `Kivo couldn’t reach ${info.label}. Check your connection.`;
   return "Test the saved key with the selected model before using Writing Tools.";
 }

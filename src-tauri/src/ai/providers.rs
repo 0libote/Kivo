@@ -985,10 +985,40 @@ impl OpencodeError {
     }
 
     fn is_auth_code(code: Option<&str>) -> bool {
-        matches!(
-            code,
-            Some("authentication" | "invalid_api_key" | "AuthError" | "unauthorized")
-        )
+        code.is_some_and(|code| {
+            [
+                "authentication",
+                "invalid_api_key",
+                "AuthError",
+                "unauthorized",
+            ]
+            .iter()
+            .any(|known| code.eq_ignore_ascii_case(known))
+        })
+    }
+
+    fn is_region_unavailable_code(code: Option<&str>) -> bool {
+        code.is_some_and(|code| {
+            [
+                "Account.RegionUnavailable",
+                "account_region_unavailable",
+                "region_unavailable",
+            ]
+            .iter()
+            .any(|known| code.eq_ignore_ascii_case(known))
+        })
+    }
+
+    fn is_account_disabled_code(code: Option<&str>) -> bool {
+        code.is_some_and(|code| {
+            [
+                "Account.Disabled",
+                "account_disabled",
+                "subscription_required",
+            ]
+            .iter()
+            .any(|known| code.eq_ignore_ascii_case(known))
+        })
     }
 
     pub fn user_message(&self) -> &'static str {
@@ -1000,12 +1030,16 @@ impl OpencodeError {
             Self::InaccessibleSource => {
                 "Link summaries need the Gemini provider. Paste the text or transcript instead."
             }
+            Self::Api { code, .. } if Self::is_region_unavailable_code(code.as_deref()) => {
+                "OpenCode Go requires Global regions for this model. Set Workspace Privacy → Regions to Global, then try again."
+            }
+            Self::Api { code, .. } if Self::is_account_disabled_code(code.as_deref()) => {
+                "OpenCode Go says this workspace does not have an active Go subscription. Check the Go subscription in the OpenCode console."
+            }
             Self::Api { status, code }
-                if *status == StatusCode::UNAUTHORIZED
-                    || *status == StatusCode::FORBIDDEN
-                    || Self::is_auth_code(code.as_deref()) =>
+                if *status == StatusCode::UNAUTHORIZED || Self::is_auth_code(code.as_deref()) =>
             {
-                "Couldn't connect. Check your API key."
+                "Couldn't connect. OpenCode did not accept this API key."
             }
             _ if self.is_out_of_credits() => "The OpenCode balance is empty. Top up to continue.",
             Self::Api { status, code }
@@ -1025,6 +1059,9 @@ impl OpencodeError {
             Self::Api { .. } if self.is_not_found() => {
                 "That model isn't available. Choose another model under AI → Model."
             }
+            Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => {
+                "OpenCode rejected this request. The key may be valid, but this workspace, model, or client is not permitted to use the requested Go endpoint."
+            }
             Self::Transport(_) => "Couldn't reach the AI provider. Check your connection.",
             _ => "The AI provider couldn't complete that request.",
         }
@@ -1038,6 +1075,12 @@ impl OpencodeError {
             Self::InvalidResponse(_) => "invalid_response",
             Self::Incomplete => "incomplete",
             _ if self.is_out_of_credits() => "insufficient_credits",
+            Self::Api { code, .. } if Self::is_region_unavailable_code(code.as_deref()) => {
+                "region_unavailable"
+            }
+            Self::Api { code, .. } if Self::is_account_disabled_code(code.as_deref()) => {
+                "account_disabled"
+            }
             Self::Api { status, code }
                 if *status == StatusCode::TOO_MANY_REQUESTS
                     || matches!(
@@ -1053,13 +1096,12 @@ impl OpencodeError {
                 "rate_limited"
             }
             Self::Api { status, code }
-                if *status == StatusCode::UNAUTHORIZED
-                    || *status == StatusCode::FORBIDDEN
-                    || Self::is_auth_code(code.as_deref()) =>
+                if *status == StatusCode::UNAUTHORIZED || Self::is_auth_code(code.as_deref()) =>
             {
                 "invalid_api_key"
             }
             Self::Api { .. } if self.is_not_found() => "model_not_found",
+            Self::Api { status, .. } if *status == StatusCode::FORBIDDEN => "provider_forbidden",
             Self::Api { .. } => "api_error",
             Self::EmptyResponse => "empty_response",
         }
@@ -1081,8 +1123,8 @@ impl std::error::Error for OpencodeError {
     }
 }
 
-/// Failures shared by every queue entry: the key is wrong, the balance is
-/// empty, or the host is unreachable, so trying the next model cannot help
+/// Failures shared by every queue entry: the key/account is unusable, the
+/// balance is empty, or the host is unreachable, so trying the next model cannot help
 /// (and must not burn quota).
 fn is_failover_terminal(error: &OpencodeError) -> bool {
     match error {
@@ -1090,8 +1132,8 @@ fn is_failover_terminal(error: &OpencodeError) -> bool {
         OpencodeError::Transport(error) => !error.is_timeout(),
         OpencodeError::Api { status, code }
             if *status == StatusCode::UNAUTHORIZED
-                || *status == StatusCode::FORBIDDEN
-                || OpencodeError::is_auth_code(code.as_deref()) =>
+                || OpencodeError::is_auth_code(code.as_deref())
+                || OpencodeError::is_account_disabled_code(code.as_deref()) =>
         {
             true
         }
@@ -1290,7 +1332,10 @@ impl OpenAiCompatClient {
                 role: "user",
                 content: "ok",
             }],
-            max_tokens: Some(1),
+            // A few OpenAI-compatible gateways reject ultra-small output limits.
+            // Sixteen tokens is still effectively free for a connection probe and
+            // matches the minimum Kivo already uses for Responses requests.
+            max_tokens: Some(16),
         };
         let protocol = completion_protocol(provider, &model);
         let (url, body) = completion_request(
@@ -1631,7 +1676,7 @@ struct ChatCompletionRequest<'a> {
     messages: &'a [ChatMessage<'a>],
     // No output cap on writing requests: prompt budgets were dropped alongside
     // the Gemini `max_output_tokens` (same reasoning — small sources produce
-    // small outputs). Only the connection probe caps to one token.
+    // small outputs). Only the connection probe uses a tiny output cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     max_tokens: Option<u32>,
 }
@@ -1693,8 +1738,28 @@ struct ChatContentPart {
 /// `{"error": {"code": "model_not_found"}}` shape.
 fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
     let error = body.get("error").unwrap_or(body);
+    let classify_message = |message: &str| {
+        let lower = message.to_lowercase();
+        if lower.contains("global region") || lower.contains("global regions") {
+            Some("Account.RegionUnavailable")
+        } else if lower.contains("active opencode go subscription")
+            || lower.contains("go subscription is required")
+            || lower.contains("subscribe to go")
+        {
+            Some("Account.Disabled")
+        } else if lower.contains("invalid api key")
+            || lower.contains("incorrect api key")
+            || lower.contains("unauthorized")
+        {
+            Some("authentication")
+        } else {
+            None
+        }
+    };
     if let Some(text) = error.as_str() {
-        return Some(text.to_owned());
+        return classify_message(text)
+            .map(str::to_owned)
+            .or_else(|| Some(text.to_owned()));
     }
     let kind = error.get("type").and_then(serde_json::Value::as_str);
     let code = error.get("code").and_then(|code| match code {
@@ -1708,11 +1773,10 @@ fn parse_openai_error_code(body: &serde_json::Value) -> Option<String> {
         .unwrap_or("");
     let message_lower = message.to_lowercase();
 
-    if matches!(kind, Some("AuthError"))
-        || message_lower.contains("invalid api key")
-        || message_lower.contains("incorrect api key")
-        || message_lower.contains("unauthorized")
-    {
+    if let Some(classified) = classify_message(message) {
+        return Some(classified.into());
+    }
+    if matches!(kind, Some("AuthError")) {
         return Some("authentication".into());
     }
     if message_lower.contains("insufficient")
@@ -2195,7 +2259,7 @@ mod tests {
         assert_eq!(body["max_tokens"], 8192);
         assert!(body.get("temperature").is_none());
         let probe = ChatCompletionRequest {
-            max_tokens: Some(1),
+            max_tokens: Some(16),
             ..request
         };
         let (_, body) = completion_request(
@@ -2205,7 +2269,67 @@ mod tests {
             "https://opencode.ai/zen/go/v1/chat/completions",
             &probe,
         );
-        assert_eq!(body["max_tokens"], 1);
+        assert_eq!(body["max_tokens"], 16);
+    }
+
+    #[test]
+    fn go_account_and_forbidden_errors_are_not_misreported_as_bad_keys() {
+        let region = serde_json::json!({
+            "error": {
+                "code": "Account.RegionUnavailable",
+                "message": "This Go model requires Global regions."
+            }
+        });
+        let region_error = OpencodeError::Api {
+            status: StatusCode::FORBIDDEN,
+            code: parse_openai_error_code(&region),
+        };
+        assert_eq!(region_error.code(), "region_unavailable");
+        assert!(region_error.user_message().contains("Global regions"));
+        assert!(!is_failover_terminal(&region_error));
+
+        let disabled = serde_json::json!({
+            "error": {
+                "code": "Account.Disabled",
+                "message": "An active OpenCode Go subscription is required to use Go models."
+            }
+        });
+        let disabled_error = OpencodeError::Api {
+            status: StatusCode::FORBIDDEN,
+            code: parse_openai_error_code(&disabled),
+        };
+        assert_eq!(disabled_error.code(), "account_disabled");
+        assert!(
+            disabled_error
+                .user_message()
+                .contains("active Go subscription")
+        );
+        assert!(is_failover_terminal(&disabled_error));
+
+        let forbidden = serde_json::json!({
+            "error": {
+                "message": "Forbidden: {\"model\":\"glm-5.3-flash\"}"
+            }
+        });
+        let forbidden_error = OpencodeError::Api {
+            status: StatusCode::FORBIDDEN,
+            code: parse_openai_error_code(&forbidden),
+        };
+        assert_eq!(forbidden_error.code(), "provider_forbidden");
+        assert!(!is_failover_terminal(&forbidden_error));
+
+        let auth = serde_json::json!({
+            "error": {
+                "type": "AuthError",
+                "message": "Invalid API key."
+            }
+        });
+        let auth_error = OpencodeError::Api {
+            status: StatusCode::FORBIDDEN,
+            code: parse_openai_error_code(&auth),
+        };
+        assert_eq!(auth_error.code(), "invalid_api_key");
+        assert!(is_failover_terminal(&auth_error));
     }
 
     #[test]

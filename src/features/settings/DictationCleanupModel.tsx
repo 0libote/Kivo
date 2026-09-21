@@ -19,7 +19,7 @@ export function DictationCleanupModel({ settings, save }: DictationCleanupModelP
   useEffect(() => {
     let active = true;
     void nativeBridge
-      .listAiModels()
+      .listAiModels(settings.aiProvider)
       .then((next) => {
         if (active) setModels(next);
       })

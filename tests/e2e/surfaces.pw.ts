@@ -53,6 +53,19 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
   await page.getByRole("button", { name: "AI", exact: true }).click();
+  // Native settings persistence is slower than React's optimistic provider
+  // switch. Recreate that timing so model discovery must use the provider
+  // requested by the picker rather than whichever provider is persisted yet.
+  await page.evaluate(async () => {
+    const { nativeBridge } = await import("/src/platform/native.ts");
+    const updateSettings = nativeBridge.updateSettings.bind(nativeBridge);
+    nativeBridge.updateSettings = async (patch) => {
+      if (patch.aiProvider !== undefined) {
+        await new Promise((resolve) => window.setTimeout(resolve, 150));
+      }
+      return updateSettings(patch);
+    };
+  });
   const providerSelect = page.getByLabel("AI provider", { exact: true });
   await expect(providerSelect).toBeVisible();
   await providerSelect.selectOption("zen");
