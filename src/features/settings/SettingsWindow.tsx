@@ -1266,13 +1266,7 @@ function AboutSection({
           >
             <Button
               isDisabled={busy !== null}
-              label={
-                busy === "install"
-                  ? "Installing…"
-                  : busy === "restart"
-                    ? "Restarting…"
-                    : "Download and Install"
-              }
+              label={installButtonLabel(busy)}
               onClick={() => {
                 setBusy("install");
                 setNotice(null);
@@ -1358,6 +1352,12 @@ function AboutSection({
       </p>
     </SettingsContent>
   );
+}
+
+function installButtonLabel(busy: string | null): string {
+  if (busy === "install") return "Installing…";
+  if (busy === "restart") return "Restarting…";
+  return "Download and Install";
 }
 
 function updateDescription(updateResult: UpdateResult | null): string {

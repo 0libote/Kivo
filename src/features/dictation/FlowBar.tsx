@@ -60,6 +60,13 @@ function mockInitialStatus(): DictationStatus {
   return "listening";
 }
 
+/** Stagger the idle wave loop so neighbouring bars never move in lockstep. */
+function waveDelay(index: number): number {
+  if (index % 3 === 1) return -0.18;
+  if (index % 3 === 2) return -0.36;
+  return 0;
+}
+
 const barMotion: Record<DictationStatus, Record<string, number>> = {
   hidden: { opacity: 0, y: 5, scale: 0.92, width: 84, height: 40 },
   idle: { opacity: 1, y: 0, scale: 1, width: 38, height: 38 },
@@ -161,7 +168,7 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
                         duration: 0.72,
                         repeat: Number.POSITIVE_INFINITY,
                         ease: "easeInOut",
-                        delay: index % 3 === 1 ? -0.18 : index % 3 === 2 ? -0.36 : 0,
+                        delay: waveDelay(index),
                       },
                     }}
                     {...stylex.props(styles.waveBar)}
