@@ -8,6 +8,7 @@ import {
   normalizeAiModelList,
   normalizeAiProvider,
 } from "../ai/models";
+import { FALLBACK_AI_PROVIDERS } from "../ai/providers";
 import {
   type AiModelInfo,
   type AiProviderId,
@@ -558,48 +559,7 @@ class MockBridge implements NativeBridge {
   }
 
   async listAiProviders(): Promise<AiProviderInfo[]> {
-    return [
-      {
-        id: "gemini",
-        label: "Gemini",
-        keyUrl: "https://aistudio.google.com/app/apikey",
-        keyOptional: false,
-        defaultModel: "gemini-3.8-flash",
-        defaultBaseUrl: null,
-        supportsLinkSummary: true,
-        testUsesQuota: true,
-      },
-      {
-        id: "zen",
-        label: "OpenCode Zen",
-        keyUrl: "https://opencode.ai/auth",
-        keyOptional: false,
-        defaultModel: "gemini-3.8-flash",
-        defaultBaseUrl: null,
-        supportsLinkSummary: false,
-        testUsesQuota: true,
-      },
-      {
-        id: "go",
-        label: "OpenCode Go",
-        keyUrl: "https://opencode.ai/auth",
-        keyOptional: false,
-        defaultModel: "glm-5.3-flash",
-        defaultBaseUrl: null,
-        supportsLinkSummary: false,
-        testUsesQuota: true,
-      },
-      {
-        id: "custom",
-        label: "Custom (OpenAI-compatible)",
-        keyUrl: null,
-        keyOptional: true,
-        defaultModel: "llama3.1",
-        defaultBaseUrl: "http://localhost:11434/v1",
-        supportsLinkSummary: false,
-        testUsesQuota: true,
-      },
-    ];
+    return structuredClone(FALLBACK_AI_PROVIDERS);
   }
 
   async listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]> {

@@ -2,6 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import * as stylex from "@stylexjs/stylex";
 import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { normalizeAiProvider } from "../../ai/models";
+import { FALLBACK_AI_PROVIDERS } from "../../ai/providers";
 import { Icon, type IconName } from "../../components/Icon";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { ShortcutRecorder } from "../../components/ShortcutRecorder";
@@ -1143,49 +1144,6 @@ function providerBlurb(info: AiProviderInfo): string {
       return "Connects directly to Google and supports summaries of highlighted links.";
   }
 }
-
-const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
-  {
-    id: "gemini",
-    label: "Gemini",
-    keyUrl: "https://aistudio.google.com/app/apikey",
-    keyOptional: false,
-    defaultModel: "gemini-3.8-flash",
-    defaultBaseUrl: null,
-    supportsLinkSummary: true,
-    testUsesQuota: true,
-  },
-  {
-    id: "zen",
-    label: "OpenCode Zen",
-    keyUrl: "https://opencode.ai/auth",
-    keyOptional: false,
-    defaultModel: "gemini-3.8-flash",
-    defaultBaseUrl: null,
-    supportsLinkSummary: false,
-    testUsesQuota: true,
-  },
-  {
-    id: "go",
-    label: "OpenCode Go",
-    keyUrl: "https://opencode.ai/auth",
-    keyOptional: false,
-    defaultModel: "glm-5.3-flash",
-    defaultBaseUrl: null,
-    supportsLinkSummary: false,
-    testUsesQuota: true,
-  },
-  {
-    id: "custom",
-    label: "Custom (OpenAI-compatible)",
-    keyUrl: null,
-    keyOptional: true,
-    defaultModel: "llama3.1",
-    defaultBaseUrl: "http://localhost:11434/v1",
-    supportsLinkSummary: false,
-    testUsesQuota: true,
-  },
-];
 
 function keyLabel(info: AiProviderInfo): string {
   if (info.id === "custom") return "Custom endpoint API key (optional)";
