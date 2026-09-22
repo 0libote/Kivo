@@ -150,8 +150,8 @@ function ShortcutRow({
       </div>
       <div {...stylex.props(styles.shortcutTail)}>
         <div {...stylex.props(styles.keyRow)}>
-          {keys.map((key, index) => (
-            <kbd key={index} {...stylex.props(styles.key)}>
+          {keys.map((key) => (
+            <kbd key={key} {...stylex.props(styles.key)}>
               {key}
             </kbd>
           ))}

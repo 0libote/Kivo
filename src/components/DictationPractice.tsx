@@ -16,17 +16,7 @@ export function DictationPractice({
   const field = useRef<HTMLTextAreaElement>(null);
   const [status, setStatus] = useState("");
   useNativeEvent<DictationSnapshot>("dictation-state", (snapshot) => {
-    setStatus(
-      snapshot.status === "error"
-        ? (snapshot.message ?? "Dictation could not start.")
-        : snapshot.status === "listening"
-          ? "Listening. Release your shortcut to finish."
-          : snapshot.status === "processing"
-            ? "Finishing your sentence…"
-            : snapshot.status === "success"
-              ? "Your sentence is ready."
-              : "",
-    );
+    setStatus(dictationStatusMessage(snapshot));
   });
   // Backend microphone failures all mention the microphone ("Microphone access
   // is required…", "…could not start. Check microphone…"); other errors
@@ -71,6 +61,21 @@ export function DictationPractice({
       ) : null}
     </div>
   );
+}
+
+function dictationStatusMessage(snapshot: DictationSnapshot): string {
+  switch (snapshot.status) {
+    case "error":
+      return snapshot.message ?? "Dictation could not start.";
+    case "listening":
+      return "Listening. Release your shortcut to finish.";
+    case "processing":
+      return "Finishing your sentence…";
+    case "success":
+      return "Your sentence is ready.";
+    default:
+      return "";
+  }
 }
 
 const styles = stylex.create({
