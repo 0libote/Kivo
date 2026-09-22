@@ -5,7 +5,9 @@ type EventName = Parameters<typeof nativeBridge.on>[0];
 
 export function useNativeEvent<T>(event: EventName, handler: (payload: T) => void) {
   const latest = useRef(handler);
-  useEffect(() => { latest.current = handler; }, [handler]);
+  useEffect(() => {
+    latest.current = handler;
+  }, [handler]);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -14,7 +16,8 @@ export function useNativeEvent<T>(event: EventName, handler: (payload: T) => voi
       .then((cleanup) => {
         if (disposed) cleanup();
         else unlisten = cleanup;
-      }).catch(() => {
+      })
+      .catch(() => {
         // A closed native surface may reject registration; warn so a
         // silently-stale subscription (settings, dictation level) is visible
         // in diagnostics instead of failing without a trace.

@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { dictationReducer, initialDictationState } from "./state";
 
 describe("dictationReducer", () => {
   it("moves through a successful hold-to-dictate session", () => {
-    const listening = dictationReducer(initialDictationState, { type: "LISTEN", sessionId: "session-1" });
+    const listening = dictationReducer(initialDictationState, {
+      type: "LISTEN",
+      sessionId: "session-1",
+    });
     expect(listening).toMatchObject({ status: "listening", sessionId: "session-1" });
 
     const level = dictationReducer(listening, { type: "LEVEL", level: 2 });
@@ -23,7 +26,10 @@ describe("dictationReducer", () => {
   });
 
   it("returns to the passive idle indicator without retaining session state", () => {
-    const listening = dictationReducer(initialDictationState, { type: "LISTEN", sessionId: "session-2" });
+    const listening = dictationReducer(initialDictationState, {
+      type: "LISTEN",
+      sessionId: "session-2",
+    });
     expect(dictationReducer(listening, { type: "IDLE" })).toEqual({
       ...initialDictationState,
       status: "idle",
@@ -31,8 +37,15 @@ describe("dictationReducer", () => {
   });
 
   it("ignores stale transitions and records recoverable failures", () => {
-    expect(dictationReducer(initialDictationState, { type: "PROCESS" })).toEqual(initialDictationState);
-    expect(dictationReducer(initialDictationState, { type: "FAIL", message: "No microphone", canRetry: true }))
-      .toMatchObject({ status: "error", message: "No microphone", canRetry: true });
+    expect(dictationReducer(initialDictationState, { type: "PROCESS" })).toEqual(
+      initialDictationState,
+    );
+    expect(
+      dictationReducer(initialDictationState, {
+        type: "FAIL",
+        message: "No microphone",
+        canRetry: true,
+      }),
+    ).toMatchObject({ status: "error", message: "No microphone", canRetry: true });
   });
 });

@@ -882,8 +882,16 @@ fn plan_download(
 fn verify_sha256(path: &Path, expected: &str) -> io::Result<bool> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    // std::io::copy avoids a hand-rolled buffer loop and streams the file.
-    io::copy(&mut file, &mut hasher)?;
+    // sha2 0.11 dropped the io::Write impl (digest 0.11), so stream the file
+    // through update() in fixed-size chunks instead of io::copy.
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = io::Read::read(&mut file, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
     let digest = hasher.finalize();
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {

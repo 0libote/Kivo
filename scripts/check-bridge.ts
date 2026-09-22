@@ -50,9 +50,7 @@ const libRs = read("src-tauri/src/lib.rs");
 // `call<T>("name")`, including generics with `>` inside like
 // `call<Omit<AppContext, "surface">>("get_app_context")`. Type arguments never
 // contain parens, so `[^()]*` reaches the opening `(` without backtracking.
-const invoked = new Set(
-  [...nativeTs.matchAll(/call<[^()]*>\(\s*"([a-z_]+)"/g)].map((m) => m[1]),
-);
+const invoked = new Set([...nativeTs.matchAll(/call<[^()]*>\(\s*"([a-z_]+)"/g)].map((m) => m[1]));
 if (invoked.size > 0) {
   pass("frontend invokes at least one command");
 } else {
@@ -130,11 +128,8 @@ for (const command of [...registered].sort(byName)) {
 const eventAnchor = "type NativeEventMap = {";
 const eventStart = nativeTs.indexOf(eventAnchor);
 const eventEnd = nativeTs.indexOf("\n};", eventStart);
-const eventBlock =
-  eventStart === -1 || eventEnd === -1 ? "" : nativeTs.slice(eventStart, eventEnd);
-const events = new Set(
-  [...eventBlock.matchAll(/"([a-z-]+)":/g)].map((m) => m[1]),
-);
+const eventBlock = eventStart === -1 || eventEnd === -1 ? "" : nativeTs.slice(eventStart, eventEnd);
+const events = new Set([...eventBlock.matchAll(/"([a-z-]+)":/g)].map((m) => m[1]));
 if (events.size > 0) {
   pass("event map parses");
 } else {
@@ -181,8 +176,7 @@ const frontendBlock = commandsRs.slice(
   commandsRs.indexOf("pub struct FrontendSettings"),
   commandsRs.indexOf("}", commandsRs.indexOf("pub struct FrontendSettings")) + 1,
 );
-const camelToSnake = (key: string) =>
-  key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+const camelToSnake = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 if (tsFields.length > 0) {
   pass("TS AppSettings parses");
 } else {

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
+import { nativeBridge } from "../platform/native";
 import type { AppSettings, Platform } from "../types";
 import { defaultSettings } from "../types";
 import { useNativeEvent } from "./useNativeEvent";
-import { nativeBridge } from "../platform/native";
 
 export function useSystemPreferences(platform: Platform) {
   const [settings, setSettings] = useState<AppSettings>(() => defaultSettings(platform));
@@ -35,7 +35,7 @@ export function useSystemPreferences(platform: Platform) {
       const persisted = await nativeBridge.updateSettings(patch);
       setSettings(persisted);
       return persisted;
-    } catch (error) {
+    } catch (cause) {
       // Refresh from the native side so a failed write never leaves the UI
       // showing state that was not persisted. A failed refresh must not mask
       // the original error, so it is intentionally swallowed here.
@@ -45,7 +45,7 @@ export function useSystemPreferences(platform: Platform) {
       } catch {
         // Keep the optimistic state; the caller still sees the real failure.
       }
-      throw error;
+      throw cause;
     }
   }
 

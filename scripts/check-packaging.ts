@@ -32,23 +32,47 @@ check(
   `got "${version}"; the NSIS artifact names embed this string`,
 );
 
-const windowsConf = JSON.parse(readFileSync(join(root, "src-tauri/tauri.windows.conf.json"), "utf8")) as { bundle: { targets: string[]; windows: { nsis: { installMode: string; installerHooks: string } } } };
-check("Windows ships a per-user .exe", windowsConf.bundle.targets.length === 1 && windowsConf.bundle.targets[0] === "nsis" && windowsConf.bundle.windows.nsis.installMode === "currentUser", "Windows must keep the NSIS .exe installer");
-check("Windows installer enforces 24H2", readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8").includes("${AtLeastBuild} 26100"), "installer OS floor is missing");
+const windowsConf = JSON.parse(
+  readFileSync(join(root, "src-tauri/tauri.windows.conf.json"), "utf8"),
+) as {
+  bundle: { targets: string[]; windows: { nsis: { installMode: string; installerHooks: string } } };
+};
+check(
+  "Windows ships a per-user .exe",
+  windowsConf.bundle.targets.length === 1 &&
+    windowsConf.bundle.targets[0] === "nsis" &&
+    windowsConf.bundle.windows.nsis.installMode === "currentUser",
+  "Windows must keep the NSIS .exe installer",
+);
+check(
+  "Windows installer enforces 24H2",
+  readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8").includes("${AtLeastBuild} 26100"),
+  "installer OS floor is missing",
+);
 
 // --- Tauri config -----------------------------------------------------------
-const tauriConf = JSON.parse(
-  readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"),
-) as {
+const tauriConf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8")) as {
   productName: string;
   version: string;
   identifier: string;
   build: { frontendDist: string };
-  bundle: { targets: unknown; macOS?: { signingIdentity?: string | null }; windows?: { digestAlgorithm?: string } };
+  bundle: {
+    targets: unknown;
+    macOS?: { signingIdentity?: string | null };
+    windows?: { digestAlgorithm?: string };
+  };
   plugins: { updater: { endpoints: string[]; pubkey: string } };
 };
-check("tauri.conf version matches package.json", tauriConf.version === version, `tauri.conf has "${tauriConf.version}"`);
-check("tauri.conf identifier is set", typeof tauriConf.identifier === "string" && tauriConf.identifier.length > 0, "identifier missing");
+check(
+  "tauri.conf version matches package.json",
+  tauriConf.version === version,
+  `tauri.conf has "${tauriConf.version}"`,
+);
+check(
+  "tauri.conf identifier is set",
+  typeof tauriConf.identifier === "string" && tauriConf.identifier.length > 0,
+  "identifier missing",
+);
 check(
   "bundle targets cover both desktops",
   tauriConf.bundle.targets === "all",
@@ -56,7 +80,9 @@ check(
 );
 check(
   "updater endpoints include the rolling beta manifest",
-  tauriConf.plugins.updater.endpoints.some((endpoint) => endpoint.includes("continuous/continuous.json")),
+  tauriConf.plugins.updater.endpoints.some((endpoint) =>
+    endpoint.includes("continuous/continuous.json"),
+  ),
   "continuous.json endpoint missing or misnamed; beta updates break",
 );
 
@@ -70,21 +96,37 @@ for (const icon of [
   "src-tauri/icons/icon.ico", // NSIS/Windows
   "src-tauri/icons/icon.icns", // dmg/macOS
 ]) {
-  check(`icon exists: ${icon}`, existsSync(join(root, icon)), "missing file breaks the corresponding bundle");
+  check(
+    `icon exists: ${icon}`,
+    existsSync(join(root, icon)),
+    "missing file breaks the corresponding bundle",
+  );
 }
 
 // --- Rust package version -----------------------------------------------------
 const cargoToml = readFileSync(join(root, "src-tauri/Cargo.toml"), "utf8");
 const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(cargoToml)?.[1];
-check("Cargo.toml version matches package.json", cargoVersion === version, `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`);
+check(
+  "Cargo.toml version matches package.json",
+  cargoVersion === version,
+  `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`,
+);
 
 // --- Capability windows match the windows the shell creates -------------------
 // The bundler allows any label, so a renamed window label merges fine and
 // then fails at runtime when show_surface cannot find the window.
-const capabilities = JSON.parse(readFileSync(join(root, "src-tauri/capabilities/default.json"), "utf8")) as { windows: string[] };
+const capabilities = JSON.parse(
+  readFileSync(join(root, "src-tauri/capabilities/default.json"), "utf8"),
+) as { windows: string[] };
 const shellSource = readFileSync(join(root, "src-tauri/src/shell.rs"), "utf8");
-const createdWindows = [...shellSource.matchAll(/build_window\(\s*app,\s*"([^"]+)"/g)].map((match) => match[1]);
-check("capabilities/default.json parses a window list", Array.isArray(capabilities.windows) && capabilities.windows.length > 0, "windows list missing");
+const createdWindows = [...shellSource.matchAll(/build_window\(\s*app,\s*"([^"]+)"/g)].map(
+  (match) => match[1],
+);
+check(
+  "capabilities/default.json parses a window list",
+  Array.isArray(capabilities.windows) && capabilities.windows.length > 0,
+  "windows list missing",
+);
 // Set-diff instead of sorting: bare sort() compares UTF-16 code units, so
 // ordering (and therefore the comparison) is locale-dependent.
 const missingWindows = createdWindows.filter((window) => !capabilities.windows.includes(window));
@@ -97,18 +139,38 @@ check(
 
 // --- macOS bundle metadata (fails the dmg build late when missing) -------------
 const entitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
-check("Entitlements.plist keeps microphone access", entitlements.includes("com.apple.security.device.audio-input"), "audio-input entitlement missing; dictation has no mic on macOS");
+check(
+  "Entitlements.plist keeps microphone access",
+  entitlements.includes("com.apple.security.device.audio-input"),
+  "audio-input entitlement missing; dictation has no mic on macOS",
+);
 const infoPlist = readFileSync(join(root, "src-tauri/Info.plist"), "utf8");
-for (const key of ["NSMicrophoneUsageDescription", "NSSpeechRecognitionUsageDescription", "NSAccessibilityUsageDescription"]) {
-  check(`Info.plist keeps ${key}`, infoPlist.includes(key), `${key} missing; the OS prompt shows no purpose string`);
+for (const key of [
+  "NSMicrophoneUsageDescription",
+  "NSSpeechRecognitionUsageDescription",
+  "NSAccessibilityUsageDescription",
+]) {
+  check(
+    `Info.plist keeps ${key}`,
+    infoPlist.includes(key),
+    `${key} missing; the OS prompt shows no purpose string`,
+  );
 }
-check("Swift speech bridge source exists", existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")), "build.rs compiles this on macOS; a missing file breaks only the macOS build");
+check(
+  "Swift speech bridge source exists",
+  existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")),
+  "build.rs compiles this on macOS; a missing file breaks only the macOS build",
+);
 check(
   "macOS ad-hoc signs free builds",
   tauriConf.bundle.macOS?.signingIdentity === "-",
   `got ${JSON.stringify(tauriConf.bundle.macOS?.signingIdentity)}; null skips bundle signing and ships a half-signed .app that Gatekeeper reports as "damaged" with no bypass. "-" ad-hoc signs for free; release.yml still overrides with a real Developer ID via APPLE_SIGNING_IDENTITY`,
 );
-check("macOS installer script exists", existsSync(join(root, "scripts/install-macos.sh")), "the continuous release notes point at this one-liner; a missing file breaks the free install path");
+check(
+  "macOS installer script exists",
+  existsSync(join(root, "scripts/install-macos.sh")),
+  "the continuous release notes point at this one-liner; a missing file breaks the free install path",
+);
 
 // --- Windows floor consistency --------------------------------------------------
 const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");
@@ -124,7 +186,9 @@ const windowsConfRaw = readFileSync(join(root, "src-tauri/tauri.windows.conf.jso
 const windowsConfTop = JSON.parse(windowsConfRaw) as Record<string, unknown>;
 check(
   "tauri.windows.conf.json does not fork identity",
-  !("identifier" in windowsConfTop) && !("productName" in windowsConfTop) && !("version" in windowsConfTop),
+  !("identifier" in windowsConfTop) &&
+    !("productName" in windowsConfTop) &&
+    !("version" in windowsConfTop),
   "the Windows overlay must only narrow bundle targets; identity/version stay in tauri.conf.json or releases fork",
 );
 
@@ -136,7 +200,9 @@ check(
 );
 
 // --- Artifact name parity (what CI uploads vs. what releases expect) ---------
-console.info(`info - expected NSIS artifact: src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe`);
+console.info(
+  `info - expected NSIS artifact: src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe`,
+);
 
 if (failures > 0) {
   console.error(`\n${failures} packaging check(s) failed.`);

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 // Exercises the Linux test-bench frontend branches without a Tauri runner:
 // the browser harness derives its platform from navigator.userAgent, so a
@@ -41,6 +41,8 @@ test("settings shows the Linux bench permission copy", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
   await page.getByRole("button", { name: "Permissions", exact: true }).click();
-  await expect(page.getByText("Linux test bench: microphone and speech are simulated")).toBeVisible();
+  await expect(
+    page.getByText("Linux test bench: microphone and speech are simulated"),
+  ).toBeVisible();
   assertNoErrors();
 });

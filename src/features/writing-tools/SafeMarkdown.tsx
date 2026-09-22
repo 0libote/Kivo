@@ -1,6 +1,7 @@
-import { useMemo } from "react";
 import DOMPurify from "dompurify";
 import { Marked, type Tokens } from "marked";
+import { useMemo } from "react";
+import "./markdown.css";
 
 /**
  * AI result body renderer. Block markdown (headings, paragraphs, quotes,

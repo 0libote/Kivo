@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Button } from "../../components/Button";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import * as stylex from "@stylexjs/stylex";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import {
-  NativeError,
   type AppSettings,
   type LocalModelProgress,
   type LocalSpeechModelInfo,
+  NativeError,
 } from "../../types";
 
 interface LocalSpeechModelsProps {
@@ -28,12 +31,12 @@ function languageLabel(count: number): string {
 function ScoreBar({ label, value }: { readonly label: string; readonly value: number }) {
   const clamped = Math.max(0, Math.min(100, value));
   return (
-    <span className="local-model__score" title={`${label}: ${clamped}/100`}>
-      <span className="local-model__score-label">{label}</span>
-      <span className="local-model__bar">
-        <span style={{ width: `${clamped}%` }} />
-      </span>
-    </span>
+    <div title={`${label}: ${clamped}/100`} {...stylex.props(styles.score)}>
+      <span {...stylex.props(styles.scoreLabel)}>{label}</span>
+      <div data-testid="local-model-bar" {...stylex.props(styles.bar)}>
+        <div style={{ width: `${clamped}%` }} {...stylex.props(styles.barFill)} />
+      </div>
+    </div>
   );
 }
 
@@ -74,7 +77,8 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
     };
   }, []);
 
-  const activeModel = settings.localSpeechModel ?? models.find((model) => model.recommended)?.id ?? null;
+  const activeModel =
+    settings.localSpeechModel ?? models.find((model) => model.recommended)?.id ?? null;
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -113,7 +117,9 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
       await save({ localSpeechModel: modelId });
     } catch (error_) {
       if (!cancelled.current.has(modelId)) {
-        setError(error_ instanceof NativeError ? error_.message : "The model could not be downloaded.");
+        setError(
+          error_ instanceof NativeError ? error_.message : "The model could not be downloaded.",
+        );
       }
     } finally {
       cancelled.current.delete(modelId);
@@ -144,17 +150,17 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
   }
 
   return (
-    <div className="local-models">
+    <div {...stylex.props(styles.root)}>
       <input
         aria-label="Search speech models"
-        className="local-models__search"
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Search models…"
         spellCheck={false}
         type="search"
         value={query}
+        {...stylex.props(styles.search)}
       />
-      <div className="local-models__list">
+      <div {...stylex.props(styles.list)}>
         {ordered.map((model) => {
           const downloading = progress[model.id];
           const selected = activeModel === model.id && model.downloaded;
@@ -162,70 +168,250 @@ export function LocalSpeechModels({ settings, save }: LocalSpeechModelsProps) {
           if (downloading && !model.downloaded) {
             actions = (
               <>
-                <progress
-                  aria-label={`Downloading ${model.name}`}
+                <ProgressBar
+                  isLabelHidden
+                  label={`Downloading ${model.name}`}
                   max={downloading.total || model.sizeBytes}
                   value={downloading.downloaded}
+                  xstyle={styles.download}
                 />
-                <Button compact onClick={() => cancel(model.id)}>
-                  Cancel
-                </Button>
+                <Button label="Cancel" onClick={() => cancel(model.id)} size="sm" />
               </>
             );
           } else if (model.downloaded) {
             actions = (
               <>
                 {!selected ? (
-                  <Button compact disabled={busy !== null} onClick={() => void save({ localSpeechModel: model.id })} tone="primary">
-                    Use
-                  </Button>
+                  <Button
+                    isDisabled={busy !== null}
+                    label="Use"
+                    onClick={() => void save({ localSpeechModel: model.id })}
+                    size="sm"
+                    variant="primary"
+                  />
                 ) : null}
-                <Button compact disabled={busy !== null} onClick={() => void remove(model.id)} tone="danger">
-                  Delete
-                </Button>
+                <Button
+                  isDisabled={busy !== null}
+                  label="Delete"
+                  onClick={() => void remove(model.id)}
+                  size="sm"
+                  variant="destructive"
+                />
               </>
             );
           } else {
             actions = (
-              <Button compact disabled={busy !== null || !loaded} onClick={() => void download(model.id)}>
-                {busy === model.id ? "Starting…" : "Download"}
-              </Button>
+              <Button
+                isDisabled={busy !== null || !loaded}
+                label={busy === model.id ? "Starting…" : "Download"}
+                onClick={() => void download(model.id)}
+                size="sm"
+              />
             );
           }
           return (
-            <div className="local-model" key={model.id} data-selected={selected}>
-              <div className="local-model__top">
-                <div className="local-model__labels">
-                  <span className="local-model__name">
+            <div
+              data-selected={selected}
+              data-testid="local-model"
+              key={model.id}
+              {...stylex.props(styles.model, selected && styles.modelSelected)}
+            >
+              <div {...stylex.props(styles.top)}>
+                <div {...stylex.props(styles.labels)}>
+                  <span {...stylex.props(styles.name)}>
                     {model.name}
-                    {model.recommended ? <span className="local-model__badge">Recommended</span> : null}
-                    {selected ? <span className="local-model__badge local-model__badge--active">Selected</span> : null}
+                    {model.recommended ? (
+                      <span {...stylex.props(styles.badge)}>Recommended</span>
+                    ) : null}
+                    {selected ? (
+                      <span {...stylex.props(styles.badge, styles.badgeActive)}>Selected</span>
+                    ) : null}
                   </span>
-                  <span className="local-model__meta">{model.description}</span>
+                  <span {...stylex.props(styles.meta)}>{model.description}</span>
                 </div>
-                <div className="local-model__scores">
+                <div {...stylex.props(styles.scores)}>
                   <ScoreBar label="Accuracy" value={model.accuracy} />
                   <ScoreBar label="Speed" value={model.speed} />
                 </div>
               </div>
-              <div className="local-model__footer">
-                <span className="local-model__tag">{model.family}</span>
-                <span className="local-model__tag">{model.parameters}</span>
-                <span className="local-model__tag">{languageLabel(model.languageCount)}</span>
-                {model.streaming ? <span className="local-model__tag">Streaming</span> : null}
-                <span className="local-model__size">{formatBytes(model.sizeBytes)}</span>
-                <div className="local-model__actions">{actions}</div>
+              <div {...stylex.props(styles.footer)}>
+                <span {...stylex.props(styles.tag)}>{model.family}</span>
+                <span {...stylex.props(styles.tag)}>{model.parameters}</span>
+                <span {...stylex.props(styles.tag)}>{languageLabel(model.languageCount)}</span>
+                {model.streaming ? <span {...stylex.props(styles.tag)}>Streaming</span> : null}
+                <span {...stylex.props(styles.size)}>{formatBytes(model.sizeBytes)}</span>
+                <div {...stylex.props(styles.actions)}>{actions}</div>
               </div>
             </div>
           );
         })}
-        {loaded && ordered.length === 0 ? <p className="setting-empty">No speech models match that search.</p> : null}
+        {loaded && ordered.length === 0 ? (
+          <p {...stylex.props(styles.empty)}>No speech models match that search.</p>
+        ) : null}
       </div>
-      {error ? <p className="settings-note" role="alert">{error}</p> : null}
-      <p className="settings-note">
+      {error ? <Banner status="error" title={error} /> : null}
+      <p {...stylex.props(styles.note)}>
         Models run entirely on this device; audio never leaves it. Accuracy and speed are relative
         scores, and every model is downloaded once.
       </p>
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    display: "grid",
+    gap: "8px",
+  },
+  search: {
+    width: "100%",
+    padding: "7px 10px",
+    userSelect: "text",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+    fontSize: "12.5px",
+    ":focus": {
+      borderColor: "color-mix(in srgb, var(--color-accent) 55%, transparent)",
+      outline: "none",
+    },
+    "::placeholder": {
+      color: "var(--color-text-disabled)",
+    },
+  },
+  list: {
+    display: "grid",
+    gap: "8px",
+  },
+  model: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: "8px",
+    padding: "10px 12px",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+  },
+  modelSelected: {
+    borderColor: "var(--color-accent)",
+  },
+  top: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "12px",
+  },
+  labels: {
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+  },
+  name: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "7px",
+    fontSize: "13px",
+    fontWeight: 620,
+  },
+  badge: {
+    padding: "1px 5px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "9.5px",
+    fontWeight: 700,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "5px",
+  },
+  badgeActive: {
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
+    borderColor: "transparent",
+  },
+  meta: {
+    color: "var(--color-text-secondary)",
+    fontSize: "11.5px",
+    lineHeight: 1.35,
+  },
+  scores: {
+    display: "grid",
+    flexShrink: 0,
+    gap: "4px",
+  },
+  score: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  scoreLabel: {
+    width: "50px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "9.5px",
+    fontWeight: 650,
+    textAlign: "right",
+  },
+  bar: {
+    width: "62px",
+    height: "5px",
+    overflow: "hidden",
+    backgroundColor: "color-mix(in srgb, var(--kivo-text-tertiary) 20%, transparent)",
+    borderRadius: "999px",
+  },
+  barFill: {
+    display: "block",
+    height: "100%",
+    backgroundColor: "var(--color-accent)",
+    borderRadius: "999px",
+  },
+  footer: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "6px",
+  },
+  tag: {
+    padding: "1px 5px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "9.5px",
+    fontWeight: 650,
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "5px",
+  },
+  size: {
+    color: "var(--color-text-secondary)",
+    fontSize: "11px",
+  },
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: "8px",
+    marginInlineStart: "auto",
+  },
+  download: {
+    width: "120px",
+  },
+  empty: {
+    color: "var(--color-text-secondary)",
+    fontSize: "12.5px",
+  },
+  note: {
+    margin: "2px 0 14px",
+    color: "var(--color-text-secondary)",
+    fontSize: "12px",
+    lineHeight: 1.4,
+  },
+});

@@ -1,12 +1,15 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Button } from "../../components/Button";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { ProgressBar } from "@astryxdesign/core/ProgressBar";
+import * as stylex from "@stylexjs/stylex";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import {
-  NativeError,
   type AppSettings,
   type LocalAiInstallProgress,
   type LocalAiServerInfo,
+  NativeError,
 } from "../../types";
 
 interface LocalAiSetupProps {
@@ -65,7 +68,9 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
       await nativeBridge.installLocalAiRuntime();
       setError("Finish the Ollama install, then Refresh to detect it.");
     } catch (error_) {
-      setError(error_ instanceof NativeError ? error_.message : "The installer couldn’t be downloaded.");
+      setError(
+        error_ instanceof NativeError ? error_.message : "The installer couldn’t be downloaded.",
+      );
     } finally {
       setInstalling(false);
       setProgress(null);
@@ -74,21 +79,25 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
 
   let body: ReactNode;
   if (scanning) {
-    body = <p className="settings-note">Checking for local servers…</p>;
+    body = <p {...stylex.props(styles.note)}>Checking for local servers…</p>;
   } else if (running.length > 0) {
     body = (
-      <div className="local-ai__list">
+      <div {...stylex.props(styles.list)}>
         {running.map((server) => {
           const active = settings.aiCustomBaseUrl === server.baseUrl;
           return (
-            <div className="local-ai__row" data-active={active} key={server.id}>
-              <span className="local-ai__labels">
-                <strong>{server.name}</strong>
-                <span>{modelsLabel(server.models.length)}</span>
+            <div key={server.id} {...stylex.props(styles.row, active && styles.rowActive)}>
+              <span {...stylex.props(styles.labels)}>
+                <strong {...stylex.props(styles.name)}>{server.name}</strong>
+                <span {...stylex.props(styles.meta)}>{modelsLabel(server.models.length)}</span>
               </span>
-              <Button compact disabled={disabled || active} onClick={() => void useServer(server)} tone={active ? undefined : "primary"}>
-                {active ? "Selected" : "Use"}
-              </Button>
+              <Button
+                isDisabled={disabled || active}
+                label={active ? "Selected" : "Use"}
+                onClick={() => void useServer(server)}
+                size="sm"
+                variant={active ? "secondary" : "primary"}
+              />
             </div>
           );
         })}
@@ -96,25 +105,91 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
     );
   } else {
     body = (
-      <div className="local-ai__empty">
-        <p className="settings-note">No local server detected. Install Ollama to run models on this computer for free.</p>
-        <Button compact disabled={disabled || installing} onClick={() => void install()}>
-          {installing ? "Downloading…" : "Install Ollama"}
-        </Button>
+      <div {...stylex.props(styles.empty)}>
+        <p {...stylex.props(styles.note)}>
+          No local server detected. Install Ollama to run models on this computer for free.
+        </p>
+        <Button
+          isDisabled={disabled || installing}
+          label={installing ? "Downloading…" : "Install Ollama"}
+          onClick={() => void install()}
+          size="sm"
+        />
         {progress && progress.total > 0 ? (
-          <progress aria-label="Downloading Ollama" max={progress.total} value={progress.downloaded} />
+          <ProgressBar
+            isLabelHidden
+            label="Downloading Ollama"
+            max={progress.total}
+            value={progress.downloaded}
+            xstyle={styles.download}
+          />
         ) : null}
       </div>
     );
   }
 
   return (
-    <div className="local-ai">
+    <div {...stylex.props(styles.root)}>
       {body}
-      <div className="local-ai__footer">
-        <Button compact disabled={disabled || scanning} onClick={scan}>Refresh</Button>
+      <div {...stylex.props(styles.footer)}>
+        <Button isDisabled={disabled || scanning} label="Refresh" onClick={scan} size="sm" />
       </div>
-      {error ? <p className="settings-note" role="alert">{error}</p> : null}
+      {error ? <Banner status="error" title={error} /> : null}
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    display: "grid",
+    gap: "8px",
+  },
+  list: {
+    display: "grid",
+    gap: "8px",
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    padding: "9px 12px",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+  },
+  rowActive: {
+    borderColor: "var(--color-accent)",
+  },
+  labels: {
+    display: "grid",
+    gap: "2px",
+  },
+  name: {
+    fontSize: "13px",
+    fontWeight: 620,
+  },
+  meta: {
+    color: "var(--color-text-secondary)",
+    fontSize: "11.5px",
+  },
+  empty: {
+    display: "grid",
+    gap: "8px",
+    justifyItems: "start",
+  },
+  download: {
+    width: "220px",
+  },
+  footer: {
+    display: "flex",
+  },
+  note: {
+    margin: "2px 0 14px",
+    color: "var(--color-text-secondary)",
+    fontSize: "12px",
+    lineHeight: 1.4,
+  },
+});

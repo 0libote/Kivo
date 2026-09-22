@@ -1,4 +1,11 @@
-export type DictationStatus = "hidden" | "idle" | "starting" | "listening" | "processing" | "success" | "error";
+export type DictationStatus =
+  | "hidden"
+  | "idle"
+  | "starting"
+  | "listening"
+  | "processing"
+  | "success"
+  | "error";
 
 export interface DictationState {
   status: DictationStatus;

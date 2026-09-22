@@ -17,3 +17,5 @@ src-tauri/keys/
 *.p12
 *.cer
 *.key
+
+.playwright-mcp/

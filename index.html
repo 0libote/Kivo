@@ -1,12 +1,24 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-astryx-theme="kivo">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#f4f3ee" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#181b18" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f7f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#19191b" media="(prefers-color-scheme: dark)" />
     <title>Kivo</title>
+    <script type="module">
+      // StyleX dev endpoint: the plugin aggregates compiled styles behind a
+      // virtual CSS file and a runtime that refreshes it on HMR. Production
+      // builds emit the same styles into the normal CSS asset.
+      if (import.meta.env.DEV) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "/virtual:stylex.css";
+        document.head.append(link);
+        import("virtual:stylex:runtime");
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

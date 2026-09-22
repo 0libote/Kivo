@@ -64,7 +64,6 @@ export interface WritingPreset {
   models: string[];
 }
 
-
 /** AI backends (mirrors `AiProvider` in `src-tauri/src/ai/providers.rs`). */
 export type AiProviderId = "gemini" | "zen" | "go" | "custom";
 
@@ -179,7 +178,15 @@ export interface SpeechLanguage {
 
 export interface ApiKeyStatus {
   configured: boolean;
-  connection: "untested" | "testing" | "connected" | "invalid" | "rate-limited" | "offline" | "model" | "blocked";
+  connection:
+    | "untested"
+    | "testing"
+    | "connected"
+    | "invalid"
+    | "rate-limited"
+    | "offline"
+    | "model"
+    | "blocked";
 }
 
 export interface AiModelInfo {

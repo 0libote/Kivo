@@ -82,7 +82,8 @@
 │   │   ├── settings/       # SettingsWindow (5 sections)
 │   │   └── onboarding/     # first-run permission + setup flow
 │   ├── hooks/ platform/    # nativeBridge, useNativeEvent, prefs
-│   └── styles/             # tokens in globals.css, per-surface css
+│   ├── theme/              # kivo.ts (Astryx theme) + built/ artefacts
+│   └── styles/             # app.css (document-level rules only)
 ├── src-tauri/src/
 │   ├── lib.rs main.rs      # composition root, tray, shortcuts, surfaces
 │   ├── commands/           # Tauri invoke handlers + AppCore
@@ -154,7 +155,8 @@ store      = false                  // always — retention off</code></pre>
           <tr><td>Frontend</td><td>Reducers + <code>nativeBridge</code>; generation counters to drop stale async results.</td></tr>
           <tr><td>Rust</td><td>OS calls stay in <code>platform/</code>; everything else goes through adapters.</td></tr>
           <tr><td>Markdown</td><td>Render AI output only through <code>SafeMarkdown</code>.</td></tr>
-          <tr><td>Theming</td><td>Design tokens in <code>globals.css</code>; <code>data-theme</code> / <code>data-platform</code> on root.</td></tr>
+          <tr><td>UI</td><td>Astryx components + StyleX (<code>src/ui</code>); theme source in <code>src/theme/kivo.ts</code>, built artefacts committed.</td></tr>
+          <tr><td>Theming</td><td>Astryx tokens via <code>&lt;Theme&gt;</code>; <code>data-theme</code> / <code>data-platform</code> on root.</td></tr>
         </tbody>
       </table>
 
@@ -163,7 +165,9 @@ store      = false                  // always — retention off</code></pre>
 bun tauri dev     # full app (needs Xcode / VS Build Tools + OS perms)
 
 bun dev           # Vite-only UI harness, no OS integration
-bun typecheck && bun lint && bun test
+bun typecheck && bun lint && bun run test   # tsc, Oxlint, bun test
+bun run format:check                        # Biome; `bun run format` applies
+bun run knip && bun run theme:check         # dead-code + Astryx theme drift
 bun test:ui       # Playwright; isolated port: KIVO_UI_TEST_PORT=1437 bun run test:ui
 bun check:rust && cargo test --manifest-path src-tauri/Cargo.toml</code></pre>
       <p>Physical testing on <strong>both</strong> systems is required before a release: Fn/Globe handling, Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party apps, and signing.</p>

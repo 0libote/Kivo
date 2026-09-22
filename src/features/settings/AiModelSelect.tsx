@@ -1,3 +1,4 @@
+import * as stylex from "@stylexjs/stylex";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import {
   canonicalAiModelIdFor,
@@ -31,7 +32,13 @@ const sharedCaches = new Map<AiProviderId, ProviderCache>();
 function cacheFor(provider: AiProviderId): ProviderCache {
   let cache = sharedCaches.get(provider);
   if (!cache) {
-    cache = { models: fallbackAiModels(provider), refreshing: false, error: null, loaded: false, inflight: null };
+    cache = {
+      models: fallbackAiModels(provider),
+      refreshing: false,
+      error: null,
+      loaded: false,
+      inflight: null,
+    };
     sharedCaches.set(provider, cache);
   }
   return cache;
@@ -42,7 +49,7 @@ const sharedListeners = new Set<() => void>();
 
 function emitShared() {
   sharedVersion += 1;
-  sharedListeners.forEach(listener => listener());
+  sharedListeners.forEach((listener) => listener());
 }
 
 function subscribeShared(listener: () => void): () => void {
@@ -72,7 +79,7 @@ function refreshSharedModels(provider: AiProviderId, silent: boolean): Promise<v
   }
   const task = nativeBridge
     .listAiModels(provider)
-    .then(next => {
+    .then((next) => {
       if (next.length > 0) {
         cache.models = next;
         cache.error = null;
@@ -99,7 +106,11 @@ function refreshSharedModels(provider: AiProviderId, silent: boolean): Promise<v
 
 /** Shared provider model list for pickers (queue rows). */
 export function useAiModelOptions(provider: AiProviderId) {
-  useSyncExternalStore(subscribeShared, () => sharedVersion, () => sharedVersion);
+  useSyncExternalStore(
+    subscribeShared,
+    () => sharedVersion,
+    () => sharedVersion,
+  );
   useEffect(() => {
     const cache = cacheFor(provider);
     if (!cache.loaded) void refreshSharedModels(provider, true);
@@ -145,7 +156,7 @@ export function CustomModelEditor({
 }) {
   const error = customIdError(provider, draft);
   return (
-    <div className="ai-model-select__custom">
+    <div {...stylex.props(styles.custom)}>
       <input
         aria-label="Custom model ID"
         autoCapitalize="none"
@@ -155,8 +166,8 @@ export function CustomModelEditor({
         onBlur={() => {
           if (error == null) onCommit(canonicalAiModelIdFor(provider, draft));
         }}
-        onChange={event => onDraftChange(event.target.value)}
-        onKeyDown={event => {
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={(event) => {
           if (event.key === "Enter" && error == null) {
             event.currentTarget.blur();
           }
@@ -165,12 +176,53 @@ export function CustomModelEditor({
         placeholder={providerDefaultModel(provider)}
         spellCheck={false}
         value={draft}
+        {...stylex.props(styles.input)}
       />
       {error ? (
-        <span className="ai-model-select__error" role="alert">{error}</span>
+        <span role="alert" {...stylex.props(styles.error)}>
+          {error}
+        </span>
       ) : (
-        <span className="ai-model-select__hint">Press Enter to use this model.</span>
+        <span {...stylex.props(styles.hint)}>Press Enter to use this model.</span>
       )}
     </div>
   );
 }
+
+const styles = stylex.create({
+  custom: {
+    display: "grid",
+    gap: "4px",
+  },
+  input: {
+    width: "100%",
+    minHeight: "32px",
+    paddingBlock: 0,
+    paddingInline: "10px",
+    userSelect: "text",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+    boxShadow: "0 1px 2px rgba(17, 19, 23, 0.024)",
+    fontSize: "13px",
+    ":focus-visible": {
+      outline: "2px solid color-mix(in srgb, var(--color-accent) 72%, transparent)",
+      outlineOffset: "1px",
+    },
+    "::placeholder": {
+      color: "var(--kivo-text-tertiary)",
+    },
+  },
+  hint: {
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "11px",
+  },
+  error: {
+    color: "var(--color-error)",
+    fontSize: "11px",
+    lineHeight: 1.35,
+  },
+});

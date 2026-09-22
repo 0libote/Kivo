@@ -7,11 +7,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  extractGenerated,
-  renderGeneratedAiModels,
-  spliceGenerated,
-} from "./ai-model-codegen.ts";
+import { extractGenerated, renderGeneratedAiModels, spliceGenerated } from "./ai-model-codegen.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const rustPath = join(root, "src-tauri/src/ai/mod.rs");

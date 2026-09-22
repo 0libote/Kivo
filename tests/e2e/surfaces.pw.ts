@@ -1,4 +1,5 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
+import type { NativeBridge } from "../../src/platform/native";
 
 function failOnConsoleErrors(page: Page) {
   const errors: string[] = [];
@@ -40,10 +41,18 @@ test("settings navigation and controls work", async ({ page }) => {
   const queueSecond = page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true });
   await expect(queueFirst).toHaveValue("gemini-3.6-flash");
   await expect(queueSecond).toBeVisible();
-  await page.getByRole("button", { name: "Move Gemini 3.6 Flash down (now main model)", exact: true }).click();
-  await expect(page.getByLabel("Model 1 of 2 (main model)", { exact: true })).not.toHaveValue("gemini-3.6-flash");
-  await expect(page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true })).toHaveValue("gemini-3.6-flash");
-  await page.getByRole("button", { name: "Remove Gemini 3.6 Flash (fallback 1)", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Move Gemini 3.6 Flash down (now main model)", exact: true })
+    .click();
+  await expect(page.getByLabel("Model 1 of 2 (main model)", { exact: true })).not.toHaveValue(
+    "gemini-3.6-flash",
+  );
+  await expect(page.getByLabel("Model 2 of 2 (fallback 1)", { exact: true })).toHaveValue(
+    "gemini-3.6-flash",
+  );
+  await page
+    .getByRole("button", { name: "Remove Gemini 3.6 Flash (fallback 1)", exact: true })
+    .click();
   await expect(page.getByLabel("Model 1 of 1 (main model)", { exact: true })).toBeVisible();
   assertNoErrors();
 });
@@ -57,7 +66,8 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   // switch. Recreate that timing so model discovery must use the provider
   // requested by the picker rather than whichever provider is persisted yet.
   await page.evaluate(async () => {
-    const { nativeBridge } = await import("/src/platform/native.ts");
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
     const updateSettings = nativeBridge.updateSettings.bind(nativeBridge);
     nativeBridge.updateSettings = async (patch) => {
       if (patch.aiProvider !== undefined) {
@@ -72,7 +82,9 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   await expect(page.getByLabel("OpenCode API key")).toBeVisible();
   const modelSelect = page.getByLabel("Model 1 of 1 (main model)", { exact: true });
   // Zen rows show their per-1M cost under the picker so the price is visible up front.
-  await expect(page.locator(".ai-model-queue__cost", { hasText: "per 1M" }).first()).toBeVisible();
+  await expect(
+    page.locator('[data-testid="ai-model-cost"]', { hasText: "per 1M" }).first(),
+  ).toBeVisible();
   await providerSelect.selectOption("go");
   await expect(modelSelect).toHaveValue("glm-5.3-flash");
   await expect(modelSelect.locator('option[value="gemini-3.8-flash"]')).toHaveCount(0);
@@ -91,12 +103,14 @@ test("on-device dictation models and local AI setup work", async ({ page }) => {
   await page.getByRole("button", { name: "Dictation", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Dictation" })).toBeVisible();
   await page.getByRole("radio", { name: "On-device", exact: true }).click();
-  await expect(page.getByText("Models run entirely on this device", { exact: false })).toBeVisible();
+  await expect(
+    page.getByText("Models run entirely on this device", { exact: false }),
+  ).toBeVisible();
   // Small is the recommended model and is pre-selected by the harness.
   await expect(page.getByText("Recommended", { exact: true })).toBeVisible();
   // Downloading Tiny marks it installed and selects it.
-  const tinyRow = page.locator(".local-model").filter({ hasText: "Whisper Tiny" });
-  await expect(tinyRow.locator(".local-model__bar")).toHaveCount(2);
+  const tinyRow = page.locator('[data-testid="local-model"]').filter({ hasText: "Whisper Tiny" });
+  await expect(tinyRow.locator('[data-testid="local-model-bar"]')).toHaveCount(2);
   await tinyRow.getByRole("button", { name: "Download" }).click();
   await expect(tinyRow.getByRole("button", { name: "Delete" })).toBeVisible();
   // Dictation cleanup can be pinned to its own model instead of the queue.
@@ -122,7 +136,7 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "About" })).toBeVisible();
   await page.evaluate(async () => {
     const path = "/src/platform/native.ts";
-    const { nativeBridge } = await import(path);
+    const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
     nativeBridge.checkForUpdates = async () => ({
       currentVersion: "0.1.0",
       availableVersion: "0.2.0",
@@ -134,7 +148,11 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
   await page.getByRole("button", { name: "Check now", exact: true }).click();
   await page.getByRole("button", { name: "Download and Install", exact: true }).click();
   await expect(page.getByRole("button", { name: "Restart now", exact: true })).toBeVisible();
-  await expect(page.locator(".settings-notice").getByText("Update installed. Restart Kivo to finish.", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .locator('[data-testid="settings-notice"]')
+      .getByText("Update installed. Restart Kivo to finish.", { exact: true }),
+  ).toBeVisible();
   assertNoErrors();
 });
 
@@ -148,12 +166,16 @@ test("onboarding completes the concise four-screen flow", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Dictation uses system speech" })).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.getByRole("heading", { name: /Add AI/ })).toBeVisible();
-  await expect(page.locator(".shortcut-demo").getByText("Writing Tools", { exact: true })).toBeVisible();
+  await expect(
+    page.locator('[data-testid="shortcut-demo"]').getByText("Writing Tools", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByLabel("Model 1 of 1 (main model)", { exact: true })).toBeVisible();
   assertNoErrors();
 });
 
-test("writing tools supports keyboard custom instructions and informational results", async ({ page }) => {
+test("writing tools supports keyboard custom instructions and informational results", async ({
+  page,
+}) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 344, height: 420 });
   await page.goto("/?surface=writing-tools&harness=1");
@@ -175,7 +197,9 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
 
   await page.getByRole("button", { name: "Add preset", exact: true }).click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Pirate");
-  await page.getByRole("textbox", { name: "What it should do", exact: true }).fill("Rewrite the text like a pirate.");
+  await page
+    .getByRole("textbox", { name: "What it should do", exact: true })
+    .fill("Rewrite the text like a pirate.");
   await page.getByRole("button", { name: "Save preset", exact: true }).click();
   await expect(page.getByText("Pirate", { exact: true })).toBeVisible();
 
@@ -203,11 +227,13 @@ test("flow bar exposes calm listening, processing, and error states", async ({ p
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 260, height: 72 });
   for (const state of ["idle", "starting", "listening", "processing", "error"]) {
-    await page.setViewportSize(state === "error" ? { width: 380, height: 96 } : { width: 164, height: 48 });
+    await page.setViewportSize(
+      state === "error" ? { width: 380, height: 96 } : { width: 164, height: 48 },
+    );
     await page.goto(`/?surface=flow-bar&state=${state}`);
-    await expect(page.locator(".flow-bar")).toBeVisible();
+    await expect(page.locator('[data-testid="flow-bar"]')).toBeVisible();
   }
   await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.locator('.flow-bar[data-state="listening"]')).toBeVisible();
+  await expect(page.locator('[data-testid="flow-bar"][data-state="listening"]')).toBeVisible();
   assertNoErrors();
 });

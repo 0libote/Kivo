@@ -1,13 +1,39 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type Dispatch } from "react";
-import { Button } from "../../components/Button";
+import { Button } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { Spinner } from "@astryxdesign/core/Spinner";
+import * as stylex from "@stylexjs/stylex";
+import { motion } from "motion/react";
+import {
+  type Dispatch,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { Icon } from "../../components/Icon";
-import { Spinner } from "../../components/Spinner";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import { NativeError, type AppSettings, type NativeErrorShape, type Platform, type SelectionContext, type SummarySource, type WritingPreset, type WritingRequest } from "../../types";
-import { SafeMarkdown } from "./SafeMarkdown";
+import {
+  type AppSettings,
+  NativeError,
+  type NativeErrorShape,
+  type Platform,
+  type SelectionContext,
+  type SummarySource,
+  type WritingPreset,
+  type WritingRequest,
+} from "../../types";
 import { builtinActionFor, resolvePresetPrompt, resolveWritingPresets } from "./presets";
-import { initialWritingToolsState, writingToolsReducer, type WritingToolsEvent, type WritingToolsState } from "./state";
+import { SafeMarkdown } from "./SafeMarkdown";
+import {
+  initialWritingToolsState,
+  type WritingToolsEvent,
+  type WritingToolsState,
+  writingToolsReducer,
+} from "./state";
 
 interface WritingToolsPopupProps {
   readonly platform: Platform;
@@ -17,7 +43,10 @@ interface WritingToolsPopupProps {
 type RunAction = (presetId: string) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
 
-function getActiveDefinition(activeAction: string | null, presets: WritingPreset[]): WritingPreset | null {
+function getActiveDefinition(
+  activeAction: string | null,
+  presets: WritingPreset[],
+): WritingPreset | null {
   if (activeAction === null) return null;
   return presets.find((preset) => preset.id === activeAction) ?? null;
 }
@@ -53,7 +82,11 @@ function handleMenuKey(
   dispatch: PopupDispatch,
 ): void {
   const target = event.target as HTMLElement | null;
-  if (target?.matches("input, textarea, summary") || target?.closest("button:not(.writing-action)")) return;
+  if (
+    target?.matches("input, textarea, summary") ||
+    target?.closest("button:not([data-writing-action])")
+  )
+    return;
   const delta = MENU_MOVEMENT[event.key];
   if (delta !== undefined) {
     event.preventDefault();
@@ -109,10 +142,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   const requestInFlight = useRef(false);
   const popup = useRef<HTMLDialogElement>(null);
   const summarizeEnabled = settings.enabledWritingActions.includes("summarize");
-  const presets = useMemo(
-    () => resolveWritingPresets(settings),
-    [settings.enabledWritingActions, settings.writingPresets],
-  );
+  const presets = useMemo(() => resolveWritingPresets(settings), [settings]);
 
   const openWithContext = useCallback(
     (context: SelectionContext) => {
@@ -128,10 +158,13 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     dispatch({ type: "FAIL", message: error.message, canRetry: error.recoverable });
   });
 
-  useEffect(() => () => {
-    requestGeneration.current += 1;
-    requestInFlight.current = false;
-  }, []);
+  useEffect(
+    () => () => {
+      requestGeneration.current += 1;
+      requestInFlight.current = false;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (nativeBridge.isNative) return;
@@ -158,8 +191,15 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
       frame = requestAnimationFrame(() => {
         // Ask for the full content height; the native shell clamps it to the
         // user's maximum, while the harness can still observe menu changes.
-        const content = element.querySelector<HTMLElement>(".writing-menu") ?? element;
-        void nativeBridge.setSurfaceMode("writing-tools", mode, content.scrollHeight + 4).catch(() => {});
+        const content =
+          element.querySelector<HTMLElement>("[data-writing-menu]") ?? element.firstElementChild;
+        void nativeBridge
+          .setSurfaceMode(
+            "writing-tools",
+            mode,
+            (content instanceof HTMLElement ? content.scrollHeight : element.scrollHeight) + 4,
+          )
+          .catch(() => {});
       });
     };
     const observer = new ResizeObserver(reportHeight);
@@ -167,7 +207,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     observer.observe(element);
     mutationObserver.observe(element, { attributes: true, childList: true, subtree: true });
     reportHeight();
-    return () => { observer.disconnect(); mutationObserver.disconnect(); cancelAnimationFrame(frame); };
+    return () => {
+      observer.disconnect();
+      mutationObserver.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [state.mode]);
 
   const close = useCallback(() => {
@@ -181,42 +225,50 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     });
   }, []);
 
-  const runAction = useCallback(async (presetId: string) => {
-    if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
-    if (presetId === "summarize" && !summarizeEnabled) return;
-    const preset = presets.find((candidate) => candidate.id === presetId);
-    if (!preset) return;
-    if (presetId === "custom" && state.mode !== "custom" && state.mode !== "error") {
-      dispatch({ type: "OPEN_CUSTOM" });
-      return;
-    }
-    const request = prepareWritingRequest(state, preset);
-    if (!request) return;
-
-    const generation = ++requestGeneration.current;
-    requestInFlight.current = true;
-
-    dispatch({ type: "RUN", action: presetId });
-    try {
-      const response = await nativeBridge.runWritingAction(request);
-      if (generation !== requestGeneration.current) return;
-      if (response.kind === "result" && typeof response.text === "string") {
-        dispatch({ type: "RESULT", text: response.text, source: response.source, canReplace: response.canReplace });
-      } else {
-        dispatch({ type: "REPLACED" });
-        // Close is best-effort: if hiding fails, show the error instead of a
-        // stuck spinner.
-        void nativeBridge.closeSurface("writing-tools").catch((error: unknown) => {
-          dispatch(failureForError(error));
-        });
+  const runAction = useCallback(
+    async (presetId: string) => {
+      if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
+      if (presetId === "summarize" && !summarizeEnabled) return;
+      const preset = presets.find((candidate) => candidate.id === presetId);
+      if (!preset) return;
+      if (presetId === "custom" && state.mode !== "custom" && state.mode !== "error") {
+        dispatch({ type: "OPEN_CUSTOM" });
+        return;
       }
-    } catch (error) {
-      if (generation !== requestGeneration.current) return;
-      dispatch(failureForError(error));
-    } finally {
-      if (generation === requestGeneration.current) requestInFlight.current = false;
-    }
-  }, [state, summarizeEnabled, presets]);
+      const request = prepareWritingRequest(state, preset);
+      if (!request) return;
+
+      const generation = ++requestGeneration.current;
+      requestInFlight.current = true;
+
+      dispatch({ type: "RUN", action: presetId });
+      try {
+        const response = await nativeBridge.runWritingAction(request);
+        if (generation !== requestGeneration.current) return;
+        if (response.kind === "result" && typeof response.text === "string") {
+          dispatch({
+            type: "RESULT",
+            text: response.text,
+            source: response.source,
+            canReplace: response.canReplace,
+          });
+        } else {
+          dispatch({ type: "REPLACED" });
+          // Close is best-effort: if hiding fails, show the error instead of a
+          // stuck spinner.
+          void nativeBridge.closeSurface("writing-tools").catch((error: unknown) => {
+            dispatch(failureForError(error));
+          });
+        }
+      } catch (error) {
+        if (generation !== requestGeneration.current) return;
+        dispatch(failureForError(error));
+      } finally {
+        if (generation === requestGeneration.current) requestInFlight.current = false;
+      }
+    },
+    [state, summarizeEnabled, presets],
+  );
 
   useWritingHotkeys({
     mode: state.mode,
@@ -229,16 +281,30 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   });
 
   return (
-    <main className="writing-stage" data-platform={platform}>
+    <main data-platform={platform} {...stylex.props(styles.stage)}>
       <dialog
         aria-label="Writing Tools"
-        className="writing-popup"
         data-mode={state.mode}
         onCancel={(event) => event.preventDefault()}
         open
         ref={popup}
+        {...stylex.props(styles.popup)}
       >
-        <PopupContent state={state} presets={presets} close={close} dispatch={dispatch} runAction={runAction} />
+        <motion.div
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          initial={{ opacity: 0, y: -3, scale: 0.985 }}
+          key={state.mode}
+          transition={{ duration: 0.15, ease: [0.2, 0.82, 0.24, 1] }}
+          {...stylex.props(styles.modeSurface)}
+        >
+          <PopupContent
+            state={state}
+            presets={presets}
+            close={close}
+            dispatch={dispatch}
+            runAction={runAction}
+          />
+        </motion.div>
       </dialog>
     </main>
   );
@@ -269,11 +335,30 @@ function PopupContent({ state, presets, close, dispatch, runAction }: PopupConte
         />
       );
     case "summary":
-      return <LinkSummaryView close={close} dispatch={dispatch} runAction={runAction} url={state.sourceText.trim()} />;
+      return (
+        <LinkSummaryView
+          close={close}
+          dispatch={dispatch}
+          runAction={runAction}
+          url={state.sourceText.trim()}
+        />
+      );
     case "custom":
-      return <CustomView customInstruction={state.customInstruction} dispatch={dispatch} runAction={runAction} />;
+      return (
+        <CustomView
+          customInstruction={state.customInstruction}
+          dispatch={dispatch}
+          runAction={runAction}
+        />
+      );
     case "processing":
-      return <ProcessingView close={close} label={state.isLinkSummary ? "Summarizing link" : activeDefinition?.label} hint={state.isLinkSummary ? "Retrieving the page content…" : undefined} />;
+      return (
+        <ProcessingView
+          close={close}
+          label={state.isLinkSummary ? "Summarizing link" : activeDefinition?.label}
+          hint={state.isLinkSummary ? "Retrieving the page content…" : undefined}
+        />
+      );
     case "result":
       return (
         <ResultView
@@ -313,22 +398,44 @@ interface MenuViewProps {
 
 function MenuView(props: MenuViewProps) {
   const { presets, applicationName, close, dispatch, runAction, selectedIndex } = props;
-  const renderAction = (action: WritingPreset, index: number) => <button
-    aria-label={action.label} className="writing-action" data-selected={index === selectedIndex}
-    key={action.id} onClick={() => void runAction(action.id)} onFocus={() => dispatch({ type: "SELECT", index })}
-    role="menuitem" type="button"><Icon name={action.icon} size={16} /><span className="writing-action__copy"><strong>{action.label}</strong><small>{action.description}</small></span></button>;
+  const renderAction = (action: WritingPreset, index: number) => (
+    <button
+      aria-label={action.label}
+      data-selected={index === selectedIndex}
+      data-writing-action
+      key={action.id}
+      onClick={() => void runAction(action.id)}
+      onFocus={() => dispatch({ type: "SELECT", index })}
+      role="menuitem"
+      type="button"
+      {...stylex.props(styles.action, index === selectedIndex && styles.actionSelected)}
+    >
+      <Icon name={action.icon} size={16} />
+      <span {...stylex.props(styles.actionCopy)}>
+        <strong {...stylex.props(styles.actionLabel)}>{action.label}</strong>
+        <small {...stylex.props(styles.actionDescription)}>{action.description}</small>
+      </span>
+    </button>
+  );
   return (
-    <div className="writing-menu">
-      <div className="writing-popup__top" data-tauri-drag-region>
-        <span className="writing-popup__heading">
-          <span className="writing-popup__eyebrow">Writing Tools</span>
-          <span className="writing-popup__context">{applicationName ? `Selected text in ${applicationName}` : "Selected text"}</span>
+    <div data-writing-menu {...stylex.props(styles.menu)}>
+      <div data-tauri-drag-region {...stylex.props(styles.top)}>
+        <span {...stylex.props(styles.heading)}>
+          <span {...stylex.props(styles.eyebrow)}>Writing Tools</span>
+          <span {...stylex.props(styles.context)}>
+            {applicationName ? `Selected text in ${applicationName}` : "Selected text"}
+          </span>
         </span>
-        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button">
-          <Icon name="close" size={14} />
-        </button>
+        <IconButton
+          icon={<Icon name="close" size={14} />}
+          label="Close Writing Tools"
+          onClick={close}
+          size="sm"
+          variant="ghost"
+          xstyle={styles.overlayIconButton}
+        />
       </div>
-      <div aria-label="Writing actions" className="writing-actions" role="menu">
+      <div aria-label="Writing actions" role="menu" {...stylex.props(styles.actions)}>
         {presets.map((preset, index) => renderAction(preset, index))}
       </div>
     </div>
@@ -348,20 +455,20 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
   }, []);
   return (
     <form
-      className="custom-instruction"
       onSubmit={(event) => {
         event.preventDefault();
         void runAction("custom");
       }}
+      {...stylex.props(styles.custom)}
     >
-      <button
-        aria-label="Back to writing actions"
-        className="icon-button custom-instruction__back"
+      <IconButton
+        icon={<Icon name="arrow-left" size={15} />}
+        label="Back to writing actions"
         onClick={() => dispatch({ type: "BACK" })}
-        type="button"
-      >
-        <Icon name="arrow-left" size={15} />
-      </button>
+        size="sm"
+        variant="ghost"
+        xstyle={styles.overlayIconButton}
+      />
       <input
         aria-label="Custom writing instruction"
         autoComplete="off"
@@ -371,41 +478,68 @@ function CustomView({ customInstruction, dispatch, runAction }: CustomViewProps)
         required
         spellCheck
         value={customInstruction}
+        {...stylex.props(styles.customInput)}
       />
-      <button aria-label="Run instruction" className="custom-instruction__submit" disabled={!customInstruction.trim()} type="submit">
+      <Button
+        isDisabled={!customInstruction.trim()}
+        label="Run instruction"
+        size="sm"
+        type="submit"
+        xstyle={styles.customSubmit}
+      >
         ↵
-      </button>
+      </Button>
     </form>
   );
 }
 
 function OpeningView() {
   return (
-    <div aria-live="polite" className="writing-opening">
-      <Spinner label="Opening Writing Tools" />
+    <div aria-live="polite" {...stylex.props(styles.opening)}>
+      <Spinner aria-label="Opening Writing Tools" size="sm" />
     </div>
   );
 }
 
-function ProcessingView({ close, label, hint }: { readonly close: () => void; readonly label: string | undefined; readonly hint?: string }) {
+function ProcessingView({
+  close,
+  label,
+  hint,
+}: {
+  readonly close: () => void;
+  readonly label: string | undefined;
+  readonly hint?: string;
+}) {
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const started = Date.now();
-    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    const timer = window.setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
     return () => window.clearInterval(timer);
   }, []);
 
   const statusLabel = label ?? "Working";
   const status = elapsed > 0 ? `${statusLabel} · ${elapsed}s` : statusLabel;
   return (
-    <div aria-live="polite" className="writing-processing">
-      <Spinner label={`Running ${label ?? "writing action"}`} />
+    <div aria-live="polite" {...stylex.props(styles.processing)}>
+      <Spinner aria-label={`Running ${label ?? "writing action"}`} size="sm" />
       <span>{status}</span>
-      {hint || elapsed >= 4 ? <span className="writing-processing__hint">{hint ?? "Still working. Closing cancels the request."}</span> : null}
-      <button aria-label="Cancel" className="icon-button" onClick={close} type="button">
-        <Icon name="close" size={14} />
-      </button>
+      {hint || elapsed >= 4 ? (
+        <span {...stylex.props(styles.processingHint)}>
+          {hint ?? "Still working. Closing cancels the request."}
+        </span>
+      ) : null}
+      <IconButton
+        icon={<Icon name="close" size={14} />}
+        label="Cancel"
+        onClick={close}
+        size="sm"
+        variant="ghost"
+        xstyle={styles.overlayIconButton}
+      />
     </div>
   );
 }
@@ -423,52 +557,72 @@ function ResultView({ close, canReplace, dispatch, label, resultText, source }: 
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   return (
-    <div className="writing-result">
-      <header className="writing-result__header" data-tauri-drag-region>
+    <div {...stylex.props(styles.result)}>
+      <header data-tauri-drag-region {...stylex.props(styles.resultHeader)}>
         <div>
-          <span className="writing-result__eyebrow">Writing Tools</span>
-          <h1>{label ?? "Result"}</h1>
+          <span {...stylex.props(styles.resultEyebrow)}>Writing Tools</span>
+          <h1 {...stylex.props(styles.resultTitle)}>{label ?? "Result"}</h1>
         </div>
-        <button aria-label="Close result" className="icon-button" onClick={close} type="button">
-          <Icon name="close" size={14} />
-        </button>
+        <IconButton
+          icon={<Icon name="close" size={14} />}
+          label="Close result"
+          onClick={close}
+          size="sm"
+          variant="ghost"
+          xstyle={styles.overlayIconButton}
+        />
       </header>
       {source ? (
-        <div className="writing-result__source">
+        <div {...stylex.props(styles.resultSource)}>
           <span>{source.kind === "youtube" ? "YouTube" : "Website"}</span>
-          <span title={source.url}>{source.url}</span>
+          <span title={source.url} {...stylex.props(styles.resultSourceUrl)}>
+            {source.url}
+          </span>
         </div>
       ) : null}
-      <div className="writing-result__body" aria-live="polite">
+      <div aria-live="polite" {...stylex.props(styles.resultBody)}>
         <SafeMarkdown>{resultText}</SafeMarkdown>
       </div>
-      {copyError ? <p className="writing-result__error" role="alert">{copyError}</p> : null}
-      <footer className="writing-result__footer">
+      {copyError ? (
+        <p role="alert" {...stylex.props(styles.resultError)}>
+          {copyError}
+        </p>
+      ) : null}
+      <footer {...stylex.props(styles.resultFooter)}>
         <Button
-          compact
-          icon={copied ? "check" : "copy"}
+          icon={<Icon name={copied ? "check" : "copy"} size={14} />}
+          label={copied ? "Copied" : "Copy"}
           onClick={() => {
             setCopyError(null);
-            void nativeBridge.copyText(resultText).then(() => {
-              setCopied(true);
-              window.setTimeout(() => setCopied(false), 1000);
-            }).catch(() => setCopyError("The result could not be copied. Select the text and copy it manually."));
+            void nativeBridge
+              .copyText(resultText)
+              .then(() => {
+                setCopied(true);
+                window.setTimeout(() => setCopied(false), 1000);
+              })
+              .catch(() =>
+                setCopyError(
+                  "The result could not be copied. Select the text and copy it manually.",
+                ),
+              );
           }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </Button>
+          size="sm"
+          variant="secondary"
+        />
         {canReplace ? (
           <Button
-            compact
+            label="Replace"
             onClick={() => {
-              void nativeBridge.replaceWritingResult(resultText).then(close).catch((error: unknown) => {
-                dispatch(failureForError(error));
-              });
+              void nativeBridge
+                .replaceWritingResult(resultText)
+                .then(close)
+                .catch((error: unknown) => {
+                  dispatch(failureForError(error));
+                });
             }}
-            tone="primary"
-          >
-            Replace
-          </Button>
+            size="sm"
+            variant="primary"
+          />
         ) : null}
       </footer>
     </div>
@@ -485,24 +639,38 @@ interface ErrorViewProps {
   readonly runAction: RunAction;
 }
 
-function ErrorView({ activeAction, canRetry, close, dispatch, hasContext, message, runAction }: ErrorViewProps) {
+function ErrorView({
+  activeAction,
+  canRetry,
+  close,
+  dispatch,
+  hasContext,
+  message,
+  runAction,
+}: ErrorViewProps) {
   const canShowRetry = canRetry && activeAction !== null;
   return (
-    <div aria-live="assertive" className="writing-error">
+    <div aria-live="assertive" {...stylex.props(styles.error)}>
       <Icon name="error" size={20} />
       <div>
-        <strong>Writing Tools</strong>
-        <span>{message}</span>
+        <strong {...stylex.props(styles.errorTitle)}>Writing Tools</strong>
+        <span {...stylex.props(styles.errorMessage)}>{message}</span>
       </div>
-      <div className="writing-error__actions">
+      <div {...stylex.props(styles.errorActions)}>
         {canShowRetry && activeAction ? (
-          <Button compact onClick={() => void runAction(activeAction)}>
-            Retry
-          </Button>
+          <Button
+            label="Retry"
+            onClick={() => void runAction(activeAction)}
+            size="sm"
+            variant="secondary"
+          />
         ) : null}
-        <Button compact onClick={hasContext ? () => dispatch({ type: "BACK" }) : close}>
-          {hasContext ? "Back" : "Close"}
-        </Button>
+        <Button
+          label={hasContext ? "Back" : "Close"}
+          onClick={hasContext ? () => dispatch({ type: "BACK" }) : close}
+          size="sm"
+          variant="secondary"
+        />
       </div>
     </div>
   );
@@ -531,24 +699,50 @@ interface LinkSummaryViewProps {
 function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewProps) {
   const hostname = new URL(url).hostname.replace(/^www\./u, "");
   return (
-    <form className="writing-summary" onSubmit={(event) => { event.preventDefault(); void runAction("summarize"); }}>
-      <header className="writing-popup__header" data-tauri-drag-region>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        void runAction("summarize");
+      }}
+      {...stylex.props(styles.summary)}
+    >
+      <header data-tauri-drag-region {...stylex.props(styles.popupHeader)}>
         <span>Summarize link</span>
-        <button aria-label="Close Writing Tools" className="icon-button" onClick={close} type="button"><Icon name="close" size={14} /></button>
+        <IconButton
+          icon={<Icon name="close" size={14} />}
+          label="Close Writing Tools"
+          onClick={close}
+          size="sm"
+          variant="ghost"
+          xstyle={styles.overlayIconButton}
+        />
       </header>
-      <div className="writing-summary__link">
+      <div {...stylex.props(styles.summaryLink)}>
         <Icon name="connection" size={17} />
-        <span><strong>{hostname}</strong><small title={url}>{url}</small></span>
+        <span {...stylex.props(styles.summaryLinkCopy)}>
+          <strong {...stylex.props(styles.summaryLinkHost)}>{hostname}</strong>
+          <small title={url} {...stylex.props(styles.summaryLinkUrl)}>
+            {url}
+          </small>
+        </span>
       </div>
-      <footer className="writing-summary__footer">
-        <Button compact onClick={() => dispatch({ type: "BACK" })}>Other actions</Button>
-        <Button compact tone="primary" type="submit">Summarize</Button>
+      <footer {...stylex.props(styles.summaryFooter)}>
+        <Button
+          label="Other actions"
+          onClick={() => dispatch({ type: "BACK" })}
+          size="sm"
+          variant="secondary"
+        />
+        <Button label="Summarize" size="sm" type="submit" variant="primary" />
       </footer>
     </form>
   );
 }
 
-function prepareWritingRequest(state: WritingToolsState, preset: WritingPreset): WritingRequest | undefined {
+function prepareWritingRequest(
+  state: WritingToolsState,
+  preset: WritingPreset,
+): WritingRequest | undefined {
   const typed = state.customInstruction.trim();
   const isQuickCustom = preset.id === "custom";
   if (isQuickCustom && !typed) return undefined;
@@ -570,3 +764,335 @@ function prepareWritingRequest(state: WritingToolsState, preset: WritingPreset):
     sourceKind,
   };
 }
+
+const overlayBorder = "rgba(255, 255, 255, 0.09)";
+
+const styles = stylex.create({
+  stage: {
+    display: "flex",
+    width: "100%",
+    height: "100%",
+    padding: "2px",
+    alignItems: "flex-end",
+    justifyContent: "center",
+  },
+  popup: {
+    position: "relative",
+    inset: "auto",
+    width: "100%",
+    maxWidth: "none",
+    maxHeight: "calc(100vh - 4px)",
+    margin: "0",
+    padding: "0",
+    overflow: "hidden",
+    color: "var(--kivo-overlay-text)",
+    backgroundColor: "var(--kivo-overlay-bg)",
+    backdropFilter: "blur(20px) saturate(1.15)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--kivo-overlay-border)",
+    borderRadius: "18px",
+    boxShadow: "var(--kivo-overlay-shadow)",
+  },
+  modeSurface: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: "0",
+    maxHeight: "calc(100vh - 4px)",
+  },
+  menu: {
+    maxHeight: "calc(100vh - 4px)",
+    overflowY: "auto",
+  },
+  top: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "8px",
+    paddingBlockStart: "13px",
+    paddingInline: "14px",
+    paddingBlockEnd: "5px",
+    color: "var(--kivo-overlay-text-secondary)",
+  },
+  heading: {
+    display: "grid",
+    gap: "1px",
+  },
+  eyebrow: {
+    color: "var(--kivo-overlay-text)",
+    fontSize: "12px",
+    fontWeight: 700,
+    letterSpacing: "0.01em",
+  },
+  context: {
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "10.5px",
+  },
+  actions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "3px",
+    paddingBlock: "2px",
+    paddingBlockEnd: "7px",
+    paddingInline: "9px",
+  },
+  action: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    minHeight: "38px",
+    paddingBlock: "6px",
+    paddingInline: "9px",
+    textAlign: "left",
+    color: "var(--kivo-overlay-text)",
+    backgroundColor: "transparent",
+    borderWidth: "0",
+    borderRadius: "var(--radius-element, 10px)",
+    fontSize: "14px",
+    cursor: "pointer",
+    transitionProperty: "background-color",
+    transitionDuration: "120ms",
+    ":hover": {
+      backgroundColor: "var(--kivo-overlay-hover)",
+    },
+  },
+  actionSelected: {
+    backgroundColor: "var(--kivo-overlay-hover)",
+    boxShadow: "inset 2px 0 var(--kivo-overlay-text)",
+  },
+  actionCopy: {
+    display: "grid",
+    gap: "1px",
+    minWidth: "0",
+  },
+  actionLabel: {
+    fontSize: "12.5px",
+    fontWeight: 650,
+  },
+  actionDescription: {
+    display: "none",
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "11px",
+    lineHeight: "1.25",
+  },
+  overlayIconButton: {
+    color: "var(--kivo-overlay-text-tertiary)",
+    flexShrink: 0,
+    ":hover": {
+      color: "var(--kivo-overlay-text)",
+      backgroundColor: "var(--kivo-overlay-hover)",
+    },
+  },
+  custom: {
+    display: "grid",
+    gridTemplateColumns: "28px 1fr 30px",
+    alignItems: "center",
+    gap: "4px",
+    height: "50px",
+    padding: "7px",
+  },
+  customInput: {
+    width: "100%",
+    minHeight: "32px",
+    paddingInline: "10px",
+    color: "var(--kivo-overlay-text)",
+    backgroundColor: "transparent",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "transparent",
+    borderRadius: "var(--radius-inner, 6px)",
+    ":focus": {
+      outline: "none",
+      borderColor: "var(--kivo-overlay-border-strong)",
+    },
+    "::placeholder": {
+      color: "var(--kivo-overlay-text-tertiary)",
+    },
+  },
+  customSubmit: {
+    height: "28px",
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
+    borderColor: "transparent",
+  },
+  opening: {
+    display: "grid",
+    placeItems: "center",
+    height: "64px",
+    color: "var(--kivo-overlay-text-secondary)",
+  },
+  processing: {
+    display: "grid",
+    gridTemplateColumns: "17px 1fr 26px",
+    alignItems: "center",
+    gap: "8px",
+    minHeight: "50px",
+    paddingBlock: "7px",
+    paddingInlineStart: "13px",
+    paddingInlineEnd: "8px",
+    color: "var(--kivo-overlay-text-secondary)",
+  },
+  processingHint: {
+    gridColumn: "2 / 3",
+    margin: "0",
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "11px",
+  },
+  result: {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "calc(100vh - 4px)",
+  },
+  resultHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    flexShrink: 0,
+    paddingBlockStart: "15px",
+    paddingInlineStart: "16px",
+    paddingInlineEnd: "11px",
+    paddingBlockEnd: "11px",
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: overlayBorder,
+  },
+  resultEyebrow: {
+    display: "block",
+    marginBottom: "2px",
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "10px",
+    fontWeight: 700,
+    letterSpacing: "0.045em",
+    textTransform: "uppercase",
+  },
+  resultTitle: {
+    margin: "0",
+    fontSize: "16px",
+    fontWeight: 650,
+    letterSpacing: "-0.02em",
+  },
+  resultSource: {
+    display: "flex",
+    flexShrink: 0,
+    gap: "7px",
+    minWidth: "0",
+    paddingBlockStart: "8px",
+    paddingInline: "15px",
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "11px",
+  },
+  resultBody: {
+    minHeight: "0",
+    maxHeight: "252px",
+    padding: "13px 15px",
+    overflow: "auto",
+    overflowWrap: "anywhere",
+    userSelect: "text",
+  },
+  resultSourceUrl: {
+    minWidth: "0",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    userSelect: "text",
+  },
+  resultError: {
+    margin: "0",
+    paddingBlockStart: "6px",
+    paddingInline: "15px",
+    color: "var(--color-error)",
+    fontSize: "12px",
+  },
+  resultFooter: {
+    display: "flex",
+    flexShrink: 0,
+    justifyContent: "flex-end",
+    gap: "7px",
+    paddingBlock: "10px",
+    paddingInline: "11px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: overlayBorder,
+    backgroundColor: "rgba(255, 255, 255, 0.035)",
+  },
+  error: {
+    display: "grid",
+    gridTemplateColumns: "24px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "10px",
+    minHeight: "86px",
+    maxHeight: "calc(100vh - 4px)",
+    padding: "12px",
+    overflowY: "auto",
+    color: "var(--color-error)",
+  },
+  errorTitle: {
+    display: "block",
+    color: "var(--kivo-overlay-text)",
+  },
+  errorMessage: {
+    display: "block",
+    marginTop: "2px",
+    color: "var(--kivo-overlay-text-secondary)",
+    fontSize: "12px",
+  },
+  errorActions: {
+    display: "flex",
+    flexWrap: "wrap",
+    gridColumn: "2",
+    gap: "6px",
+  },
+  summary: {
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "calc(100vh - 4px)",
+    overflowY: "auto",
+  },
+  popupHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexShrink: 0,
+    height: "34px",
+    paddingInlineStart: "12px",
+    paddingInlineEnd: "7px",
+    color: "var(--kivo-overlay-text-secondary)",
+    fontSize: "11.5px",
+    fontWeight: 600,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: overlayBorder,
+  },
+  summaryLink: {
+    display: "flex",
+    alignItems: "center",
+    gap: "11px",
+    margin: "12px",
+    padding: "12px",
+    color: "var(--kivo-overlay-text-secondary)",
+    backgroundColor: "var(--kivo-overlay-selected)",
+    borderRadius: "10px",
+  },
+  summaryLinkCopy: {
+    display: "grid",
+    gap: "2px",
+    minWidth: "0",
+  },
+  summaryLinkHost: {
+    fontSize: "12.5px",
+  },
+  summaryLinkUrl: {
+    minWidth: "0",
+    overflow: "hidden",
+    color: "var(--kivo-overlay-text-tertiary)",
+    fontSize: "10.5px",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  summaryFooter: {
+    display: "flex",
+    justifyContent: "space-between",
+    paddingInline: "12px",
+    paddingBlockEnd: "12px",
+  },
+});

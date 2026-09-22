@@ -1,0 +1,53 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc", "react", "jsx-a11y", "import", "promise"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "perf": "warn"
+  },
+  "env": {
+    "browser": true,
+    "es2024": true
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "node_modules/**",
+    "playwright-report/**",
+    "test-results/**",
+    "coverage/**",
+    "src-tauri/**",
+    "src/theme/built/**",
+    "website/**"
+  ],
+  "rules": {
+    "typescript/consistent-type-imports": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-unused-vars": [
+      "error",
+      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+    ],
+    "react/react-in-jsx-scope": "off",
+    "import/no-unassigned-import": "off",
+    "unicorn/require-module-specifiers": "off",
+    "unicorn/no-array-sort": "off",
+    "no-console": "off",
+    "no-underscore-dangle": ["error", { "allow": ["__TAURI_INTERNALS__"] }],
+    "promise/always-return": "off",
+    "promise/no-callback-in-promise": "off",
+    "react/set-state-in-effect": "off",
+    "react/no-array-index-key": "off",
+    "jsx-a11y/no-autofocus": "off"
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.test.ts", "tests/**/*.ts", "scripts/**/*.ts", "*.config.ts"],
+      "rules": {
+        "typescript/no-explicit-any": "off",
+        "no-shadow": "off",
+        "no-await-in-loop": "off",
+        "unicorn/prefer-set-has": "off"
+      }
+    }
+  ]
+}

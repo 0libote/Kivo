@@ -20,6 +20,7 @@ import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER } from "../types";
  * literals so the intentional mirror doesn't trip duplication gates; the
  * parity script verifies this section is freshly generated.
  */
+// biome-ignore format: generated — `bun run generate:models` owns this block.
 // @generated ai-models start
 const FALLBACK_ROWS: Array<[id: string, label: string, description: string]> = [
   ["gemini-3.8-flash", "Gemini 3.8 Flash", "Default. Fastest frontier text model, tuned for low-latency edits."],
@@ -32,11 +33,14 @@ const FALLBACK_ROWS: Array<[id: string, label: string, description: string]> = [
 ];
 // @generated ai-models end
 
-export const FALLBACK_AI_MODELS: AiModelInfo[] = FALLBACK_ROWS.map(
-  ([id, label, description]) => ({ id, label, description }),
-);
+export const FALLBACK_AI_MODELS: AiModelInfo[] = FALLBACK_ROWS.map(([id, label, description]) => ({
+  id,
+  label,
+  description,
+}));
 
 /** GENERATED from `BLOCKED_MODEL_SUBSTRINGS` in `src-tauri/src/ai/mod.rs` — do not edit by hand. */
+// biome-ignore format: generated — `bun run generate:models` owns this block.
 // @generated ai-models start
 export const BLOCKED_AI_MODEL_PATTERNS = [
   "tts",
@@ -62,7 +66,7 @@ export function canonicalAiModelId(id: string): string {
 
 export function isBlockedAiModelId(id: string): boolean {
   const canonical = canonicalAiModelId(id).toLowerCase();
-  return BLOCKED_AI_MODEL_PATTERNS.some(pattern => canonical.includes(pattern));
+  return BLOCKED_AI_MODEL_PATTERNS.some((pattern) => canonical.includes(pattern));
 }
 
 export function isUsableAiModelId(id: string): boolean {
@@ -73,17 +77,9 @@ export function isUsableAiModelId(id: string): boolean {
   return !isBlockedAiModelId(canonical);
 }
 
-export function isKnownAiModel(id: string): boolean {
-  return FALLBACK_AI_MODELS.some(model => model.id === canonicalAiModelId(id));
-}
-
 export function normalizeAiModel(id: string | null | undefined): string {
   const canonical = canonicalAiModelId(id ?? "");
   return isUsableAiModelId(canonical) ? canonical : DEFAULT_AI_MODEL;
-}
-
-export function aiModelLabel(id: string, models: AiModelInfo[] = FALLBACK_AI_MODELS): string {
-  return models.find(model => model.id === canonicalAiModelId(id))?.label ?? canonicalAiModelId(id);
 }
 
 export function normalizeAiProvider(value: string | null | undefined): AiProviderId {
@@ -124,8 +120,8 @@ export function isUsableOpenCodeModelId(id: string): boolean {
   if (!canonical.includes("-") && !canonical.includes(".")) return false;
   if (!/^[a-z0-9._-]+$/.test(canonical)) return false;
   const lower = canonical.toLowerCase();
-  return BLOCKED_AI_MODEL_PATTERNS.filter(pattern => pattern !== "omni").every(
-    pattern => !lower.includes(pattern),
+  return BLOCKED_AI_MODEL_PATTERNS.filter((pattern) => pattern !== "omni").every(
+    (pattern) => !lower.includes(pattern),
   );
 }
 
@@ -181,7 +177,8 @@ export function normalizeAiModelList(provider: AiProviderId, ids: readonly strin
   for (const id of ids) {
     if (models.length >= MAX_AI_MODELS) break;
     const canonical = canonicalAiModelIdFor(provider, id);
-    if (canonical === "" || seen.has(canonical) || !isUsableAiModelIdFor(provider, canonical)) continue;
+    if (canonical === "" || seen.has(canonical) || !isUsableAiModelIdFor(provider, canonical))
+      continue;
     seen.add(canonical);
     models.push(canonical);
   }
@@ -190,7 +187,10 @@ export function normalizeAiModelList(provider: AiProviderId, ids: readonly strin
 }
 
 /** Migrate a pre-queue primary/backup pair into a queue. */
-export function legacyModelList(primary: string | null | undefined, backup: string | null | undefined): string[] {
+export function legacyModelList(
+  primary: string | null | undefined,
+  backup: string | null | undefined,
+): string[] {
   const ids: string[] = [];
   if (primary != null && primary.trim() !== "") ids.push(primary);
   if (backup != null && backup.trim() !== "") ids.push(backup);
@@ -203,7 +203,8 @@ export function migrateAiModels(stored: {
   aiModel?: unknown;
   aiBackupModel?: unknown;
 }): string[] {
-  if (Array.isArray(stored.aiModels)) return stored.aiModels.filter((id): id is string => typeof id === "string");
+  if (Array.isArray(stored.aiModels))
+    return stored.aiModels.filter((id): id is string => typeof id === "string");
   const primary = typeof stored.aiModel === "string" ? stored.aiModel : null;
   const backup = typeof stored.aiBackupModel === "string" ? stored.aiBackupModel : null;
   return legacyModelList(primary, backup);
@@ -244,41 +245,185 @@ export function normalizeAiBaseUrl(raw: string | null | undefined): string | nul
 type PricedRow = [id: string, label: string, blurb: string, cost: string, billing: string];
 
 const ZEN_FALLBACK_ROWS: PricedRow[] = [
-  ["gemini-3.8-flash", "Gemini 3.8 Flash", "Default. Same fast model as the Gemini provider.", "$1.50 in / $7.50 out per 1M", "zen_credits"],
-  ["glm-5.3-flash", "GLM 5.3 Flash", "Cheapest pay-as-you-go coding model.", "$0.15 in / $0.50 out per 1M", "zen_credits"],
-  ["kimi-k2.7-code", "Kimi K2.7 Code", "Strong open coding model, good default for Zen.", "$0.95 in / $4.00 out per 1M", "zen_credits"],
-  ["deepseek-v4-flash", "DeepSeek V4 Flash", "Fast budget reasoning for everyday edits.", "$0.14 in / $0.28 out per 1M", "zen_credits"],
-  ["qwen3.7-plus", "Qwen 3.7 Plus", "Balanced quality for longer rewrites.", "$0.40 in / $1.60 out per 1M", "zen_credits"],
-  ["minimax-m3", "MiniMax M3", "Capable all-rounder for writing tasks.", "$0.30 in / $1.20 out per 1M", "zen_credits"],
-  ["gpt-5.4-nano", "GPT 5.4 Nano", "Tiny OpenAI model for quick cleanup.", "$0.20 in / $1.25 out per 1M", "zen_credits"],
-  ["gpt-5.6-luna", "GPT 5.6 Luna", "Efficient OpenAI model with low rates.", "$0.20 in / $1.20 out per 1M", "zen_credits"],
-  ["claude-haiku-4-5", "Claude Haiku 4.5", "Fast Anthropic model for short tasks.", "$1.00 in / $5.00 out per 1M", "zen_credits"],
+  [
+    "gemini-3.8-flash",
+    "Gemini 3.8 Flash",
+    "Default. Same fast model as the Gemini provider.",
+    "$1.50 in / $7.50 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "glm-5.3-flash",
+    "GLM 5.3 Flash",
+    "Cheapest pay-as-you-go coding model.",
+    "$0.15 in / $0.50 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "kimi-k2.7-code",
+    "Kimi K2.7 Code",
+    "Strong open coding model, good default for Zen.",
+    "$0.95 in / $4.00 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "deepseek-v4-flash",
+    "DeepSeek V4 Flash",
+    "Fast budget reasoning for everyday edits.",
+    "$0.14 in / $0.28 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "qwen3.7-plus",
+    "Qwen 3.7 Plus",
+    "Balanced quality for longer rewrites.",
+    "$0.40 in / $1.60 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "minimax-m3",
+    "MiniMax M3",
+    "Capable all-rounder for writing tasks.",
+    "$0.30 in / $1.20 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "gpt-5.4-nano",
+    "GPT 5.4 Nano",
+    "Tiny OpenAI model for quick cleanup.",
+    "$0.20 in / $1.25 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "gpt-5.6-luna",
+    "GPT 5.6 Luna",
+    "Efficient OpenAI model with low rates.",
+    "$0.20 in / $1.20 out per 1M",
+    "zen_credits",
+  ],
+  [
+    "claude-haiku-4-5",
+    "Claude Haiku 4.5",
+    "Fast Anthropic model for short tasks.",
+    "$1.00 in / $5.00 out per 1M",
+    "zen_credits",
+  ],
   ["big-pickle", "Big Pickle", "Free stealth model, limited time.", "Free", "free"],
 ];
 
 const GO_FALLBACK_ROWS: PricedRow[] = [
-  ["glm-5.3-flash", "GLM 5.3 Flash", "Recommended. Fast, high-throughput model for short writing tasks.", "$0.15 in / $0.50 out per 1M · $60/mo incl.", "go_subscription"],
-  ["qwen3.8-flash", "Qwen 3.8 Flash", "Fast alternative with a low monthly usage cost.", "$0.15 in / $0.47 out per 1M · $30/mo incl.", "go_subscription"],
-  ["deepseek-v4.1-flash", "DeepSeek V4.1 Flash", "Fast budget alternative for everyday edits.", "$0.15 in / $0.60 out per 1M · $60/mo incl.", "go_subscription"],
-  ["kimi-k2.7-code", "Kimi K2.7 Code", "Strong coding model; prose edits may take longer.", "$0.95 in / $4.00 out per 1M · $60/mo incl.", "go_subscription"],
-  ["deepseek-v4-flash", "DeepSeek V4 Flash", "Fast budget reasoning for everyday edits.", "$0.15 in / $0.60 out per 1M · $30/mo incl.", "go_subscription"],
-  ["qwen3.7-plus", "Qwen 3.7 Plus", "Balanced quality for longer rewrites.", "$0.40 in / $1.60 out per 1M · $60/mo incl.", "go_subscription"],
-  ["minimax-m3", "MiniMax M3", "Capable all-rounder for writing tasks.", "$0.30 in / $1.20 out per 1M · $60/mo incl.", "go_subscription"],
-  ["mimo-v2.5", "MiMo V2.5", "Very high request allowance per dollar.", "$0.14 in / $0.28 out per 1M · $60/mo incl.", "go_subscription"],
-  ["muse-spark-1.3-contributor", "Muse Spark 1.3", "Meta contributor tier; trains on prompts.", "$0.10 in / $0.20 out per 1M · $60/mo incl.", "go_subscription"],
-  ["gpt-5.6-luna", "GPT 5.6 Luna", "Efficient OpenAI model on Go.", "$0.20 in / $1.20 out per 1M · $15/mo incl.", "go_subscription"],
-  ["grok-4.6", "Grok 4.6", "xAI flagship, smaller allowance.", "$2.00 in / $6.00 out per 1M · $15/mo incl.", "go_subscription"],
+  [
+    "glm-5.3-flash",
+    "GLM 5.3 Flash",
+    "Recommended. Fast, high-throughput model for short writing tasks.",
+    "$0.15 in / $0.50 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "qwen3.8-flash",
+    "Qwen 3.8 Flash",
+    "Fast alternative with a low monthly usage cost.",
+    "$0.15 in / $0.47 out per 1M · $30/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "deepseek-v4.1-flash",
+    "DeepSeek V4.1 Flash",
+    "Fast budget alternative for everyday edits.",
+    "$0.15 in / $0.60 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "kimi-k2.7-code",
+    "Kimi K2.7 Code",
+    "Strong coding model; prose edits may take longer.",
+    "$0.95 in / $4.00 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "deepseek-v4-flash",
+    "DeepSeek V4 Flash",
+    "Fast budget reasoning for everyday edits.",
+    "$0.15 in / $0.60 out per 1M · $30/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "qwen3.7-plus",
+    "Qwen 3.7 Plus",
+    "Balanced quality for longer rewrites.",
+    "$0.40 in / $1.60 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "minimax-m3",
+    "MiniMax M3",
+    "Capable all-rounder for writing tasks.",
+    "$0.30 in / $1.20 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "mimo-v2.5",
+    "MiMo V2.5",
+    "Very high request allowance per dollar.",
+    "$0.14 in / $0.28 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "muse-spark-1.3-contributor",
+    "Muse Spark 1.3",
+    "Meta contributor tier; trains on prompts.",
+    "$0.10 in / $0.20 out per 1M · $60/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "gpt-5.6-luna",
+    "GPT 5.6 Luna",
+    "Efficient OpenAI model on Go.",
+    "$0.20 in / $1.20 out per 1M · $15/mo incl.",
+    "go_subscription",
+  ],
+  [
+    "grok-4.6",
+    "Grok 4.6",
+    "xAI flagship, smaller allowance.",
+    "$2.00 in / $6.00 out per 1M · $15/mo incl.",
+    "go_subscription",
+  ],
   ["union-alpha", "Union Alpha", "Free stealth model, limited time.", "Free", "free"],
 ];
 
 const CUSTOM_FALLBACK_ROWS: PricedRow[] = [
-  ["llama3.1", "Llama 3.1", "Ollama default example — `ollama pull llama3.1` first.", "Local · free", "local"],
-  ["qwen2.5-coder:7b", "Qwen 2.5 Coder 7B", "Good local coding model — `ollama pull qwen2.5-coder:7b`.", "Local · free", "local"],
-  ["gemma-3n-e4b", "Gemma 3n E4B", "Small local model, e.g. via LM Studio.", "Local · free", "local"],
+  [
+    "llama3.1",
+    "Llama 3.1",
+    "Ollama default example — `ollama pull llama3.1` first.",
+    "Local · free",
+    "local",
+  ],
+  [
+    "qwen2.5-coder:7b",
+    "Qwen 2.5 Coder 7B",
+    "Good local coding model — `ollama pull qwen2.5-coder:7b`.",
+    "Local · free",
+    "local",
+  ],
+  [
+    "gemma-3n-e4b",
+    "Gemma 3n E4B",
+    "Small local model, e.g. via LM Studio.",
+    "Local · free",
+    "local",
+  ],
 ];
 
 function pricedRows(rows: PricedRow[]): AiModelInfo[] {
-  return rows.map(([id, label, description, cost, billing]) => ({ id, label, description, cost, billing }));
+  return rows.map(([id, label, description, cost, billing]) => ({
+    id,
+    label,
+    description,
+    cost,
+    billing,
+  }));
 }
 
 export const ZEN_FALLBACK_MODELS: AiModelInfo[] = pricedRows(ZEN_FALLBACK_ROWS);
@@ -296,9 +441,4 @@ export function fallbackAiModels(provider: AiProviderId): AiModelInfo[] {
     default:
       return FALLBACK_AI_MODELS;
   }
-}
-
-/** One-line cost summary for the picker, e.g. `$0.95 in / $4.00 out per 1M`. */
-export function aiModelCostLabel(model: AiModelInfo): string | null {
-  return model.cost ?? null;
 }
