@@ -1,16 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import {
-  FALLBACK_AI_MODELS,
-  GO_FALLBACK_MODELS,
-  MAX_AI_MODELS,
-  ZEN_FALLBACK_MODELS,
   CUSTOM_FALLBACK_MODELS,
+  FALLBACK_AI_MODELS,
   fallbackAiModels,
+  GO_FALLBACK_MODELS,
   isUsableAiModelId,
   isUsableAiModelIdFor,
   isUsableCustomModelId,
   isUsableOpenCodeModelId,
   legacyModelList,
+  MAX_AI_MODELS,
   migrateAiModels,
   normalizeAiBaseUrl,
   normalizeAiModel,
@@ -18,8 +17,9 @@ import {
   normalizeAiModelList,
   normalizeAiProvider,
   providerDefaultModel,
+  ZEN_FALLBACK_MODELS,
 } from "./ai/models";
-import { formatShortcut } from "./components/ShortcutRecorder";
+import { formatShortcut } from "./components/shortcut";
 import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER, defaultSettings } from "./types";
 
 // Cross-platform default parity. The Rust side owns the same defaults
@@ -65,9 +65,11 @@ describe("platform defaults parity", () => {
 
   it("only lists text models that work with Kivo", () => {
     expect(FALLBACK_AI_MODELS.length).toBeGreaterThan(0);
-    expect(FALLBACK_AI_MODELS.some(model => model.id === DEFAULT_AI_MODEL)).toBe(true);
+    expect(FALLBACK_AI_MODELS.some((model) => model.id === DEFAULT_AI_MODEL)).toBe(true);
     for (const model of FALLBACK_AI_MODELS) {
-      expect(model.id).not.toMatch(/tts|live|audio|image|banana|transcribe|embed|omni|computer-use/i);
+      expect(model.id).not.toMatch(
+        /tts|live|audio|image|banana|transcribe|embed|omni|computer-use/i,
+      );
       expect(model.id).not.toMatch(/^veo|^lyria/);
       expect(model.id).not.toContain("deep-research");
       expect(model.id).not.toContain("robotics");
@@ -82,7 +84,7 @@ describe("platform defaults parity", () => {
       "veo-3.1-preview",
       "lyria-3-pro-preview",
     ]) {
-      expect(FALLBACK_AI_MODELS.some(model => model.id === excluded)).toBe(false);
+      expect(FALLBACK_AI_MODELS.some((model) => model.id === excluded)).toBe(false);
       expect(normalizeAiModel(excluded)).toBe(DEFAULT_AI_MODEL);
     }
     expect(normalizeAiModel("  gemini-2.5-flash  ")).toBe("gemini-2.5-flash");
@@ -150,14 +152,18 @@ describe("platform defaults parity", () => {
   });
 
   it("normalizes failover queues like the Rust backend", () => {
-    expect(normalizeAiModelList("gemini", ["  gemini-2.5-flash  ", "models/gemini-4.0-flash"])).toEqual([
-      "gemini-2.5-flash",
-      "gemini-4.0-flash",
-    ]);
+    expect(
+      normalizeAiModelList("gemini", ["  gemini-2.5-flash  ", "models/gemini-4.0-flash"]),
+    ).toEqual(["gemini-2.5-flash", "gemini-4.0-flash"]);
     // Duplicates collapse, junk drops out, emptied queues fall back.
-    expect(normalizeAiModelList("gemini", ["gemini-2.5-flash", "gemini-2.5-flash", "has spaces!", "gemini-2.5-flash-preview-tts"])).toEqual([
-      "gemini-2.5-flash",
-    ]);
+    expect(
+      normalizeAiModelList("gemini", [
+        "gemini-2.5-flash",
+        "gemini-2.5-flash",
+        "has spaces!",
+        "gemini-2.5-flash-preview-tts",
+      ]),
+    ).toEqual(["gemini-2.5-flash"]);
     expect(normalizeAiModelList("gemini", [])).toEqual([DEFAULT_AI_MODEL]);
     // Long queues truncate to the cap.
     const many = Array.from({ length: MAX_AI_MODELS + 3 }, (_, n) => `gemini-test-${n}-flash`);
@@ -178,25 +184,32 @@ describe("platform defaults parity", () => {
     ]);
     expect(legacyModelList("gemini-2.5-flash", null)).toEqual(["gemini-2.5-flash"]);
     expect(migrateAiModels({ aiModels: ["a-1", "b-2"] })).toEqual(["a-1", "b-2"]);
-    expect(migrateAiModels({ aiModel: "gemini-2.5-flash", aiBackupModel: "gemini-2.5-flash-lite" })).toEqual([
-      "gemini-2.5-flash",
-      "gemini-2.5-flash-lite",
-    ]);
+    expect(
+      migrateAiModels({ aiModel: "gemini-2.5-flash", aiBackupModel: "gemini-2.5-flash-lite" }),
+    ).toEqual(["gemini-2.5-flash", "gemini-2.5-flash-lite"]);
     expect(migrateAiModels({})).toEqual([]);
   });
 
   it("shows a cost for every Zen/Go/Custom fallback model", () => {
     expect(fallbackAiModels("gemini")).toBe(FALLBACK_AI_MODELS);
-    for (const [provider, rows] of [["zen", ZEN_FALLBACK_MODELS], ["go", GO_FALLBACK_MODELS], ["custom", CUSTOM_FALLBACK_MODELS]] as const) {
+    for (const [provider, rows] of [
+      ["zen", ZEN_FALLBACK_MODELS],
+      ["go", GO_FALLBACK_MODELS],
+      ["custom", CUSTOM_FALLBACK_MODELS],
+    ] as const) {
       expect(rows.length).toBeGreaterThan(0);
       expect(fallbackAiModels(provider)).toBe(rows);
       for (const model of rows) {
         expect(model.cost).toBeTruthy();
         expect(model.billing).toBeTruthy();
       }
-      expect(rows.some(model => model.id === providerDefaultModel(provider))).toBe(true);
+      expect(rows.some((model) => model.id === providerDefaultModel(provider))).toBe(true);
     }
-    expect(ZEN_FALLBACK_MODELS.find(model => model.id === "glm-5.3-flash")?.cost).toBe("$0.15 in / $0.50 out per 1M");
-    expect(GO_FALLBACK_MODELS.find(model => model.id === "glm-5.3-flash")?.cost).toBe("$0.15 in / $0.50 out per 1M · $60/mo incl.");
+    expect(ZEN_FALLBACK_MODELS.find((model) => model.id === "glm-5.3-flash")?.cost).toBe(
+      "$0.15 in / $0.50 out per 1M",
+    );
+    expect(GO_FALLBACK_MODELS.find((model) => model.id === "glm-5.3-flash")?.cost).toBe(
+      "$0.15 in / $0.50 out per 1M · $60/mo incl.",
+    );
   });
 });

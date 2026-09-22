@@ -16,6 +16,7 @@ import {
   type AppContext,
   type AppSettings,
   type DictationSnapshot,
+  defaultSettings,
   type LocalAiInstallProgress,
   type LocalAiServerInfo,
   type LocalModelProgress,
@@ -31,7 +32,6 @@ import {
   type Surface,
   type WritingRequest,
   type WritingResponse,
-  defaultSettings,
 } from "../types";
 
 type NativeEventMap = {
@@ -94,14 +94,21 @@ export interface NativeBridge {
   copyText(text: string): Promise<void>;
   closeSurface(surface: Surface): Promise<void>;
   showSurface(surface: Surface): Promise<void>;
-  setSurfaceMode(surface: "writing-tools", mode: "menu" | "custom" | "summary" | "processing" | "result" | "error", height?: number): Promise<void>;
+  setSurfaceMode(
+    surface: "writing-tools",
+    mode: "menu" | "custom" | "summary" | "processing" | "result" | "error",
+    height?: number,
+  ): Promise<void>;
   completeOnboarding(): Promise<void>;
   setPaused(paused: boolean): Promise<void>;
   checkForUpdates(): Promise<UpdateResult>;
   installUpdate(): Promise<void>;
   restartApp(): Promise<void>;
   openExternal(url: string): Promise<void>;
-  on<K extends keyof NativeEventMap>(event: K, handler: (payload: NativeEventMap[K]) => void): Promise<UnlistenFn>;
+  on<K extends keyof NativeEventMap>(
+    event: K,
+    handler: (payload: NativeEventMap[K]) => void,
+  ): Promise<UnlistenFn>;
 }
 
 export function detectedPlatform(): Platform {
@@ -131,7 +138,8 @@ function normalizeError(error: unknown): NativeError {
     const shape = error as Partial<NativeErrorShape>;
     return new NativeError({
       code: shape.code ?? "native-error",
-      message: typeof shape.message === "string" ? shape.message : "The operation couldn’t be completed.",
+      message:
+        typeof shape.message === "string" ? shape.message : "The operation couldn’t be completed.",
       recoverable: shape.recoverable,
     });
   }
@@ -163,17 +171,23 @@ class TauriBridge implements NativeBridge {
   clearDictationRecovery = () => call<void>("clear_dictation_recovery");
   updateSettings = (patch: Partial<AppSettings>) => call<AppSettings>("update_settings", { patch });
   getPermissions = () => call<PermissionStatus[]>("get_permission_statuses");
-  requestPermission = (kind: PermissionKind) => call<PermissionStatus[]>("request_permission", { kind });
-  openPermissionSettings = (kind: PermissionKind) => call<void>("open_permission_settings", { kind });
+  requestPermission = (kind: PermissionKind) =>
+    call<PermissionStatus[]>("request_permission", { kind });
+  openPermissionSettings = (kind: PermissionKind) =>
+    call<void>("open_permission_settings", { kind });
   resetPermissionGrants = () => call<PermissionStatus[]>("reset_permission_grants");
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
   listLocalSpeechModels = () => call<LocalSpeechModelInfo[]>("list_local_speech_models");
-  downloadLocalSpeechModel = (modelId: string) => call<LocalSpeechModelInfo[]>("download_local_speech_model", { modelId });
-  cancelLocalSpeechModelDownload = (modelId: string) => call<void>("cancel_local_speech_model_download", { modelId });
-  deleteLocalSpeechModel = (modelId: string) => call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
+  downloadLocalSpeechModel = (modelId: string) =>
+    call<LocalSpeechModelInfo[]>("download_local_speech_model", { modelId });
+  cancelLocalSpeechModelDownload = (modelId: string) =>
+    call<void>("cancel_local_speech_model_download", { modelId });
+  deleteLocalSpeechModel = (modelId: string) =>
+    call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
-  listAiModels = (provider?: AiProviderId) => call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
+  listAiModels = (provider?: AiProviderId) =>
+    call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
   detectLocalAiServers = () => call<LocalAiServerInfo[]>("detect_local_ai_servers");
   installLocalAiRuntime = () => call<void>("install_local_ai_runtime");
   getApiKeyStatus = () => call<ApiKeyStatus>("get_api_key_status");
@@ -185,12 +199,17 @@ class TauriBridge implements NativeBridge {
   cancelDictation = () => call<void>("cancel_dictation");
   retryDictation = () => call<void>("retry_dictation");
   getWritingContext = () => call<SelectionContext>("get_writing_context");
-  runWritingAction = (request: WritingRequest) => call<WritingResponse>("run_writing_action", { request });
+  runWritingAction = (request: WritingRequest) =>
+    call<WritingResponse>("run_writing_action", { request });
   replaceWritingResult = (text: string) => call<void>("replace_writing_result", { text });
   copyText = (text: string) => call<void>("copy_text", { text });
   closeSurface = (surface: Surface) => call<void>("close_surface", { surface });
   showSurface = (surface: Surface) => call<void>("show_surface", { surface });
-  setSurfaceMode = (surface: "writing-tools", mode: "menu" | "custom" | "summary" | "processing" | "result" | "error", height?: number) => call<void>("set_surface_mode", { surface, mode, height });
+  setSurfaceMode = (
+    surface: "writing-tools",
+    mode: "menu" | "custom" | "summary" | "processing" | "result" | "error",
+    height?: number,
+  ) => call<void>("set_surface_mode", { surface, mode, height });
   completeOnboarding = () => call<void>("complete_onboarding");
   setPaused = (paused: boolean) => call<void>("set_paused", { paused });
   checkForUpdates = () => call<UpdateResult>("check_for_updates");
@@ -244,9 +263,17 @@ class MockBridge implements NativeBridge {
     const portable = this.platform !== "macos";
     this.permissions = [
       { kind: "accessibility", state: "not-determined", required: true },
-      { kind: "input-monitoring", state: this.platform === "macos" ? "not-determined" : "unavailable", required: false },
+      {
+        kind: "input-monitoring",
+        state: this.platform === "macos" ? "not-determined" : "unavailable",
+        required: false,
+      },
       { kind: "microphone", state: portable ? "granted" : "not-determined", required: true },
-      { kind: "speech-recognition", state: portable ? "granted" : "not-determined", required: this.platform === "macos" },
+      {
+        kind: "speech-recognition",
+        state: portable ? "granted" : "not-determined",
+        required: this.platform === "macos",
+      },
     ];
   }
 
@@ -260,8 +287,12 @@ class MockBridge implements NativeBridge {
     };
   }
 
-  async getDictationRecovery(): Promise<string | null> { return null; }
-  async clearDictationRecovery() { this.emit("recovery-changed", null); }
+  async getDictationRecovery(): Promise<string | null> {
+    return null;
+  }
+  async clearDictationRecovery() {
+    this.emit("recovery-changed", null);
+  }
 
   async getSettings() {
     return structuredClone(this.settings);
@@ -348,16 +379,146 @@ class MockBridge implements NativeBridge {
   // Illustrative catalog mirroring src-tauri/src/speech/model_store.rs; the
   // harness never downloads anything.
   private readonly localModels: LocalSpeechModelInfo[] = [
-    { id: "whisper-tiny", name: "Whisper Tiny", description: "Fastest and smallest.", sizeBytes: 44_211_616, recommended: false, downloaded: false, accuracy: 61, speed: 100, family: "Whisper", parameters: "38M", languageCount: 99, streaming: false },
-    { id: "whisper-base", name: "Whisper Base", description: "A light, responsive model.", sizeBytes: 63_786_048, recommended: false, downloaded: false, accuracy: 71, speed: 99, family: "Whisper", parameters: "73M", languageCount: 99, streaming: false },
-    { id: "whisper-small", name: "Whisper Small", description: "Recommended.", sizeBytes: 193_749_056, recommended: true, downloaded: true, accuracy: 80, speed: 78, family: "Whisper", parameters: "242M", languageCount: 99, streaming: false },
-    { id: "whisper-medium", name: "Whisper Medium", description: "Higher accuracy.", sizeBytes: 504_102_848, recommended: false, downloaded: false, accuracy: 84, speed: 42, family: "Whisper", parameters: "764M", languageCount: 99, streaming: false },
-    { id: "whisper-large-v3-turbo", name: "Whisper Large v3 Turbo", description: "Best quality.", sizeBytes: 536_069_728, recommended: false, downloaded: false, accuracy: 88, speed: 35, family: "Whisper", parameters: "809M", languageCount: 100, streaming: false },
-    { id: "parakeet-tdt-0.6b-v3", name: "Parakeet TDT 0.6B v3", description: "Fast across 25 European languages.", sizeBytes: 739_508_576, recommended: false, downloaded: false, accuracy: 88, speed: 79, family: "Parakeet", parameters: "0.6B", languageCount: 25, streaming: false },
-    { id: "canary-180m-flash", name: "Canary 180M Flash", description: "Tiny and instant.", sizeBytes: 218_447_552, recommended: false, downloaded: false, accuracy: 88, speed: 98, family: "Canary", parameters: "180M", languageCount: 4, streaming: false },
-    { id: "moonshine-base", name: "Moonshine Base", description: "Small English model.", sizeBytes: 77_476_480, recommended: false, downloaded: false, accuracy: 80, speed: 99, family: "Moonshine", parameters: "62M", languageCount: 1, streaming: false },
-    { id: "sensevoice-small", name: "SenseVoice Small", description: "Strong on Asian languages.", sizeBytes: 252_684_608, recommended: false, downloaded: false, accuracy: 81, speed: 98, family: "SenseVoice", parameters: "234M", languageCount: 5, streaming: false },
-    { id: "cohere-transcribe-03-2026", name: "Cohere Transcribe", description: "Highest accuracy, slower.", sizeBytes: 1_770_270_208, recommended: false, downloaded: false, accuracy: 92, speed: 63, family: "Cohere", parameters: "2.0B", languageCount: 14, streaming: false },
+    {
+      id: "whisper-tiny",
+      name: "Whisper Tiny",
+      description: "Fastest and smallest.",
+      sizeBytes: 44_211_616,
+      recommended: false,
+      downloaded: false,
+      accuracy: 61,
+      speed: 100,
+      family: "Whisper",
+      parameters: "38M",
+      languageCount: 99,
+      streaming: false,
+    },
+    {
+      id: "whisper-base",
+      name: "Whisper Base",
+      description: "A light, responsive model.",
+      sizeBytes: 63_786_048,
+      recommended: false,
+      downloaded: false,
+      accuracy: 71,
+      speed: 99,
+      family: "Whisper",
+      parameters: "73M",
+      languageCount: 99,
+      streaming: false,
+    },
+    {
+      id: "whisper-small",
+      name: "Whisper Small",
+      description: "Recommended.",
+      sizeBytes: 193_749_056,
+      recommended: true,
+      downloaded: true,
+      accuracy: 80,
+      speed: 78,
+      family: "Whisper",
+      parameters: "242M",
+      languageCount: 99,
+      streaming: false,
+    },
+    {
+      id: "whisper-medium",
+      name: "Whisper Medium",
+      description: "Higher accuracy.",
+      sizeBytes: 504_102_848,
+      recommended: false,
+      downloaded: false,
+      accuracy: 84,
+      speed: 42,
+      family: "Whisper",
+      parameters: "764M",
+      languageCount: 99,
+      streaming: false,
+    },
+    {
+      id: "whisper-large-v3-turbo",
+      name: "Whisper Large v3 Turbo",
+      description: "Best quality.",
+      sizeBytes: 536_069_728,
+      recommended: false,
+      downloaded: false,
+      accuracy: 88,
+      speed: 35,
+      family: "Whisper",
+      parameters: "809M",
+      languageCount: 100,
+      streaming: false,
+    },
+    {
+      id: "parakeet-tdt-0.6b-v3",
+      name: "Parakeet TDT 0.6B v3",
+      description: "Fast across 25 European languages.",
+      sizeBytes: 739_508_576,
+      recommended: false,
+      downloaded: false,
+      accuracy: 88,
+      speed: 79,
+      family: "Parakeet",
+      parameters: "0.6B",
+      languageCount: 25,
+      streaming: false,
+    },
+    {
+      id: "canary-180m-flash",
+      name: "Canary 180M Flash",
+      description: "Tiny and instant.",
+      sizeBytes: 218_447_552,
+      recommended: false,
+      downloaded: false,
+      accuracy: 88,
+      speed: 98,
+      family: "Canary",
+      parameters: "180M",
+      languageCount: 4,
+      streaming: false,
+    },
+    {
+      id: "moonshine-base",
+      name: "Moonshine Base",
+      description: "Small English model.",
+      sizeBytes: 77_476_480,
+      recommended: false,
+      downloaded: false,
+      accuracy: 80,
+      speed: 99,
+      family: "Moonshine",
+      parameters: "62M",
+      languageCount: 1,
+      streaming: false,
+    },
+    {
+      id: "sensevoice-small",
+      name: "SenseVoice Small",
+      description: "Strong on Asian languages.",
+      sizeBytes: 252_684_608,
+      recommended: false,
+      downloaded: false,
+      accuracy: 81,
+      speed: 98,
+      family: "SenseVoice",
+      parameters: "234M",
+      languageCount: 5,
+      streaming: false,
+    },
+    {
+      id: "cohere-transcribe-03-2026",
+      name: "Cohere Transcribe",
+      description: "Highest accuracy, slower.",
+      sizeBytes: 1_770_270_208,
+      recommended: false,
+      downloaded: false,
+      accuracy: 92,
+      speed: 63,
+      family: "Cohere",
+      parameters: "2.0B",
+      languageCount: 14,
+      streaming: false,
+    },
   ];
 
   async listLocalSpeechModels() {
@@ -369,7 +530,14 @@ class MockBridge implements NativeBridge {
     if (model && !model.downloaded) {
       const steps = 4;
       for (let step = 1; step <= steps; step += 1) {
-        this.emit("local-model-progress", { modelId, downloaded: Math.round((model.sizeBytes * step) / steps), total: model.sizeBytes });
+        this.emit("local-model-progress", {
+          modelId,
+          downloaded: Math.round((model.sizeBytes * step) / steps),
+          total: model.sizeBytes,
+        });
+        // The harness simulates a sequential download progress stream;
+        // parallelizing would remove the intermediate states the UI renders.
+        // oxlint-disable-next-line no-await-in-loop
         await delay(180);
       }
       model.downloaded = true;
@@ -391,10 +559,46 @@ class MockBridge implements NativeBridge {
 
   async listAiProviders(): Promise<AiProviderInfo[]> {
     return [
-      { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
-      { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-      { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-      { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
+      {
+        id: "gemini",
+        label: "Gemini",
+        keyUrl: "https://aistudio.google.com/app/apikey",
+        keyOptional: false,
+        defaultModel: "gemini-3.8-flash",
+        defaultBaseUrl: null,
+        supportsLinkSummary: true,
+        testUsesQuota: true,
+      },
+      {
+        id: "zen",
+        label: "OpenCode Zen",
+        keyUrl: "https://opencode.ai/auth",
+        keyOptional: false,
+        defaultModel: "gemini-3.8-flash",
+        defaultBaseUrl: null,
+        supportsLinkSummary: false,
+        testUsesQuota: true,
+      },
+      {
+        id: "go",
+        label: "OpenCode Go",
+        keyUrl: "https://opencode.ai/auth",
+        keyOptional: false,
+        defaultModel: "glm-5.3-flash",
+        defaultBaseUrl: null,
+        supportsLinkSummary: false,
+        testUsesQuota: true,
+      },
+      {
+        id: "custom",
+        label: "Custom (OpenAI-compatible)",
+        keyUrl: null,
+        keyOptional: true,
+        defaultModel: "llama3.1",
+        defaultBaseUrl: "http://localhost:11434/v1",
+        supportsLinkSummary: false,
+        testUsesQuota: true,
+      },
     ];
   }
 
@@ -404,9 +608,27 @@ class MockBridge implements NativeBridge {
 
   async detectLocalAiServers(): Promise<LocalAiServerInfo[]> {
     return [
-      { id: "ollama", name: "Ollama", baseUrl: "http://localhost:11434/v1", running: false, models: [] },
-      { id: "lmstudio", name: "LM Studio", baseUrl: "http://localhost:1234/v1", running: false, models: [] },
-      { id: "llamacpp", name: "llama.cpp", baseUrl: "http://localhost:8080/v1", running: false, models: [] },
+      {
+        id: "ollama",
+        name: "Ollama",
+        baseUrl: "http://localhost:11434/v1",
+        running: false,
+        models: [],
+      },
+      {
+        id: "lmstudio",
+        name: "LM Studio",
+        baseUrl: "http://localhost:1234/v1",
+        running: false,
+        models: [],
+      },
+      {
+        id: "llamacpp",
+        name: "llama.cpp",
+        baseUrl: "http://localhost:8080/v1",
+        running: false,
+        models: [],
+      },
     ];
   }
 
@@ -425,7 +647,10 @@ class MockBridge implements NativeBridge {
   async saveApiKey(apiKey: string) {
     await delay(250);
     const provider = this.settings.aiProvider;
-    this.apiKeyStatuses[provider] = { configured: apiKey.trim().length > 8, connection: "untested" };
+    this.apiKeyStatuses[provider] = {
+      configured: apiKey.trim().length > 8,
+      connection: "untested",
+    };
     return this.currentKeyStatus();
   }
 
@@ -501,7 +726,10 @@ class MockBridge implements NativeBridge {
       return { kind: "result", text: "A short greeting that asks how the other person is doing." };
     }
     if (request.action === "key-points") {
-      return { kind: "result", text: "- Opens with a casual greeting\n- Asks how the recipient is doing" };
+      return {
+        kind: "result",
+        text: "- Opens with a casual greeting\n- Asks how the recipient is doing",
+      };
     }
     // Presets that show a result instead of replacing the selection.
     if (request.replacesSelection === false) {
@@ -567,7 +795,9 @@ function delay(milliseconds: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-export const nativeBridge: NativeBridge = window.__TAURI_INTERNALS__ ? new TauriBridge() : new MockBridge();
+export const nativeBridge: NativeBridge = window.__TAURI_INTERNALS__
+  ? new TauriBridge()
+  : new MockBridge();
 
 export function initialAppContext(): AppContext {
   // Synchronous guess so each window paints on load instead of waiting for

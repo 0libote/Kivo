@@ -1,6 +1,5 @@
-// @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
-import { formatShortcut } from "../components/ShortcutRecorder";
+import { afterEach, describe, expect, it } from "bun:test";
+import { formatShortcut } from "../components/shortcut";
 import { defaultSettings } from "../types";
 import { detectedPlatform, surfaceFromLabel } from "./native";
 
@@ -48,12 +47,7 @@ describe("detectedPlatform", () => {
 
 describe("surfaceFromLabel", () => {
   it("maps every native window label", () => {
-    for (const surface of [
-      "flow-bar",
-      "writing-tools",
-      "settings",
-      "onboarding",
-    ] as const) {
+    for (const surface of ["flow-bar", "writing-tools", "settings", "onboarding"] as const) {
       window.history.replaceState({}, "", "/");
       expect(surfaceFromLabel(surface)).toBe(surface);
     }
@@ -76,13 +70,7 @@ describe("surfaceFromLabel", () => {
 
 describe("shortcut labels cover both platforms", () => {
   it("renders every macOS modifier as a symbol", () => {
-    expect(formatShortcut("Meta+Alt+Shift+Ctrl+X", "macos")).toEqual([
-      "⌘",
-      "⌥",
-      "⇧",
-      "⌃",
-      "X",
-    ]);
+    expect(formatShortcut("Meta+Alt+Shift+Ctrl+X", "macos")).toEqual(["⌘", "⌥", "⇧", "⌃", "X"]);
   });
 
   it("labels Win on Windows and never leaks Meta", () => {

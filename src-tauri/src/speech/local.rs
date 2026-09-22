@@ -18,7 +18,7 @@ use std::{
 };
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rubato::{FftFixedIn, Resampler};
+use rubato::{Fft, FixedSync, Resampler};
 use transcribe_cpp::{Model, ModelOptions, RunOptions, Session};
 
 use super::{
@@ -142,9 +142,11 @@ impl SpeechEngine for LocalSpeechEngine {
     fn microphones(&self) -> SpeechFuture<'_, Result<Vec<MicrophoneDevice>, SpeechError>> {
         Box::pin(async {
             let host = cpal::default_host();
+            // cpal 0.18 replaced Device::name() with Device::description().
             let default_name = host
                 .default_input_device()
-                .and_then(|device| device.name().ok());
+                .and_then(|device| device.description().ok())
+                .map(|description| description.name().to_owned());
             let mut devices = vec![MicrophoneDevice {
                 id: "default".into(),
                 name: "System Default".into(),
@@ -152,13 +154,16 @@ impl SpeechEngine for LocalSpeechEngine {
             }];
             if let Ok(inputs) = host.input_devices() {
                 for device in inputs {
-                    let Ok(name) = device.name() else { continue };
+                    let Ok(description) = device.description() else {
+                        continue;
+                    };
+                    let name = description.name().to_owned();
                     if default_name.as_deref() == Some(name.as_str()) {
                         continue;
                     }
                     devices.push(MicrophoneDevice {
                         id: name.clone(),
-                        name: name.clone(),
+                        name,
                         is_default: false,
                     });
                 }
@@ -315,7 +320,12 @@ fn run_capture(
             .input_devices()
             .ok()
             .and_then(|mut devices| {
-                devices.find(|device| device.name().ok().as_deref() == Some(name.as_str()))
+                devices.find(|device| {
+                    device
+                        .description()
+                        .map(|description| description.name() == name)
+                        .unwrap_or(false)
+                })
             })
             .or_else(|| host.default_input_device()),
         None => host.default_input_device(),
@@ -367,9 +377,9 @@ fn run_capture(
     macro_rules! open {
         ($sample:ty) => {
             device.build_input_stream(
-                &stream_config,
+                stream_config.clone(),
                 callback!($sample),
-                move |_error: cpal::StreamError| {},
+                move |_error: cpal::Error| {},
                 None,
             )
         };
@@ -395,7 +405,7 @@ fn run_capture(
         let _ = started.send(Err(SpeechError::MicrophoneUnavailable));
         return;
     }
-    let _ = started.send(Ok(stream_config.sample_rate.0));
+    let _ = started.send(Ok(stream_config.sample_rate));
     while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -446,31 +456,30 @@ fn resample_to_16k(samples: &[f32], input_rate: u32) -> Vec<f32> {
         return samples.to_vec();
     }
     let chunk = 1024usize;
-    let Ok(mut resampler) = FftFixedIn::<f32>::new(
+    // rubato 5 renamed FftFixedIn to Fft and takes the fixed side explicitly.
+    // process_all resamples the whole captured utterance in one call and
+    // trims the resampler delay, replacing the old per-chunk loop.
+    let Ok(mut resampler) = Fft::<f32>::new(
         input_rate as usize,
         TARGET_SAMPLE_RATE as usize,
         chunk,
         1,
-        1,
+        FixedSync::Input,
     ) else {
         return samples.to_vec();
     };
-    let mut output = Vec::with_capacity(
-        samples.len() * TARGET_SAMPLE_RATE as usize / input_rate as usize + chunk,
-    );
-    let mut index = 0;
-    while index + chunk <= samples.len() {
-        if let Ok(processed) = resampler.process(&[&samples[index..index + chunk]], None) {
-            output.extend_from_slice(&processed[0]);
-        }
-        index += chunk;
+    let input = match rubato::audioadapter_buffers::direct::InterleavedSlice::new(
+        samples,
+        1,
+        samples.len(),
+    ) {
+        Ok(input) => input,
+        Err(_) => return samples.to_vec(),
+    };
+    match resampler.process_all(&input, samples.len(), None) {
+        Ok(processed) => processed.take_data(),
+        Err(_) => samples.to_vec(),
     }
-    if index < samples.len()
-        && let Ok(processed) = resampler.process_partial(Some(&[&samples[index..]]), None)
-    {
-        output.extend_from_slice(&processed[0]);
-    }
-    output
 }
 
 #[cfg(test)]

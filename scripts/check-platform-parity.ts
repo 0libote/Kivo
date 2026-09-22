@@ -15,10 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  extractGenerated,
-  renderGeneratedAiModels,
-} from "./ai-model-codegen.ts";
+import { extractGenerated, renderGeneratedAiModels } from "./ai-model-codegen.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 let failures = 0;
@@ -67,7 +64,9 @@ function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): strin
 }
 
 /** Per-platform defaults out of the `*_SHORTCUTS` records in src/types.ts. */
-function tsDefault(key: "DICTATION_SHORTCUTS" | "WRITING_SHORTCUTS"): [macos: string, windows: string, linux: string] | null {
+function tsDefault(
+  key: "DICTATION_SHORTCUTS" | "WRITING_SHORTCUTS",
+): [macos: string, windows: string, linux: string] | null {
   const anchor = typesTs.indexOf(`const ${key}`);
   if (anchor === -1) return null;
   const tail = typesTs.slice(anchor, anchor + 400);
@@ -90,10 +89,26 @@ const rustWritingLinux = rustDefault("writing_tools_default_for", "Linux");
 const tsDictation = tsDefault("DICTATION_SHORTCUTS");
 const tsWriting = tsDefault("WRITING_SHORTCUTS");
 
-check("Rust dictation defaults parse", rustDictationMacos !== null && rustDictationWindows !== null && rustDictationLinux !== null, "dictation_default_for arms not found in config/mod.rs");
-check("Rust writing defaults parse", rustWritingMacos !== null && rustWritingWindows !== null && rustWritingLinux !== null, "writing_tools_default_for arms not found in config/mod.rs");
-check("TS dictation default parses", tsDictation !== null, "DICTATION_SHORTCUTS record not found in src/types.ts");
-check("TS writing default parses", tsWriting !== null, "WRITING_SHORTCUTS record not found in src/types.ts");
+check(
+  "Rust dictation defaults parse",
+  rustDictationMacos !== null && rustDictationWindows !== null && rustDictationLinux !== null,
+  "dictation_default_for arms not found in config/mod.rs",
+);
+check(
+  "Rust writing defaults parse",
+  rustWritingMacos !== null && rustWritingWindows !== null && rustWritingLinux !== null,
+  "writing_tools_default_for arms not found in config/mod.rs",
+);
+check(
+  "TS dictation default parses",
+  tsDictation !== null,
+  "DICTATION_SHORTCUTS record not found in src/types.ts",
+);
+check(
+  "TS writing default parses",
+  tsWriting !== null,
+  "WRITING_SHORTCUTS record not found in src/types.ts",
+);
 
 if (tsDictation) {
   check(
@@ -137,7 +152,11 @@ check(
 
 // --- 2. Foreign-default migration covers both spellings -----------------------
 const migration = fnBody(configRs, "foreign_default_replacement");
-check("migration helper exists", migration !== "", "foreign_default_replacement missing in config/mod.rs");
+check(
+  "migration helper exists",
+  migration !== "",
+  "foreign_default_replacement missing in config/mod.rs",
+);
 for (const literal of ['"Fn"', '"Ctrl+Meta"', '"Control+Super"']) {
   check(
     `migration handles ${literal}`,
@@ -148,7 +167,11 @@ for (const literal of ['"Fn"', '"Ctrl+Meta"', '"Control+Super"']) {
 
 // --- 3. Native-shortcut check matches the stored defaults ---------------------
 const nativeCheck = fnBody(shellRs, "is_native_dictation_shortcut_for");
-check("native-shortcut helper exists", nativeCheck !== "", "is_native_dictation_shortcut_for missing in shell.rs");
+check(
+  "native-shortcut helper exists",
+  nativeCheck !== "",
+  "is_native_dictation_shortcut_for missing in shell.rs",
+);
 check(
   "macOS native shortcut is Fn",
   nativeCheck.includes('(HostPlatform::Macos, "Fn")'),
@@ -162,7 +185,11 @@ check(
 
 // --- 4. Permission requirements stay per-desktop -------------------------------
 const permissionFn = fnBody(commandsRs, "permission_required_for");
-check("permission helper exists", permissionFn !== "", "permission_required_for missing in commands/mod.rs");
+check(
+  "permission helper exists",
+  permissionFn !== "",
+  "permission_required_for missing in commands/mod.rs",
+);
 check(
   "accessibility stays required everywhere",
   /Accessibility => true/.test(permissionFn),
@@ -206,8 +233,16 @@ check(
 // --- 6. AI model default + suggestions + blocklist stay in sync ----------------
 const rustDefaultModel = /DEFAULT_GEMINI_MODEL:\s*&str\s*=\s*"([^"]+)"/.exec(aiRs)?.[1] ?? null;
 const tsDefaultModel = /DEFAULT_AI_MODEL\s*=\s*"([^"]+)"/.exec(typesTs)?.[1] ?? null;
-check("Rust default model parses", rustDefaultModel !== null, "DEFAULT_GEMINI_MODEL not found in ai/mod.rs");
-check("TS default model parses", tsDefaultModel !== null, "DEFAULT_AI_MODEL not found in src/types.ts");
+check(
+  "Rust default model parses",
+  rustDefaultModel !== null,
+  "DEFAULT_GEMINI_MODEL not found in ai/mod.rs",
+);
+check(
+  "TS default model parses",
+  tsDefaultModel !== null,
+  "DEFAULT_AI_MODEL not found in src/types.ts",
+);
 if (rustDefaultModel && tsDefaultModel) {
   check(
     "AI default model matches",
@@ -219,12 +254,30 @@ const allowlistBlock = aiRs.slice(
   aiRs.indexOf("SUPPORTED_GEMINI_MODELS"),
   aiRs.indexOf("];", aiRs.indexOf("SUPPORTED_GEMINI_MODELS")) + 2,
 );
-const allowlistIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map(m => m[1]);
-check("suggestions block parses", allowlistIds.length > 0, "SUPPORTED_GEMINI_MODELS ids not found in ai/mod.rs");
-for (const excluded of ["tts", "live", "audio", "-image", "banana", "transcribe", "embed", "veo-", "omni", "lyria-", "computer-use", "deep-research", "robotics"]) {
+const allowlistIds = [...allowlistBlock.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]);
+check(
+  "suggestions block parses",
+  allowlistIds.length > 0,
+  "SUPPORTED_GEMINI_MODELS ids not found in ai/mod.rs",
+);
+for (const excluded of [
+  "tts",
+  "live",
+  "audio",
+  "-image",
+  "banana",
+  "transcribe",
+  "embed",
+  "veo-",
+  "omni",
+  "lyria-",
+  "computer-use",
+  "deep-research",
+  "robotics",
+]) {
   check(
     `suggestions exclude "${excluded}"`,
-    allowlistIds.every(id => !id.includes(excluded)),
+    allowlistIds.every((id) => !id.includes(excluded)),
     `"${excluded}"-like model id found in SUPPORTED_GEMINI_MODELS; only text models may be suggested`,
   );
 }
@@ -252,37 +305,51 @@ function generatedCatalogIsFresh(): { fallback: boolean; blocked: boolean } {
 }
 check(
   "model queue is plumbed end to end",
-  configRs.includes("pub models") && commandsRs.includes("ai_models") && typesTs.includes("aiModels"),
+  configRs.includes("pub models") &&
+    commandsRs.includes("ai_models") &&
+    typesTs.includes("aiModels"),
   "AiSettings.models / FrontendSettings.ai_models / AppSettings.aiModels missing",
 );
 check(
   "ordered failover tries each queued model",
-  aiRs.includes("generate_in_order") && aiRs.includes("is_failover_terminal") && commandsRs.includes("summarize_link_in_order"),
+  aiRs.includes("generate_in_order") &&
+    aiRs.includes("is_failover_terminal") &&
+    commandsRs.includes("summarize_link_in_order"),
   "generate_in_order / summarize_link_in_order / is_failover_terminal missing",
 );
 check(
   "native bridge exposes list_ai_models",
-  nativeTs.includes("listAiModels") && nativeTs.includes("list_ai_models") && commandsRs.includes("list_ai_models"),
+  nativeTs.includes("listAiModels") &&
+    nativeTs.includes("list_ai_models") &&
+    commandsRs.includes("list_ai_models"),
   "NativeBridge.listAiModels / list_ai_models command missing",
 );
 check(
   "provider choice is plumbed end to end",
-  configRs.includes("pub provider") && commandsRs.includes("ai_provider") && typesTs.includes("aiProvider"),
+  configRs.includes("pub provider") &&
+    commandsRs.includes("ai_provider") &&
+    typesTs.includes("aiProvider"),
   "AiSettings.provider / FrontendSettings.ai_provider / AppSettings.aiProvider missing",
 );
 check(
   "custom endpoint is plumbed end to end",
-  configRs.includes("custom_base_url") && commandsRs.includes("ai_custom_base_url") && typesTs.includes("aiCustomBaseUrl"),
+  configRs.includes("custom_base_url") &&
+    commandsRs.includes("ai_custom_base_url") &&
+    typesTs.includes("aiCustomBaseUrl"),
   "AiSettings.custom_base_url / FrontendSettings.ai_custom_base_url / AppSettings.aiCustomBaseUrl missing",
 );
 check(
   "provider metadata reaches the UI",
-  nativeTs.includes("listAiProviders") && nativeTs.includes("list_ai_providers") && commandsRs.includes("list_ai_providers"),
+  nativeTs.includes("listAiProviders") &&
+    nativeTs.includes("list_ai_providers") &&
+    commandsRs.includes("list_ai_providers"),
   "NativeBridge.listAiProviders / list_ai_providers command missing",
 );
 check(
   "model costs reach the picker",
-  aiProvidersRs.includes("cost_label_for") && aiModelsTs.includes("per 1M") && nativeTs.includes("AiModelInfo"),
+  aiProvidersRs.includes("cost_label_for") &&
+    aiModelsTs.includes("per 1M") &&
+    nativeTs.includes("AiModelInfo"),
   "pricing (cost_label_for / per-1M fallbacks) missing from the model pipeline",
 );
 

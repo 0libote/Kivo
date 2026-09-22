@@ -1,6 +1,13 @@
 import type { SelectionContext, SummarySource } from "../../types";
 
-export type WritingMode = "closed" | "menu" | "custom" | "summary" | "processing" | "result" | "error";
+export type WritingMode =
+  | "closed"
+  | "menu"
+  | "custom"
+  | "summary"
+  | "processing"
+  | "result"
+  | "error";
 
 export interface WritingToolsState {
   mode: WritingMode;
@@ -50,7 +57,9 @@ export const initialWritingToolsState: WritingToolsState = {
 export function isWebUrl(value: string): boolean {
   try {
     const url = new URL(value.trim());
-    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password;
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+    );
   } catch {
     return false;
   }
@@ -94,7 +103,10 @@ function backState(state: WritingToolsState): WritingToolsState {
   };
 }
 
-export function writingToolsReducer(state: WritingToolsState, event: WritingToolsEvent): WritingToolsState {
+export function writingToolsReducer(
+  state: WritingToolsState,
+  event: WritingToolsEvent,
+): WritingToolsState {
   switch (event.type) {
     case "OPEN":
       return openState(event);
@@ -105,16 +117,29 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
     }
     case "SELECT":
       return state.mode === "menu"
-        ? { ...state, selectedIndex: Math.min(Math.max(0, event.index), Math.max(0, state.enabledActions.length - 1)) }
+        ? {
+            ...state,
+            selectedIndex: Math.min(
+              Math.max(0, event.index),
+              Math.max(0, state.enabledActions.length - 1),
+            ),
+          }
         : state;
     case "OPEN_CUSTOM":
       return state.context?.hasSelection
-        ? { ...state, mode: "custom", activeAction: "custom", customInstruction: event.initialValue ?? state.customInstruction, error: null }
+        ? {
+            ...state,
+            mode: "custom",
+            activeAction: "custom",
+            customInstruction: event.initialValue ?? state.customInstruction,
+            error: null,
+          }
         : state;
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
     case "RUN":
-      return ["menu", "custom", "summary", "error"].includes(state.mode) && state.context?.hasSelection
+      return ["menu", "custom", "summary", "error"].includes(state.mode) &&
+        state.context?.hasSelection
         ? { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false }
         : state;
     case "RESULT":
@@ -124,7 +149,8 @@ export function writingToolsReducer(state: WritingToolsState, event: WritingTool
             mode: "result",
             resultText: event.text,
             resultSource: event.source,
-            resultCanReplace: !state.isLinkSummary && (event.canReplace ?? state.context?.canReplace ?? false),
+            resultCanReplace:
+              !state.isLinkSummary && (event.canReplace ?? state.context?.canReplace ?? false),
             error: null,
           }
         : state;

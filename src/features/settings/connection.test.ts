@@ -1,6 +1,5 @@
-// @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
-import { testFailureConnection } from "./SettingsWindow";
+import { describe, expect, it } from "bun:test";
+import { testFailureConnection } from "./connection";
 
 describe("testFailureConnection", () => {
   it("maps key problems to invalid", () => {

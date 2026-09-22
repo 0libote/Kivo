@@ -1,0 +1,70 @@
+/**
+ * App-shell styles that cannot live in StyleX: document-level sizing, the
+ * transparent Tauri window background, selection, and per-platform token
+ * overrides. Everything else is StyleX (src/ui) or Astryx.
+ */
+:root {
+  background: transparent;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.005em;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+:root[data-platform="windows"] {
+  --font-family-body: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-family-heading: "Segoe UI Variable", "Segoe UI", sans-serif;
+  --radius-inner: 4px;
+  --radius-element: 4px;
+  --radius-container: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: currentColor;
+    --color-border-emphasized: currentColor;
+  }
+}

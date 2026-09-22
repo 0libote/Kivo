@@ -112,9 +112,5 @@ export function spliceGenerated(tsSource: string, occurrence: number, content: s
   }
   const to = tsSource.indexOf(GENERATED_END, from);
   if (to === -1) throw new Error(`generated end marker #${occurrence} missing`);
-  return (
-    tsSource.slice(0, from + GENERATED_START.length) +
-    `\n${content}\n` +
-    tsSource.slice(to)
-  );
+  return tsSource.slice(0, from + GENERATED_START.length) + `\n${content}\n` + tsSource.slice(to);
 }

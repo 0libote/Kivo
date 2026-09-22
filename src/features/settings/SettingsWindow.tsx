@@ -1,33 +1,42 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ModelQueueEditor } from "./ModelQueueEditor";
-import { WritingPresetList } from "./WritingPresetEditor";
-import { LocalSpeechModels } from "./LocalSpeechModels";
-import { DictationCleanupModel } from "./DictationCleanupModel";
-import { LocalAiSetup } from "./LocalAiSetup";
-import { HomeSection } from "./HomeSection";
-import { useNativeEvent } from "../../hooks/useNativeEvent";
-import { Button } from "../../components/Button";
+import { Button } from "@astryxdesign/core/Button";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { normalizeAiProvider } from "../../ai/models";
 import { Icon, type IconName } from "../../components/Icon";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { ShortcutRecorder } from "../../components/ShortcutRecorder";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { Switch } from "../../components/Switch";
+import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge, type UpdateResult } from "../../platform/native";
 import {
-  NativeError,
   type AiProviderId,
   type AiProviderInfo,
   type ApiKeyStatus,
   type AppContext,
   type AppSettings,
   type MicrophoneDevice,
+  NativeError,
   type PermissionKind,
   type PermissionStatus,
   type SpeechLanguage,
 } from "../../types";
-import { normalizeAiProvider } from "../../ai/models";
+import { testFailureConnection } from "./connection";
+import { DictationCleanupModel } from "./DictationCleanupModel";
+import { HomeSection } from "./HomeSection";
+import { LocalAiSetup } from "./LocalAiSetup";
+import { LocalSpeechModels } from "./LocalSpeechModels";
+import { ModelQueueEditor } from "./ModelQueueEditor";
+import { WritingPresetList } from "./WritingPresetEditor";
 
-type SettingsSection = "home" | "general" | "dictation" | "writing" | "ai" | "permissions" | "about";
+type SettingsSection =
+  | "home"
+  | "general"
+  | "dictation"
+  | "writing"
+  | "ai"
+  | "permissions"
+  | "about";
 
 interface SettingsWindowProps {
   readonly context: AppContext;
@@ -54,11 +63,19 @@ const NAV_GROUP_LABELS: Partial<Record<SettingsSection, string>> = {
 
 type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
 
-export function SettingsWindow({ context, settings, loading, updateSettings }: SettingsWindowProps) {
+export function SettingsWindow({
+  context,
+  settings,
+  loading,
+  updateSettings,
+}: SettingsWindowProps) {
   const [section, setSection] = useState<SettingsSection>("home");
   const [microphones, setMicrophones] = useState<MicrophoneDevice[]>([]);
   const [languages, setLanguages] = useState<SpeechLanguage[]>([]);
-  const [apiStatus, setApiStatus] = useState<ApiKeyStatus>({ configured: false, connection: "untested" });
+  const [apiStatus, setApiStatus] = useState<ApiKeyStatus>({
+    configured: false,
+    connection: "untested",
+  });
   const [apiKey, setApiKey] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -69,14 +86,22 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
   useEffect(() => {
     let active = true;
     // allSettled never rejects; each list degrades independently below.
-    void Promise.allSettled([nativeBridge.listMicrophones(), nativeBridge.listSpeechLanguages(), nativeBridge.getApiKeyStatus()])
-      .then(([nextMicrophones, nextLanguages, nextApiStatus]) => {
-        if (!active) return;
-        if (nextMicrophones.status === "fulfilled") setMicrophones(nextMicrophones.value);
-        if (nextLanguages.status === "fulfilled") setLanguages(nextLanguages.value);
-        if (nextApiStatus.status === "fulfilled") setApiStatus(nextApiStatus.value);
-        if ([nextMicrophones, nextLanguages, nextApiStatus].some(result => result.status === "rejected")) setNotice("Some settings could not be loaded. Reopen Settings to try again.");
-      });
+    void Promise.allSettled([
+      nativeBridge.listMicrophones(),
+      nativeBridge.listSpeechLanguages(),
+      nativeBridge.getApiKeyStatus(),
+    ]).then(([nextMicrophones, nextLanguages, nextApiStatus]) => {
+      if (!active) return;
+      if (nextMicrophones.status === "fulfilled") setMicrophones(nextMicrophones.value);
+      if (nextLanguages.status === "fulfilled") setLanguages(nextLanguages.value);
+      if (nextApiStatus.status === "fulfilled") setApiStatus(nextApiStatus.value);
+      if (
+        [nextMicrophones, nextLanguages, nextApiStatus].some(
+          (result) => result.status === "rejected",
+        )
+      )
+        setNotice("Some settings could not be loaded. Reopen Settings to try again.");
+    });
     return () => {
       active = false;
     };
@@ -95,40 +120,81 @@ export function SettingsWindow({ context, settings, loading, updateSettings }: S
   );
 
   return (
-    <main className="settings-window" data-loading={loading} data-platform={context.platform}>
-      <aside className="settings-sidebar" aria-label="Settings sections">
-        <div className="settings-sidebar__brand"><span className="settings-sidebar__mark"><Icon name="audio" size={17} /></span><strong>Kivo</strong></div>
-        <nav>
+    <main data-loading={loading} data-platform={context.platform} {...stylex.props(styles.shell)}>
+      <aside aria-label="Settings sections" {...stylex.props(styles.sidebar)}>
+        <div {...stylex.props(styles.brand)}>
+          <span {...stylex.props(styles.brandMark)}>
+            <Icon name="audio" size={17} />
+          </span>
+          <strong {...stylex.props(styles.brandName)}>Kivo</strong>
+        </div>
+        <nav {...stylex.props(styles.nav)}>
           {SECTIONS.map((item) => (
             <Fragment key={item.id}>
-              {NAV_GROUP_LABELS[item.id] ? <span className="settings-sidebar__group-label">{NAV_GROUP_LABELS[item.id]}</span> : null}
-              <button aria-current={section === item.id ? "page" : undefined} onClick={() => setSection(item.id)} type="button">
-                <Icon name={item.icon} size={16} /><span>{item.label}</span>
+              {NAV_GROUP_LABELS[item.id] ? (
+                <span {...stylex.props(styles.groupLabel)}>{NAV_GROUP_LABELS[item.id]}</span>
+              ) : null}
+              <button
+                aria-current={section === item.id ? "page" : undefined}
+                onClick={() => setSection(item.id)}
+                type="button"
+                {...stylex.props(styles.navButton, section === item.id && styles.navButtonCurrent)}
+              >
+                <Icon name={item.icon} size={16} />
+                <span>{item.label}</span>
               </button>
             </Fragment>
           ))}
         </nav>
-        <p className="settings-sidebar__status"><span aria-hidden="true" className="settings-sidebar__status-dot" data-paused={context.paused} />{context.paused ? "Paused" : "Ready"}<span className="settings-sidebar__version">{context.version}</span></p>
+        <p {...stylex.props(styles.sidebarStatus)}>
+          <span
+            aria-hidden="true"
+            {...stylex.props(styles.statusDot, context.paused && styles.statusDotPaused)}
+          />
+          {context.paused ? "Paused" : "Ready"}
+          <span {...stylex.props(styles.version)}>{context.version}</span>
+        </p>
       </aside>
       <SettingsMain key={section}>
-        {section === "home" ? <HomeSection context={context} settings={settings} onWriting={() => setSection("writing")} onDictation={() => setSection("dictation")} /> : <SectionContent
-          apiKey={apiKey}
-          apiStatus={apiStatus}
-          busy={busy}
-          context={context}
-          languages={languages}
-          microphones={microphones}
-          section={section}
-          setApiKey={setApiKey}
-          setApiStatus={setApiStatus}
-          setBusy={setBusy}
-          setNotice={setNotice}
-          setUpdateResult={setUpdateResult}
-          settings={settings}
-          save={save}
-          updateResult={updateResult}
-        />}
-        {notice ? <div aria-live="polite" className="settings-notice">{notice}<button aria-label="Dismiss message" onClick={() => setNotice(null)} type="button"><Icon name="close" size={12} /></button></div> : null}
+        {section === "home" ? (
+          <HomeSection
+            context={context}
+            settings={settings}
+            onWriting={() => setSection("writing")}
+            onDictation={() => setSection("dictation")}
+          />
+        ) : (
+          <SectionContent
+            apiKey={apiKey}
+            apiStatus={apiStatus}
+            busy={busy}
+            context={context}
+            languages={languages}
+            microphones={microphones}
+            section={section}
+            setApiKey={setApiKey}
+            setApiStatus={setApiStatus}
+            setBusy={setBusy}
+            setNotice={setNotice}
+            setUpdateResult={setUpdateResult}
+            settings={settings}
+            save={save}
+            updateResult={updateResult}
+          />
+        )}
+        {notice ? (
+          <div aria-live="polite" data-testid="settings-notice" {...stylex.props(styles.notice)}>
+            {notice}
+            <Button
+              icon={<Icon name="close" size={12} />}
+              isIconOnly
+              label="Dismiss message"
+              onClick={() => setNotice(null)}
+              size="sm"
+              variant="ghost"
+            />
+          </div>
+        ) : null}
       </SettingsMain>
     </main>
   );
@@ -142,7 +208,11 @@ function SettingsMain({ children }: { readonly children: ReactNode }) {
   useEffect(() => {
     mainRef.current?.focus({ preventScroll: true });
   }, []);
-  return <div className="settings-main" ref={mainRef} tabIndex={-1}>{children}</div>;
+  return (
+    <div data-testid="settings-main" ref={mainRef} tabIndex={-1} {...stylex.props(styles.main)}>
+      {children}
+    </div>
+  );
 }
 
 interface SectionContentProps {
@@ -165,7 +235,8 @@ interface SectionContentProps {
 
 function SectionContent(props: SectionContentProps) {
   switch (props.section) {
-    case "home": return null;
+    case "home":
+      return null;
     case "permissions":
       return (
         <PermissionsSection
@@ -250,7 +321,10 @@ function PermissionsSection({
   // requiring the manual Refresh button.
   useEffect(() => {
     const poll = () => {
-      void nativeBridge.getPermissions().then(setPermissions).catch(() => {});
+      void nativeBridge
+        .getPermissions()
+        .then(setPermissions)
+        .catch(() => {});
     };
     const interval = window.setInterval(poll, 2500);
     window.addEventListener("focus", poll);
@@ -274,7 +348,9 @@ function PermissionsSection({
         setPermissions(await nativeBridge.requestPermission(kind));
       }
     } catch (error) {
-      setNotice(error instanceof NativeError ? error.message : "Permission wasn’t granted. Try again.");
+      setNotice(
+        error instanceof NativeError ? error.message : "Permission wasn’t granted. Try again.",
+      );
       refresh();
     } finally {
       setBusy(null);
@@ -303,9 +379,13 @@ function PermissionsSection({
     setNotice(null);
     try {
       setPermissions(await nativeBridge.resetPermissionGrants());
-      setNotice("Old entries cleared. Re-allow each permission in turn — open System Settings where asked.");
+      setNotice(
+        "Old entries cleared. Re-allow each permission in turn — open System Settings where asked.",
+      );
     } catch (error) {
-      setNotice(error instanceof NativeError ? error.message : "The old entries couldn’t be cleared.");
+      setNotice(
+        error instanceof NativeError ? error.message : "The old entries couldn’t be cleared.",
+      );
     } finally {
       setResetting(false);
     }
@@ -313,13 +393,21 @@ function PermissionsSection({
 
   let subtitle: string;
   if (context.platform === "macos") {
-    subtitle = "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it.";
+    subtitle =
+      "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it.";
   } else if (context.platform === "windows") {
-    subtitle = "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows.";
+    subtitle =
+      "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows.";
   } else {
-    subtitle = "Linux test bench: microphone and speech are simulated, text access needs no extra prompt.";
+    subtitle =
+      "Linux test bench: microphone and speech are simulated, text access needs no extra prompt.";
   }
-  const order: PermissionKind[] = ["accessibility", "input-monitoring", "microphone", "speech-recognition"];
+  const order: PermissionKind[] = [
+    "accessibility",
+    "input-monitoring",
+    "microphone",
+    "speech-recognition",
+  ];
   const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
 
   return (
@@ -335,7 +423,7 @@ function PermissionsSection({
                 label={permissionLabel(kind, settings.dictationShortcut)}
                 description={status?.explanation ?? "Not required on this system."}
               >
-                <span className="permission-row__granted">Not required</span>
+                <span {...stylex.props(styles.granted)}>Not required</span>
               </SettingRow>
             );
           }
@@ -347,34 +435,57 @@ function PermissionsSection({
               label={permissionLabel(kind, settings.dictationShortcut)}
               description={status?.explanation ?? permissionBlurb(kind, context.platform)}
             >
-              <span className="permission-row__control">
-                <StatusIndicator label={permissionLabel(kind, settings.dictationShortcut)} state={state} />
+              <span {...stylex.props(styles.permissionControl)}>
+                <StatusIndicator
+                  label={permissionLabel(kind, settings.dictationShortcut)}
+                  state={state}
+                />
                 {granted ? (
-                  <span className="permission-row__granted"><Icon name="check" size={15} />Allowed</span>
+                  <span {...stylex.props(styles.granted)}>
+                    <Icon name="check" size={15} />
+                    Allowed
+                  </span>
                 ) : (
                   <Button
-                    compact
-                    disabled={busy !== null || resetting || !loaded}
+                    isDisabled={busy !== null || resetting || !loaded}
+                    label={permissionActionLabel(busy === kind, denied)}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
-                  >
-                    {permissionActionLabel(busy === kind, denied)}
-                  </Button>
+                    size="sm"
+                    variant="secondary"
+                  />
                 )}
               </span>
             </SettingRow>
           );
         })}
       </SettingsGroup>
-      <div className="settings-group__footer settings-group__footer--split">
-        <Button compact disabled={busy !== null || resetting} onClick={refresh}>Refresh status</Button>
+      <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
+        <Button
+          isDisabled={busy !== null || resetting}
+          label="Refresh status"
+          onClick={refresh}
+          size="sm"
+          variant="secondary"
+        />
         {context.platform === "macos" ? (
-          <Button compact disabled={busy !== null || resetting || !loaded} onClick={() => void resetGrants()}>
-            {resetting ? "Clearing…" : "Clear stale entries"}
-          </Button>
+          <Button
+            isDisabled={busy !== null || resetting || !loaded}
+            label={resetting ? "Clearing…" : "Clear stale entries"}
+            onClick={() => void resetGrants()}
+            size="sm"
+            variant="secondary"
+          />
         ) : null}
       </div>
       {context.platform === "macos" ? (
-        <p className="settings-note">Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets Accessibility and Fn-shortcut grants on every update — re-allow after updating, or use a Developer-ID signed stable release for grants that persist. If an old build's entry is stuck and the new one can't be enabled, Clear stale entries removes Kivo's old grants so you can re-allow from scratch. Unlocking Privacy &amp; Security and Keychain prompts each ask for a password by design.</p>
+        <p {...stylex.props(styles.note)}>
+          Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets
+          Accessibility and Fn-shortcut grants on every update — re-allow after updating, or use a
+          Developer-ID signed stable release for grants that persist. If an old build's entry is
+          stuck and the new one can't be enabled, Clear stale entries removes Kivo's old grants so
+          you can re-allow from scratch. Unlocking Privacy &amp; Security and Keychain prompts each
+          ask for a password by design.
+        </p>
       ) : null}
     </SettingsContent>
   );
@@ -388,10 +499,14 @@ function permissionActionLabel(waiting: boolean, denied: boolean): string {
 
 function permissionLabel(kind: PermissionKind, dictationShortcut: string): string {
   switch (kind) {
-    case "accessibility": return "Accessibility";
-    case "input-monitoring": return dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring";
-    case "microphone": return "Microphone";
-    case "speech-recognition": return "Speech Recognition";
+    case "accessibility":
+      return "Accessibility";
+    case "input-monitoring":
+      return dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring";
+    case "microphone":
+      return "Microphone";
+    case "speech-recognition":
+      return "Speech Recognition";
   }
 }
 
@@ -401,32 +516,69 @@ function permissionBlurb(kind: PermissionKind, platform: AppContext["platform"])
       return platform === "macos"
         ? "Read only the text you select and insert text where your cursor is."
         : "Work with the selected text and cursor in your active app.";
-    case "input-monitoring": return "Detect the dictation hold shortcut.";
-    case "microphone": return "Listen only while dictation is active.";
-    case "speech-recognition": return "Transcribe speech using the operating system.";
+    case "input-monitoring":
+      return "Detect the dictation hold shortcut.";
+    case "microphone":
+      return "Listen only while dictation is active.";
+    case "speech-recognition":
+      return "Transcribe speech using the operating system.";
   }
 }
 
-function GeneralSection({ settings, save }: { readonly settings: AppSettings; readonly save: SaveSettings }) {
+function GeneralSection({
+  settings,
+  save,
+}: {
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+}) {
   return (
-    <SettingsContent title="General" subtitle="Choose how Kivo behaves when you sign in and while it is idle.">
+    <SettingsContent
+      title="General"
+      subtitle="Choose how Kivo behaves when you sign in and while it is idle."
+    >
       <SettingsGroup>
-        <SettingRow label="Launch at login" description="Start Kivo automatically after you sign in.">
-          <Switch checked={settings.launchAtLogin} label="Launch at login" onChange={(value) => void save({ launchAtLogin: value })} />
+        <SettingRow
+          label="Launch at login"
+          description="Start Kivo automatically after you sign in."
+        >
+          <Switch
+            checked={settings.launchAtLogin}
+            label="Launch at login"
+            onChange={(value) => void save({ launchAtLogin: value })}
+          />
         </SettingRow>
         <SettingRow label="Appearance">
           <SegmentedControl
             ariaLabel="Appearance"
             onChange={(theme) => void save({ theme })}
-            options={[{ label: "System", value: "system" }, { label: "Light", value: "light" }, { label: "Dark", value: "dark" }]}
+            options={[
+              { label: "System", value: "system" },
+              { label: "Light", value: "light" },
+              { label: "Dark", value: "dark" },
+            ]}
             value={settings.theme}
           />
         </SettingRow>
-        <SettingRow label="Show Flow Bar while idle" description="Keep a quiet indicator visible between dictations.">
-          <Switch checked={settings.showIdleFlowBar} label="Show Flow Bar while idle" onChange={(value) => void save({ showIdleFlowBar: value })} />
+        <SettingRow
+          label="Show Flow Bar while idle"
+          description="Keep a quiet indicator visible between dictations."
+        >
+          <Switch
+            checked={settings.showIdleFlowBar}
+            label="Show Flow Bar while idle"
+            onChange={(value) => void save({ showIdleFlowBar: value })}
+          />
         </SettingRow>
-        <SettingRow label="Start in background" description="Keep the main window closed when Kivo starts.">
-          <Switch checked={settings.startInBackground} label="Start in background" onChange={(value) => void save({ startInBackground: value })} />
+        <SettingRow
+          label="Start in background"
+          description="Keep the main window closed when Kivo starts."
+        >
+          <Switch
+            checked={settings.startInBackground}
+            label="Start in background"
+            onChange={(value) => void save({ startInBackground: value })}
+          />
         </SettingRow>
       </SettingsGroup>
     </SettingsContent>
@@ -452,23 +604,32 @@ function DictationSection({
       : undefined;
   let languageDescription = "Automatic follows the current input language when supported.";
   if (settings.speechEngine === "local") {
-    languageDescription = "On-device models detect the spoken language automatically; set this only to force one.";
+    languageDescription =
+      "On-device models detect the spoken language automatically; set this only to force one.";
   } else if (context.platform === "windows") {
-    languageDescription = "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
+    languageDescription =
+      "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
   }
   return (
-    <SettingsContent title="Dictation" subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop.">
+    <SettingsContent
+      title="Dictation"
+      subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop."
+    >
       <SettingsGroup header="Recognition">
         <SettingRow
           label="Transcription engine"
-          description={settings.speechEngine === "local"
-            ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
-            : "System: uses the operating-system speech engine, which may use the network on some systems."}
+          description={
+            settings.speechEngine === "local"
+              ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
+              : "System: uses the operating-system speech engine, which may use the network on some systems."
+          }
           stacked
         >
           <SegmentedControl
             ariaLabel="Transcription engine"
-            onChange={(engine) => void save({ speechEngine: engine as AppSettings["speechEngine"] })}
+            onChange={(engine) =>
+              void save({ speechEngine: engine as AppSettings["speechEngine"] })
+            }
             options={[
               { label: "System", value: "system" },
               { label: "On-device", value: "local" },
@@ -483,49 +644,124 @@ function DictationSection({
         ) : null}
         <SettingRow label="Language" description={languageDescription}>
           {languages.length === 0 ? (
-            <span className="setting-empty">No languages found. Reopen Settings to try again.</span>
+            <span {...stylex.props(styles.empty)}>
+              No languages found. Reopen Settings to try again.
+            </span>
           ) : (
-            <select aria-label="Dictation language" onChange={(event) => void save({ dictationLanguage: event.target.value })} value={languages.some((language) => language.code === settings.dictationLanguage) ? settings.dictationLanguage : languages[0].code}>
-              {languages.map((language) => <option key={language.code} value={language.code}>{languageName(language)}</option>)}
+            <select
+              aria-label="Dictation language"
+              onChange={(event) => void save({ dictationLanguage: event.target.value })}
+              value={
+                languages.some((language) => language.code === settings.dictationLanguage)
+                  ? settings.dictationLanguage
+                  : languages[0].code
+              }
+              {...stylex.props(styles.field)}
+            >
+              {languages.map((language) => (
+                <option key={language.code} value={language.code}>
+                  {languageName(language)}
+                </option>
+              ))}
             </select>
           )}
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup>
         <SettingRow label="Shortcut" description={shortcutNote}>
-          <ShortcutRecorder label="Dictation shortcut" onChange={(dictationShortcut) => save({ dictationShortcut })} platform={context.platform} value={settings.dictationShortcut} />
+          <ShortcutRecorder
+            label="Dictation shortcut"
+            onChange={(dictationShortcut) => save({ dictationShortcut })}
+            platform={context.platform}
+            value={settings.dictationShortcut}
+          />
         </SettingRow>
-        <SettingRow label="Tap to dictate" description="A quick press starts listening; press again to finish.">
-          <Switch checked={settings.dictationTapEnabled} label="Tap to dictate" onChange={(value) => void save({ dictationTapEnabled: value })} />
+        <SettingRow
+          label="Tap to dictate"
+          description="A quick press starts listening; press again to finish."
+        >
+          <Switch
+            checked={settings.dictationTapEnabled}
+            label="Tap to dictate"
+            onChange={(value) => void save({ dictationTapEnabled: value })}
+          />
         </SettingRow>
-        <SettingRow label="Hold to dictate" description="Keep the shortcut held while speaking; release to finish.">
-          <Switch checked={settings.dictationHoldEnabled} label="Hold to dictate" onChange={(value) => void save({ dictationHoldEnabled: value })} />
+        <SettingRow
+          label="Hold to dictate"
+          description="Keep the shortcut held while speaking; release to finish."
+        >
+          <Switch
+            checked={settings.dictationHoldEnabled}
+            label="Hold to dictate"
+            onChange={(value) => void save({ dictationHoldEnabled: value })}
+          />
         </SettingRow>
-        <SettingRow label="Hold threshold" description="How long (ms) a press must last to count as a hold instead of a tap.">
-          <NumberPreference label="Hold threshold" min={50} max={5000} value={settings.dictationHoldThresholdMs} onChange={(value) => save({ dictationHoldThresholdMs: value })} />
+        <SettingRow
+          label="Hold threshold"
+          description="How long (ms) a press must last to count as a hold instead of a tap."
+        >
+          <NumberPreference
+            label="Hold threshold"
+            min={50}
+            max={5000}
+            value={settings.dictationHoldThresholdMs}
+            onChange={(value) => save({ dictationHoldThresholdMs: value })}
+          />
         </SettingRow>
         <SettingRow label="Microphone">
           {microphones.length === 0 ? (
-            <span className="setting-empty">No microphones found. Check the system sound settings.</span>
+            <span {...stylex.props(styles.empty)}>
+              No microphones found. Check the system sound settings.
+            </span>
           ) : (
-            <select aria-label="Microphone" onChange={(event) => void save({ microphoneId: event.target.value || null })} value={microphones.some((device) => device.id === (settings.microphoneId ?? "")) || settings.microphoneId === null ? (settings.microphoneId ?? "") : ""}>
+            <select
+              aria-label="Microphone"
+              onChange={(event) => void save({ microphoneId: event.target.value || null })}
+              value={
+                microphones.some((device) => device.id === (settings.microphoneId ?? "")) ||
+                settings.microphoneId === null
+                  ? (settings.microphoneId ?? "")
+                  : ""
+              }
+              {...stylex.props(styles.field)}
+            >
               <option value="">System Default</option>
-              {microphones.filter((device) => device.id !== "default").map((device) => <option key={device.id} value={device.id}>{device.name}</option>)}
+              {microphones
+                .filter((device) => device.id !== "default")
+                .map((device) => (
+                  <option key={device.id} value={device.id}>
+                    {device.name}
+                  </option>
+                ))}
             </select>
           )}
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup>
-        <SettingRow label="Improve dictated text with AI" description="Cleans punctuation and obvious filler words without changing your meaning.">
-          <Switch checked={settings.improveDictationWithAi} label="Improve dictated text with AI" onChange={(value) => void save({ improveDictationWithAi: value })} />
+        <SettingRow
+          label="Improve dictated text with AI"
+          description="Cleans punctuation and obvious filler words without changing your meaning."
+        >
+          <Switch
+            checked={settings.improveDictationWithAi}
+            label="Improve dictated text with AI"
+            onChange={(value) => void save({ improveDictationWithAi: value })}
+          />
         </SettingRow>
         {settings.improveDictationWithAi ? (
-          <SettingRow label="Cleanup model" description="Which AI model tidies the transcript. Defaults to your Writing Tools models, in order.">
+          <SettingRow
+            label="Cleanup model"
+            description="Which AI model tidies the transcript. Defaults to your Writing Tools models, in order."
+          >
             <DictationCleanupModel save={save} settings={settings} />
           </SettingRow>
         ) : null}
         <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
-          <Switch checked={settings.soundFeedback} label="Sound feedback" onChange={(value) => void save({ soundFeedback: value })} />
+          <Switch
+            checked={settings.soundFeedback}
+            label="Sound feedback"
+            onChange={(value) => void save({ soundFeedback: value })}
+          />
         </SettingRow>
       </SettingsGroup>
     </SettingsContent>
@@ -537,7 +773,13 @@ function languageName(language: SpeechLanguage): string {
   return language.name;
 }
 
-function NumberPreference({ label, value, min, max, onChange }: {
+function NumberPreference({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
   readonly label: string;
   readonly value: number;
   readonly min: number;
@@ -545,17 +787,27 @@ function NumberPreference({ label, value, min, max, onChange }: {
   readonly onChange: (value: number) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  return <input aria-label={label} type="number" min={min} max={max} value={draft ?? value}
-    onChange={event => setDraft(event.target.value)}
-    onBlur={event => {
-      const next = event.currentTarget.valueAsNumber;
-      setDraft(null);
-      if (Number.isFinite(next) && next !== value) void onChange(Math.min(max, Math.max(min, next)));
-    }}
-    onKeyDown={event => {
-      if (event.key === "Escape") event.currentTarget.value = String(value);
-      if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
-    }} />;
+  return (
+    <input
+      aria-label={label}
+      max={max}
+      min={min}
+      onBlur={(event) => {
+        const next = event.currentTarget.valueAsNumber;
+        setDraft(null);
+        if (Number.isFinite(next) && next !== value)
+          void onChange(Math.min(max, Math.max(min, next)));
+      }}
+      onChange={(event) => setDraft(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") event.currentTarget.value = String(value);
+        if (event.key === "Enter" || event.key === "Escape") event.currentTarget.blur();
+      }}
+      type="number"
+      value={draft ?? value}
+      {...stylex.props(styles.field, styles.numberField)}
+    />
+  );
 }
 
 function WritingSection({
@@ -568,13 +820,21 @@ function WritingSection({
   readonly save: SaveSettings;
 }) {
   return (
-    <SettingsContent title="Writing Tools" subtitle="Choose the actions shown when you work with selected text.">
-      <SettingsGroup className="writing-shortcut-group">
+    <SettingsContent
+      title="Writing Tools"
+      subtitle="Choose the actions shown when you work with selected text."
+    >
+      <SettingsGroup>
         <SettingRow label="Shortcut">
-          <ShortcutRecorder label="Writing Tools shortcut" onChange={(writingShortcut) => save({ writingShortcut })} platform={context.platform} value={settings.writingShortcut} />
+          <ShortcutRecorder
+            label="Writing Tools shortcut"
+            onChange={(writingShortcut) => save({ writingShortcut })}
+            platform={context.platform}
+            value={settings.writingShortcut}
+          />
         </SettingRow>
       </SettingsGroup>
-      <SettingsGroup header="Presets" className="writing-presets-group">
+      <SettingsGroup header="Presets">
         <WritingPresetList save={save} settings={settings} />
       </SettingsGroup>
     </SettingsContent>
@@ -604,12 +864,13 @@ function AiSection({
 }) {
   const [providers, setProviders] = useState<AiProviderInfo[]>(FALLBACK_AI_PROVIDERS);
   const provider = normalizeAiProvider(settings.aiProvider);
-  const info = providers.find(candidate => candidate.id === provider) ?? FALLBACK_AI_PROVIDERS[0];
+  const info = providers.find((candidate) => candidate.id === provider) ?? FALLBACK_AI_PROVIDERS[0];
 
   useEffect(() => {
     let active = true;
-    void nativeBridge.listAiProviders()
-      .then(next => {
+    void nativeBridge
+      .listAiProviders()
+      .then((next) => {
         if (active && next.length > 0) setProviders(next);
       })
       .catch(() => {});
@@ -627,7 +888,10 @@ function AiSection({
   }
 
   return (
-    <SettingsContent title="AI" subtitle="Choose the service and models Kivo uses for Writing Tools. Dictation cleanup follows these models unless you set its own under Dictation.">
+    <SettingsContent
+      title="AI"
+      subtitle="Choose the service and models Kivo uses for Writing Tools. Dictation cleanup follows these models unless you set its own under Dictation."
+    >
       <SettingsGroup header="Service">
         <SettingRow label="AI service" description={providerBlurb(info)} stacked>
           <select
@@ -644,16 +908,23 @@ function AiSection({
                 .finally(() => setBusy(null));
             }}
             value={provider}
+            {...stylex.props(styles.field)}
           >
-            {providers.map(candidate => (
-              <option key={candidate.id} value={candidate.id}>{candidate.label}</option>
+            {providers.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.label}
+              </option>
             ))}
           </select>
         </SettingRow>
         {provider === "custom" ? (
           <>
-            <SettingRow label="Server URL" description="The address of your OpenAI-compatible API. Use this for Ollama, LM Studio, or a hosted server." stacked>
-              <div className="api-key-editor">
+            <SettingRow
+              label="Server URL"
+              description="The address of your OpenAI-compatible API. Use this for Ollama, LM Studio, or a hosted server."
+              stacked
+            >
+              <div {...stylex.props(styles.keyEditor)}>
                 <input
                   aria-label="Custom base URL"
                   autoCapitalize="none"
@@ -664,16 +935,23 @@ function AiSection({
                     const raw = event.target.value.trim();
                     const aiCustomBaseUrl = raw === "" ? null : raw;
                     if (aiCustomBaseUrl !== settings.aiCustomBaseUrl) {
-                      void save({ aiCustomBaseUrl }).catch(() => setNotice("The base URL couldn’t be saved."));
+                      void save({ aiCustomBaseUrl }).catch(() =>
+                        setNotice("The base URL couldn’t be saved."),
+                      );
                     }
                   }}
                   placeholder={info.defaultBaseUrl ?? "http://localhost:11434/v1"}
                   spellCheck={false}
                   type="url"
+                  {...stylex.props(styles.field, styles.growField)}
                 />
               </div>
             </SettingRow>
-            <SettingRow label="Local servers" description="Kivo checks this computer for a running Ollama, LM Studio, or llama.cpp server." stacked>
+            <SettingRow
+              label="Local servers"
+              description="Kivo checks this computer for a running Ollama, LM Studio, or llama.cpp server."
+              stacked
+            >
               <LocalAiSetup disabled={busy !== null} save={save} settings={settings} />
             </SettingRow>
           </>
@@ -681,7 +959,7 @@ function AiSection({
       </SettingsGroup>
       <SettingsGroup header="Connection">
         <SettingRow label={keyLabel(info)} description={keyDescription(info, apiStatus)} stacked>
-          <div className="api-key-editor">
+          <div {...stylex.props(styles.keyEditor)}>
             <input
               aria-label={keyLabel(info)}
               autoCapitalize="none"
@@ -691,47 +969,58 @@ function AiSection({
               spellCheck={false}
               type="password"
               value={apiKey}
+              {...stylex.props(styles.field, styles.growField)}
             />
             <Button
-              compact
-              disabled={apiKey.trim().length < 8 || busy !== null}
+              isDisabled={apiKey.trim().length < 8 || busy !== null}
+              label={busy === "save-key" ? "Saving…" : "Save key"}
               onClick={() => {
                 setBusy("save-key");
                 setNotice(null);
-                void nativeBridge.saveApiKey(apiKey.trim())
+                void nativeBridge
+                  .saveApiKey(apiKey.trim())
                   .then((status) => {
                     setApiStatus(status);
                     setApiKey("");
                     setNotice("API key saved securely.");
                   })
-                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be saved."))
+                  .catch((error: unknown) =>
+                    setNotice(
+                      error instanceof NativeError
+                        ? error.message
+                        : "The API key couldn’t be saved.",
+                    ),
+                  )
                   .finally(() => setBusy(null));
               }}
-              tone="primary"
-            >
-              {busy === "save-key" ? "Saving…" : "Save key"}
-            </Button>
+              size="sm"
+              variant="primary"
+            />
           </div>
         </SettingRow>
         <SettingRow label="Status" description={connectionDescription(info, apiStatus)}>
           <StatusIndicator label={connectionLabel(apiStatus)} state={apiStatus.connection} />
         </SettingRow>
-        <div className="settings-group__footer settings-group__footer--split">
+        <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
           <Button
-            compact
-            disabled={(!apiStatus.configured && !info.keyOptional) || busy !== null}
+            isDisabled={(!apiStatus.configured && !info.keyOptional) || busy !== null}
+            label={busy === "test-key" ? "Testing…" : "Test connection"}
             onClick={() => {
               setBusy("test-key");
               setNotice(null);
               setApiStatus((current) => ({ ...current, connection: "testing" }));
-              void nativeBridge.testApiKey()
+              void nativeBridge
+                .testApiKey()
                 .then((status) => {
                   setApiStatus(status);
                   setNotice(`${info.label} is ready for writing requests.`);
                 })
                 .catch((error: unknown) => {
                   const code = error instanceof NativeError ? error.code : "";
-                  const message = error instanceof NativeError ? error.message : `Couldn’t connect to ${info.label}.`;
+                  const message =
+                    error instanceof NativeError
+                      ? error.message
+                      : `Couldn’t connect to ${info.label}.`;
                   setNotice(message);
                   setApiStatus((current) => ({
                     ...current,
@@ -740,47 +1029,77 @@ function AiSection({
                 })
                 .finally(() => setBusy(null));
             }}
-          >
-            {busy === "test-key" ? "Testing…" : "Test connection"}
-          </Button>
+            size="sm"
+            variant="secondary"
+          />
           {apiStatus.configured ? (
             <Button
-              compact
+              label="Remove key"
               onClick={() => {
                 setBusy("clear-key");
                 setNotice(null);
-                void nativeBridge.clearApiKey()
+                void nativeBridge
+                  .clearApiKey()
                   .then(setApiStatus)
-                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "The API key couldn’t be removed."))
+                  .catch((error: unknown) =>
+                    setNotice(
+                      error instanceof NativeError
+                        ? error.message
+                        : "The API key couldn’t be removed.",
+                    ),
+                  )
                   .finally(() => setBusy(null));
               }}
-              tone="danger"
-            >Remove key</Button>
+              size="sm"
+              variant="destructive"
+            />
           ) : null}
         </div>
         {info.keyUrl ? (
-          <div className="settings-group__footer"><button className="text-link" onClick={() => void nativeBridge.openExternal(info.keyUrl as string).catch(() => setNotice(`${info.label} couldn’t be opened.`))} type="button">{keyLinkLabel(info)}</button></div>
+          <div {...stylex.props(styles.groupFooter)}>
+            <button
+              onClick={() =>
+                void nativeBridge
+                  .openExternal(info.keyUrl as string)
+                  .catch(() => setNotice(`${info.label} couldn’t be opened.`))
+              }
+              type="button"
+              {...stylex.props(styles.textLink)}
+            >
+              {keyLinkLabel(info)}
+            </button>
+          </div>
         ) : null}
       </SettingsGroup>
       <SettingsGroup header="Models">
-        <SettingRow label="Models, in order" description="Kivo tries the primary model first. If it fails, Kivo tries each fallback in order." stacked>
+        <SettingRow
+          label="Models, in order"
+          description="Kivo tries the primary model first. If it fails, Kivo tries each fallback in order."
+          stacked
+        >
           <ModelQueueEditor
             disabled={busy !== null}
             provider={provider}
             onChange={(aiModels) => {
               void save({ aiModels })
-                .then(() => setApiStatus(current => ({ ...current, connection: "untested" })))
+                .then(() => setApiStatus((current) => ({ ...current, connection: "untested" })))
                 .catch(() => {});
             }}
             value={settings.aiModels}
           />
         </SettingRow>
         {!info.supportsLinkSummary ? (
-          <p className="settings-note">Link summaries require Gemini. {info.label} can still summarize selected text.</p>
+          <p {...stylex.props(styles.note)}>
+            Link summaries require Gemini. {info.label} can still summarize selected text.
+          </p>
         ) : null}
       </SettingsGroup>
       <SettingsGroup header="Response">
-        <SettingRow label="Thinking level" description="Fast is best for everyday writing. Higher levels can help difficult rewrites, but take longer and may use more quota." stacked>
+        <SettingRow
+          label="Thinking level"
+          description="Fast is best for everyday writing. Higher levels can help difficult rewrites, but take longer and may use more quota."
+          stacked
+        >
           <select
             aria-label="AI reasoning mode"
             disabled={busy !== null}
@@ -789,6 +1108,7 @@ function AiSection({
               void save({ aiReasoningMode });
             }}
             value={settings.aiReasoningMode}
+            {...stylex.props(styles.field)}
           >
             <option value="fast">Fast — recommended</option>
             <option value="balanced">Balanced — more thorough</option>
@@ -797,10 +1117,15 @@ function AiSection({
         </SettingRow>
       </SettingsGroup>
       {info.testUsesQuota ? (
-        <p className="settings-note">Testing the connection sends one short request and may use a small amount of quota.</p>
+        <p {...stylex.props(styles.note)}>
+          Testing the connection sends one short request and may use a small amount of quota.
+        </p>
       ) : null}
       {!info.keyUrl ? (
-        <p className="settings-note">No key needed for a local server. Pull a model first — e.g. <code>ollama pull {info.defaultModel}</code> — then Refresh the model list.</p>
+        <p {...stylex.props(styles.note)}>
+          No key needed for a local server. Pull a model first — e.g.{" "}
+          <code>ollama pull {info.defaultModel}</code> — then Refresh the model list.
+        </p>
       ) : null}
     </SettingsContent>
   );
@@ -820,10 +1145,46 @@ function providerBlurb(info: AiProviderInfo): string {
 }
 
 const FALLBACK_AI_PROVIDERS: AiProviderInfo[] = [
-  { id: "gemini", label: "Gemini", keyUrl: "https://aistudio.google.com/app/apikey", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: true, testUsesQuota: true },
-  { id: "zen", label: "OpenCode Zen", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "gemini-3.8-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-  { id: "go", label: "OpenCode Go", keyUrl: "https://opencode.ai/auth", keyOptional: false, defaultModel: "glm-5.3-flash", defaultBaseUrl: null, supportsLinkSummary: false, testUsesQuota: true },
-  { id: "custom", label: "Custom (OpenAI-compatible)", keyUrl: null, keyOptional: true, defaultModel: "llama3.1", defaultBaseUrl: "http://localhost:11434/v1", supportsLinkSummary: false, testUsesQuota: true },
+  {
+    id: "gemini",
+    label: "Gemini",
+    keyUrl: "https://aistudio.google.com/app/apikey",
+    keyOptional: false,
+    defaultModel: "gemini-3.8-flash",
+    defaultBaseUrl: null,
+    supportsLinkSummary: true,
+    testUsesQuota: true,
+  },
+  {
+    id: "zen",
+    label: "OpenCode Zen",
+    keyUrl: "https://opencode.ai/auth",
+    keyOptional: false,
+    defaultModel: "gemini-3.8-flash",
+    defaultBaseUrl: null,
+    supportsLinkSummary: false,
+    testUsesQuota: true,
+  },
+  {
+    id: "go",
+    label: "OpenCode Go",
+    keyUrl: "https://opencode.ai/auth",
+    keyOptional: false,
+    defaultModel: "glm-5.3-flash",
+    defaultBaseUrl: null,
+    supportsLinkSummary: false,
+    testUsesQuota: true,
+  },
+  {
+    id: "custom",
+    label: "Custom (OpenAI-compatible)",
+    keyUrl: null,
+    keyOptional: true,
+    defaultModel: "llama3.1",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    supportsLinkSummary: false,
+    testUsesQuota: true,
+  },
 ];
 
 function keyLabel(info: AiProviderInfo): string {
@@ -841,14 +1202,17 @@ function keyPlaceholder(info: AiProviderInfo): string {
 
 function keyDescription(info: AiProviderInfo, status: ApiKeyStatus): string {
   if (status.configured) return "A key is stored securely by the operating system.";
-  if (info.id === "custom") return "Optional for local servers like Ollama; required for hosted endpoints.";
-  if (info.id === "zen") return "Pay-as-you-go credits from opencode.ai/auth. Required for writing actions and optional dictation cleanup.";
+  if (info.id === "custom")
+    return "Optional for local servers like Ollama; required for hosted endpoints.";
+  if (info.id === "zen")
+    return "Pay-as-you-go credits from opencode.ai/auth. Required for writing actions and optional dictation cleanup.";
   if (info.id === "go") return "Your $10/month Go subscription key from opencode.ai/auth.";
   return "Required for writing actions and optional dictation cleanup.";
 }
 
 function keyLinkLabel(info: AiProviderInfo): string {
-  if (info.id === "zen" || info.id === "go") return "Get an API key from OpenCode (Zen credits or Go subscription)";
+  if (info.id === "zen" || info.id === "go")
+    return "Get an API key from OpenCode (Zen credits or Go subscription)";
   return "Get an API key from Google AI Studio";
 }
 
@@ -874,47 +1238,88 @@ function AboutSection({
   const [installUnsupported, setInstallUnsupported] = useState(false);
   const stableAvailable = updateResult?.available === true && updateResult.channel !== "beta";
   return (
-    <SettingsContent title="About" subtitle="A quiet writing and dictation utility for your desktop.">
-      <div className="about-lockup"><div className="about-lockup__mark"><Icon name="audio" size={27} /></div><div><h2>Kivo</h2><p>Version {context.version}</p></div></div>
+    <SettingsContent
+      title="About"
+      subtitle="A quiet writing and dictation utility for your desktop."
+    >
+      <div {...stylex.props(styles.lockup)}>
+        <div {...stylex.props(styles.lockupMark)}>
+          <Icon name="audio" size={27} />
+        </div>
+        <div>
+          <h2 {...stylex.props(styles.lockupTitle)}>Kivo</h2>
+          <p {...stylex.props(styles.lockupVersion)}>Version {context.version}</p>
+        </div>
+      </div>
       <SettingsGroup>
-        <SettingRow label="Software updates" description={installed ? (busy === "restart" ? "Update installed. Restarting…" : "Update installed. Restart Kivo to finish.") : updateDescription(updateResult)}>
+        <SettingRow
+          label="Software updates"
+          description={
+            installed
+              ? busy === "restart"
+                ? "Update installed. Restarting…"
+                : "Update installed. Restart Kivo to finish."
+              : updateDescription(updateResult)
+          }
+        >
           {installed ? (
             <Button
-              compact
-              disabled={busy !== null}
+              isDisabled={busy !== null}
+              label={busy === "restart" ? "Restarting…" : "Restart now"}
               onClick={() => {
                 setBusy("restart");
-                void nativeBridge.restartApp()
+                void nativeBridge
+                  .restartApp()
                   .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
                   .finally(() => setBusy(null));
               }}
-              tone="primary"
-            >{busy === "restart" ? "Restarting…" : "Restart now"}</Button>
+              size="sm"
+              variant="primary"
+            />
           ) : (
             <Button
-              compact
-              disabled={busy !== null}
+              isDisabled={busy !== null}
+              label={busy === "updates" ? "Checking…" : "Check now"}
               onClick={() => {
                 setBusy("updates");
                 setNotice(null);
                 setInstalled(false);
-                void nativeBridge.checkForUpdates()
+                void nativeBridge
+                  .checkForUpdates()
                   .then(setUpdateResult)
-                  .catch((error: unknown) => setNotice(error instanceof NativeError ? error.message : "Kivo couldn’t check for updates right now."))
+                  .catch((error: unknown) =>
+                    setNotice(
+                      error instanceof NativeError
+                        ? error.message
+                        : "Kivo couldn’t check for updates right now.",
+                    ),
+                  )
                   .finally(() => setBusy(null));
               }}
-            >{busy === "updates" ? "Checking…" : "Check now"}</Button>
+              size="sm"
+              variant="secondary"
+            />
           )}
         </SettingRow>
         {stableAvailable && !installed && !installUnsupported ? (
-          <SettingRow label="Install update" description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}>
+          <SettingRow
+            label="Install update"
+            description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}
+          >
             <Button
-              compact
-              disabled={busy !== null}
+              isDisabled={busy !== null}
+              label={
+                busy === "install"
+                  ? "Installing…"
+                  : busy === "restart"
+                    ? "Restarting…"
+                    : "Download and Install"
+              }
               onClick={() => {
                 setBusy("install");
                 setNotice(null);
-                void nativeBridge.installUpdate()
+                void nativeBridge
+                  .installUpdate()
                   .then(() => {
                     // Install succeeded: restart automatically so a single
                     // click finishes the update. The Windows installer exits
@@ -925,7 +1330,8 @@ function AboutSection({
                     setInstalled(true);
                     setNotice("Update installed. Restarting…");
                     setBusy("restart");
-                    void nativeBridge.restartApp()
+                    void nativeBridge
+                      .restartApp()
                       .then(() => setNotice("Update installed. Restart Kivo to finish."))
                       .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
                       .finally(() => setBusy(null));
@@ -934,24 +1340,64 @@ function AboutSection({
                     const code = error instanceof NativeError ? error.code : "";
                     // No installable update on this build (unsigned/beta):
                     // drop the button instead of looping on the same error.
-                    if (code === "update_install_unavailable" || code === "update_not_available") setInstallUnsupported(true);
-                    setNotice(error instanceof NativeError ? error.message : "The update couldn’t be installed. Use the download link instead.");
+                    if (code === "update_install_unavailable" || code === "update_not_available")
+                      setInstallUnsupported(true);
+                    setNotice(
+                      error instanceof NativeError
+                        ? error.message
+                        : "The update couldn’t be installed. Use the download link instead.",
+                    );
                     setBusy(null);
                   });
               }}
-              tone="primary"
-            >{busy === "install" ? "Installing…" : busy === "restart" ? "Restarting…" : "Download and Install"}</Button>
+              size="sm"
+              variant="primary"
+            />
           </SettingRow>
         ) : null}
       </SettingsGroup>
       {updateResult?.available && !installed ? (
-        <button className="text-link" onClick={() => void nativeBridge.openExternal(updateResult.downloadUrl ?? "https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page couldn’t be opened."))} type="button">{updateResult.channel === "beta" ? "Download the latest beta build from GitHub" : "Download the latest release from GitHub"}</button>
+        <button
+          onClick={() =>
+            void nativeBridge
+              .openExternal(updateResult.downloadUrl ?? "https://github.com/0libote/Kivo/releases")
+              .catch(() => setNotice("The releases page couldn’t be opened."))
+          }
+          type="button"
+          {...stylex.props(styles.textLink, styles.linkStart)}
+        >
+          {updateResult.channel === "beta"
+            ? "Download the latest beta build from GitHub"
+            : "Download the latest release from GitHub"}
+        </button>
       ) : null}
-      <div className="about-links" aria-label="Project links">
-        <button className="text-link" type="button" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo").catch(() => setNotice("The repository could not be opened."))}>Source code on GitHub</button>
-        <button className="text-link" type="button" onClick={() => void nativeBridge.openExternal("https://github.com/0libote/Kivo/releases").catch(() => setNotice("The releases page could not be opened."))}>Release notes</button>
+      <div aria-label="Project links" {...stylex.props(styles.aboutLinks)}>
+        <button
+          onClick={() =>
+            void nativeBridge
+              .openExternal("https://github.com/0libote/Kivo")
+              .catch(() => setNotice("The repository could not be opened."))
+          }
+          type="button"
+          {...stylex.props(styles.textLink, styles.linkStart)}
+        >
+          Source code on GitHub
+        </button>
+        <button
+          onClick={() =>
+            void nativeBridge
+              .openExternal("https://github.com/0libote/Kivo/releases")
+              .catch(() => setNotice("The releases page could not be opened."))
+          }
+          type="button"
+          {...stylex.props(styles.textLink, styles.linkStart)}
+        >
+          Release notes
+        </button>
       </div>
-      <p className="privacy-note">No accounts, analytics, or telemetry. Your text is processed only when you invoke Kivo.</p>
+      <p {...stylex.props(styles.privacyNote)}>
+        No accounts, analytics, or telemetry. Your text is processed only when you invoke Kivo.
+      </p>
     </SettingsContent>
   );
 }
@@ -968,39 +1414,78 @@ function updateDescription(updateResult: UpdateResult | null): string {
   return "Kivo is up to date.";
 }
 
-function SettingsContent({ title, subtitle, children }: { readonly title: string; readonly subtitle: string; readonly children: ReactNode }) {
-  return <section className="settings-content"><header><h1>{title}</h1><p>{subtitle}</p></header>{children}</section>;
+function SettingsContent({
+  title,
+  subtitle,
+  children,
+}: {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section {...stylex.props(styles.content)}>
+      <header {...stylex.props(styles.contentHeader)}>
+        <h1 {...stylex.props(styles.contentTitle)}>{title}</h1>
+        <p {...stylex.props(styles.contentSubtitle)}>{subtitle}</p>
+      </header>
+      {children}
+    </section>
+  );
 }
 
-function SettingsGroup({ header, children, className = "" }: { readonly header?: string; readonly children: ReactNode; readonly className?: string }) {
-  return <section className={`settings-group ${className}`}>{header ? <h2>{header}</h2> : null}<div className="settings-group__body">{children}</div></section>;
+function SettingsGroup({
+  header,
+  children,
+}: {
+  readonly header?: string;
+  readonly children: ReactNode;
+}) {
+  return (
+    <section {...stylex.props(styles.group)}>
+      {header ? <h2 {...stylex.props(styles.groupHeader)}>{header}</h2> : null}
+      <div {...stylex.props(styles.groupBody)}>{children}</div>
+    </section>
+  );
 }
 
-function SettingRow({ label, description, children, stacked = false }: { readonly label: string; readonly description?: string; readonly children: ReactNode; readonly stacked?: boolean }) {
-  return <div className="setting-row" data-stacked={stacked}><div className="setting-row__label"><strong>{label}</strong>{description ? <span>{description}</span> : null}</div><div className="setting-row__control">{children}</div></div>;
+function SettingRow({
+  label,
+  description,
+  children,
+  stacked = false,
+}: {
+  readonly label: string;
+  readonly description?: string;
+  readonly children: ReactNode;
+  readonly stacked?: boolean;
+}) {
+  return (
+    <div data-stacked={stacked} {...stylex.props(styles.row, stacked && styles.rowStacked)}>
+      <div {...stylex.props(styles.rowLabel)}>
+        <strong {...stylex.props(styles.rowTitle)}>{label}</strong>
+        {description ? <span {...stylex.props(styles.rowDescription)}>{description}</span> : null}
+      </div>
+      <div {...stylex.props(styles.rowControl, stacked && styles.rowControlStacked)}>
+        {children}
+      </div>
+    </div>
+  );
 }
 
 function connectionLabel(status: ApiKeyStatus) {
   if (!status.configured) return "Not configured";
   const labels: Record<ApiKeyStatus["connection"], string> = {
-    untested: "Not tested", testing: "Testing", connected: "Connected", invalid: "Key not accepted", "rate-limited": "Rate limited", offline: "Offline", model: "Model unavailable", blocked: "Provider error",
+    untested: "Not tested",
+    testing: "Testing",
+    connected: "Connected",
+    invalid: "Key not accepted",
+    "rate-limited": "Rate limited",
+    offline: "Offline",
+    model: "Model unavailable",
+    blocked: "Provider error",
   };
   return labels[status.connection];
-}
-
-/** Map a failed Test connection to a terminal indicator state so the UI
- * never sticks at "testing". Mirrors the native CommandError codes
- * (see GeminiError::code in src-tauri/src/ai/mod.rs and AppCoreError::code
- * in src-tauri/src/commands/mod.rs). Exported for unit tests. */
-export function testFailureConnection(code: string): ApiKeyStatus["connection"] {
-  if (code === "invalid_api_key" || code === "credential" || code === "ai_not_configured") return "invalid";
-  if (code === "model_unavailable" || code === "model_not_found") return "model";
-  if (code === "rate_limited") return "rate-limited";
-  if (code === "region_unavailable" || code === "account_disabled" || code === "provider_forbidden" || code === "provider_rejected" || code === "api_error" || code === "invalid_response" || code === "incomplete" || code === "empty_response") return "blocked";
-  if (code === "transport") return "offline";
-  // insufficient_credits (empty Zen balance) keeps the neutral state: the
-  // notice text carries the top-up guidance, not the indicator.
-  return "untested";
 }
 
 function connectionDescription(info: AiProviderInfo, status: ApiKeyStatus) {
@@ -1008,9 +1493,363 @@ function connectionDescription(info: AiProviderInfo, status: ApiKeyStatus) {
   if (!status.configured) return `Add a key, or leave it empty for a local server.`;
   if (status.connection === "connected") return "The selected model is ready for writing requests.";
   if (status.connection === "invalid") return "Check the key and save it again.";
-  if (status.connection === "model") return "A queued model isn’t available to this key. Pick another model above, then test again.";
-  if (status.connection === "rate-limited") return `${info.label} is temporarily rate limited. Try again shortly.`;
-  if (status.connection === "blocked") return `${info.label} responded with an error. Read the message above for the provider's details.`;
-  if (status.connection === "offline") return `Kivo couldn’t reach ${info.label}. Check your connection.`;
+  if (status.connection === "model")
+    return "A queued model isn’t available to this key. Pick another model above, then test again.";
+  if (status.connection === "rate-limited")
+    return `${info.label} is temporarily rate limited. Try again shortly.`;
+  if (status.connection === "blocked")
+    return `${info.label} responded with an error. Read the message above for the provider's details.`;
+  if (status.connection === "offline")
+    return `Kivo couldn’t reach ${info.label}. Check your connection.`;
   return "Test the saved key with the selected model before using Writing Tools.";
 }
+
+const styles = stylex.create({
+  shell: {
+    display: "grid",
+    gridTemplateColumns: "184px minmax(0, 1fr)",
+    width: "100%",
+    height: "100%",
+    backgroundColor: "var(--color-background-body)",
+    "@media (width <= 680px)": {
+      gridTemplateColumns: "148px minmax(0, 1fr)",
+    },
+  },
+  sidebar: {
+    display: "flex",
+    flexDirection: "column",
+    minWidth: "0",
+    paddingBlockStart: "22px",
+    paddingBlockEnd: "16px",
+    paddingInline: "10px",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-surface)",
+    borderRightWidth: "1px",
+    borderRightStyle: "solid",
+    borderRightColor: "var(--color-border)",
+    "@media (width <= 680px)": {
+      paddingInline: "8px",
+    },
+  },
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    paddingInline: "9px",
+    paddingBlockEnd: "23px",
+    fontSize: "16px",
+    letterSpacing: "-0.025em",
+  },
+  brandMark: {
+    display: "grid",
+    placeItems: "center",
+    width: "27px",
+    height: "27px",
+    color: "#fff",
+    backgroundColor: "#242426",
+    borderRadius: "7px",
+  },
+  brandName: {
+    fontWeight: 680,
+  },
+  nav: {
+    display: "grid",
+    gap: "2px",
+  },
+  groupLabel: {
+    display: "none",
+    marginBlockStart: "18px",
+    marginInline: "10px",
+    marginBlockEnd: "5px",
+    color: "var(--kivo-text-quaternary)",
+    fontSize: "9px",
+    fontWeight: 700,
+    letterSpacing: "0.13em",
+    textTransform: "uppercase",
+  },
+  navButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    height: "34px",
+    paddingInline: "9px",
+    textAlign: "left",
+    color: "var(--color-text-secondary)",
+    backgroundColor: "transparent",
+    borderWidth: "0",
+    borderRadius: "var(--radius-inner)",
+    fontSize: "12.5px",
+    cursor: "pointer",
+    transitionProperty: "background-color, color",
+    transitionDuration: "120ms",
+    ":hover": {
+      color: "var(--color-text-primary)",
+      backgroundColor: "var(--kivo-hover)",
+    },
+  },
+  navButtonCurrent: {
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--kivo-selected)",
+    fontWeight: 650,
+  },
+  sidebarStatus: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    marginBlockStart: "auto",
+    marginInline: "8px",
+    marginBlockEnd: "0",
+    paddingBlockStart: "12px",
+    color: "var(--kivo-text-tertiary)",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--color-border)",
+    fontSize: "10.5px",
+  },
+  statusDot: {
+    width: "7px",
+    height: "7px",
+    backgroundColor: "var(--kivo-signal)",
+    borderRadius: "50%",
+  },
+  statusDotPaused: {
+    backgroundColor: "var(--kivo-text-tertiary)",
+  },
+  version: {
+    marginInlineStart: "auto",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "10px",
+    fontVariantNumeric: "tabular-nums",
+  },
+  main: {
+    minWidth: "0",
+    paddingBlockStart: "42px",
+    paddingInline: "48px",
+    paddingBlockEnd: "36px",
+    overflow: "auto",
+    outline: "none",
+    backgroundColor: "var(--color-background-body)",
+    scrollbarGutter: "stable",
+    "@media (width <= 680px)": {
+      paddingBlock: "28px",
+      paddingInline: "22px",
+    },
+  },
+  content: {
+    maxWidth: "620px",
+    marginInline: "auto",
+  },
+  contentHeader: {
+    marginBottom: "27px",
+  },
+  contentTitle: {
+    margin: "0 0 4px",
+    fontSize: "25px",
+    fontWeight: 650,
+    lineHeight: 1.2,
+    letterSpacing: "-0.03em",
+  },
+  contentSubtitle: {
+    maxWidth: "560px",
+    margin: "0",
+    color: "var(--color-text-secondary)",
+    fontSize: "13px",
+  },
+  group: {
+    marginBlockEnd: "22px",
+  },
+  groupHeader: {
+    margin: "0 0 9px 2px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "10px",
+    fontWeight: 750,
+    letterSpacing: "0.11em",
+    textTransform: "uppercase",
+  },
+  groupBody: {
+    overflow: "hidden",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "18px",
+    minHeight: "62px",
+    paddingBlock: "12px",
+    paddingInline: "15px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--color-border)",
+    ":first-child": {
+      borderTopWidth: "0",
+    },
+    "@media (width <= 680px)": {
+      flexDirection: "column",
+      alignItems: "flex-start",
+      gap: "10px",
+    },
+  },
+  rowStacked: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    gap: "9px",
+  },
+  rowLabel: {
+    display: "grid",
+    gap: "3px",
+    minWidth: "0",
+  },
+  rowTitle: {
+    fontSize: "13.5px",
+    fontWeight: 620,
+    letterSpacing: "-0.01em",
+  },
+  rowDescription: {
+    color: "var(--color-text-secondary)",
+    fontSize: "11.5px",
+    lineHeight: "1.35",
+  },
+  rowControl: {
+    flexShrink: "0",
+    maxWidth: "58%",
+    "@media (width <= 680px)": {
+      maxWidth: "100%",
+    },
+  },
+  rowControlStacked: {
+    width: "100%",
+    maxWidth: "none",
+  },
+  groupFooter: {
+    display: "flex",
+    paddingBlock: "10px",
+    paddingInline: "12px",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: "var(--color-border)",
+  },
+  groupFooterSplit: {
+    justifyContent: "space-between",
+  },
+  notice: {
+    position: "sticky",
+    bottom: "10px",
+    zIndex: 2,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    maxWidth: "620px",
+    marginBlockStart: "10px",
+    marginInline: "auto",
+    paddingBlock: "10px",
+    paddingInline: "11px",
+    paddingInlineStart: "13px",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+    boxShadow: "var(--shadow-high)",
+  },
+  note: {
+    marginBlockStart: "2px",
+    marginBlockEnd: "14px",
+    color: "var(--color-text-secondary)",
+    fontSize: "12px",
+    lineHeight: "1.4",
+  },
+  empty: {
+    color: "var(--color-text-secondary)",
+    fontSize: "12.5px",
+  },
+  field: {
+    minHeight: "30px",
+    paddingBlock: "0",
+    paddingInline: "9px",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-inner)",
+    fontSize: "13px",
+  },
+  growField: {
+    flex: 1,
+    minWidth: "0",
+  },
+  numberField: {
+    width: "120px",
+  },
+  keyEditor: {
+    display: "flex",
+    gap: "7px",
+    width: "100%",
+  },
+  permissionControl: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+  },
+  granted: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    color: "var(--color-success)",
+    fontSize: "12px",
+    whiteSpace: "nowrap",
+  },
+  textLink: {
+    padding: "0",
+    color: "var(--color-text-accent)",
+    backgroundColor: "transparent",
+    borderWidth: "0",
+    fontSize: "12px",
+    cursor: "pointer",
+    ":hover": {
+      textDecoration: "underline",
+    },
+  },
+  linkStart: {
+    justifySelf: "start",
+  },
+  lockup: {
+    display: "flex",
+    alignItems: "center",
+    gap: "13px",
+    marginBlockEnd: "24px",
+  },
+  lockupMark: {
+    display: "grid",
+    placeItems: "center",
+    width: "54px",
+    height: "54px",
+    color: "#f7f7f5",
+    backgroundColor: "#1c1c1e",
+    borderRadius: "13px",
+  },
+  lockupTitle: {
+    margin: "0",
+    fontSize: "18px",
+  },
+  lockupVersion: {
+    margin: "0",
+    color: "var(--color-text-secondary)",
+  },
+  aboutLinks: {
+    display: "grid",
+    gap: "8px",
+    color: "var(--color-text-secondary)",
+  },
+  privacyNote: {
+    marginTop: "28px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "11px",
+  },
+});

@@ -68,14 +68,20 @@ Useful checks:
 
 ```sh
 bun typecheck
-bun lint
-bun run test
-bun test:ui
+bun lint              # Oxlint
+bun run format:check  # Biome (use `bun run format` to apply)
+bun run knip          # dead files, exports and dependencies
+bun run theme:check   # Astryx theme artifacts are current
+bun run test          # bun test
+bun test:ui           # Playwright
 bun run build
 bun check:rust
 cargo test --manifest-path src-tauri/Cargo.toml
 bun tauri build
 ```
+
+Git hooks are managed by Lefthook: `bun install` installs them, pre-commit runs
+Biome + Oxlint on staged files, and pre-push runs the type check and unit tests.
 
 ## AI setup
 
@@ -137,6 +143,8 @@ The app is one Tauri process with four pre-created webview surfaces:
 - `onboarding`: a short first-run permission and setup flow.
 
 React owns presentation and transient UI state. Rust owns shortcuts, window placement, speech sessions, selected text, replacements, settings, credentials, Gemini requests, and tray lifecycle. Sensitive text and keys are intentionally absent from serializable types wherever the UI does not need them. The latest completed dictation is kept only in memory for the current app session and can be copied or cleared from Home. Cancelled dictations are discarded.
+
+Presentation uses the Astryx design system (`@astryxdesign/core`) with StyleX for app-specific layout. The Kivo theme is defined in `src/theme/kivo.ts` and pre-compiled to `src/theme/built/` by `bun run theme:build`; both the built CSS and JS are committed and checked in CI by `bun run theme:check`. Motion (`motion/react`) drives the compact overlay and step transitions. There is no hand-written component CSS: document-level rules live in `src/styles/app.css` and the only other stylesheets are Astryx's prebuilt CSS and the markdown prose rules for sanitized AI output.
 
 Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. The optional on-device engine lives under `src-tauri/src/speech/` (`local.rs` capture and inference, `model_store.rs` catalog/downloads, `router.rs` per-session engine selection) and is shared by both desktops. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free AX/UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
 

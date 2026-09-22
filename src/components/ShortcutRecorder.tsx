@@ -1,5 +1,8 @@
+import { Button } from "@astryxdesign/core/Button";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 import type { Platform } from "../types";
+import { formatShortcut } from "./shortcut";
 
 interface ShortcutRecorderProps {
   readonly label: string;
@@ -27,20 +30,9 @@ function shortcutFromEvent(event: KeyboardEvent): string | null {
     values.push(displayKey(event));
   }
 
-  return values.length >= 2 || (values.length === 1 && !MODIFIERS.has(event.key)) ? values.join("+") : null;
-}
-
-export function formatShortcut(value: string, platform: Platform) {
-  return value.split("+").map((part) => {
-    if (platform === "macos") {
-      if (part === "Meta") return "⌘";
-      if (part === "Alt") return "⌥";
-      if (part === "Shift") return "⇧";
-      if (part === "Ctrl") return "⌃";
-    }
-    if (platform === "windows" && part === "Meta") return "Win";
-    return part;
-  });
+  return values.length >= 2 || (values.length === 1 && !MODIFIERS.has(event.key))
+    ? values.join("+")
+    : null;
 }
 
 export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutRecorderProps) {
@@ -74,11 +66,9 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
   }, [onChange, recording]);
 
   return (
-    <div className="shortcut-recorder">
-      <button
-        aria-label={`${label}: ${recording ? "recording" : value}`}
-        className="shortcut-recorder__button"
-        data-recording={recording}
+    <div {...stylex.props(styles.root)}>
+      <Button
+        label={`${label}: ${recording ? "recording" : value}`}
         onClick={() => {
           setRecording(true);
           setInvalid(false);
@@ -91,15 +81,63 @@ export function ShortcutRecorder({ label, platform, value, onChange }: ShortcutR
           setInvalid(false);
         }}
         ref={buttonRef}
+        size="sm"
         type="button"
+        variant="secondary"
       >
         {recording ? (
-          <span className="shortcut-recorder__prompt">Press shortcut</span>
+          <span {...stylex.props(styles.prompt)}>Press shortcut</span>
         ) : (
-          formatShortcut(value, platform).map((key, index) => <kbd key={`${key}-${index}`}>{key}</kbd>)
+          <span {...stylex.props(styles.keys)}>
+            {formatShortcut(value, platform).map((key, index) => (
+              <kbd key={`${key}-${index}`} {...stylex.props(styles.key)}>
+                {key}
+              </kbd>
+            ))}
+          </span>
         )}
-      </button>
-      {invalid ? <span className="shortcut-recorder__error" role="alert">Include a key with your modifiers.</span> : null}
+      </Button>
+      {invalid ? (
+        <span role="alert" {...stylex.props(styles.error)}>
+          Include a key with your modifiers.
+        </span>
+      ) : null}
     </div>
   );
 }
+
+const styles = stylex.create({
+  root: {
+    display: "grid",
+    justifyItems: "end",
+    gap: "5px",
+    minWidth: "150px",
+  },
+  keys: {
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  },
+  prompt: {
+    color: "var(--color-accent)",
+    fontSize: "11px",
+  },
+  key: {
+    display: "grid",
+    placeItems: "center",
+    minWidth: "23px",
+    height: "21px",
+    paddingInline: "6px",
+    fontSize: "11px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderBottomWidth: "2px",
+    borderColor: "var(--color-border-emphasized)",
+    borderRadius: "4px",
+    backgroundColor: "var(--color-background-muted)",
+  },
+  error: {
+    color: "var(--color-error)",
+    fontSize: "11px",
+  },
+});

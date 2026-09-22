@@ -1,17 +1,18 @@
+import { Button } from "@astryxdesign/core/Button";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
-import { Button } from "../../components/Button";
+import { normalizeAiProvider } from "../../ai/models";
 import { Icon } from "../../components/Icon";
 import { SegmentedControl } from "../../components/SegmentedControl";
-import { ModelQueueEditor } from "./ModelQueueEditor";
-import { normalizeAiProvider } from "../../ai/models";
+import type { AppSettings, WritingPreset } from "../../types";
 import {
   DEFAULT_PRESET_TEMPLATE,
   INSTRUCTION_PLACEHOLDER,
-  MAX_WRITING_PRESETS,
-  OUTPUT_RULE_PLACEHOLDER,
   isBuiltInPreset,
+  MAX_WRITING_PRESETS,
   newCustomPreset,
   normalizeWritingPreset,
+  OUTPUT_RULE_PLACEHOLDER,
   resolveWritingPresets,
   withAddedPreset,
   withMovedPreset,
@@ -20,7 +21,7 @@ import {
   withResetPreset,
   withWritingPreset,
 } from "../writing-tools/presets";
-import type { AppSettings, WritingPreset } from "../../types";
+import { ModelQueueEditor } from "./ModelQueueEditor";
 
 interface WritingPresetListProps {
   readonly settings: AppSettings;
@@ -39,8 +40,8 @@ export function WritingPresetList({ settings, save }: WritingPresetListProps) {
   const atCap = settings.enabledWritingActions.length >= MAX_WRITING_PRESETS;
 
   return (
-    <div className="writing-preset-list">
-      <ol className="writing-preset-list__items">
+    <div {...stylex.props(styles.list)}>
+      <ol {...stylex.props(styles.items)}>
         {presets.map((preset, index) => {
           const editing = editingId === preset.id;
           let modelSummary = "Global AI models";
@@ -49,50 +50,63 @@ export function WritingPresetList({ settings, save }: WritingPresetListProps) {
             modelSummary = `${preset.models.length} ${noun} (custom order)`;
           }
           return (
-            <li className="writing-preset" data-editing={editing} key={preset.id}>
-              <div className="writing-preset__summary">
-                <span aria-hidden className="writing-preset__position" data-first={index === 0}>{index + 1}</span>
-                <span className="writing-preset__icon" aria-hidden><Icon name={preset.icon} size={16} /></span>
-                <span className="writing-preset__copy">
-                  <strong>{preset.label || "Untitled preset"}</strong>
-                  <small>{preset.description || modelSummary}</small>
+            <li key={preset.id} {...stylex.props(styles.preset, editing && styles.presetEditing)}>
+              <div {...stylex.props(styles.summary)}>
+                <span
+                  aria-hidden
+                  {...stylex.props(styles.position, index === 0 && styles.positionFirst)}
+                >
+                  {index + 1}
                 </span>
-                <span className="writing-preset__actions">
+                <span aria-hidden {...stylex.props(styles.icon)}>
+                  <Icon name={preset.icon} size={16} />
+                </span>
+                <span {...stylex.props(styles.copy)}>
+                  <strong {...stylex.props(styles.copyTitle)}>
+                    {preset.label || "Untitled preset"}
+                  </strong>
+                  <small {...stylex.props(styles.copyMeta)}>
+                    {preset.description || modelSummary}
+                  </small>
+                </span>
+                <span {...stylex.props(styles.actions)}>
                   <Button
-                    aria-label={`Move ${preset.label} up`}
-                    compact
-                    disabled={index === 0}
-                    icon="chevron-up"
+                    icon={<Icon name="chevron-up" size={14} />}
+                    isDisabled={index === 0}
+                    isIconOnly
+                    label={`Move ${preset.label} up`}
                     onClick={() => void save(withMovedPreset(settings, preset.id, -1))}
-                    title="Move up"
+                    size="sm"
+                    tooltip="Move up"
                   />
                   <Button
-                    aria-label={`Move ${preset.label} down`}
-                    compact
-                    disabled={index === presets.length - 1}
-                    icon="chevron-down"
+                    icon={<Icon name="chevron-down" size={14} />}
+                    isDisabled={index === presets.length - 1}
+                    isIconOnly
+                    label={`Move ${preset.label} down`}
                     onClick={() => void save(withMovedPreset(settings, preset.id, 1))}
-                    title="Move down"
+                    size="sm"
+                    tooltip="Move down"
                   />
                   <Button
                     aria-expanded={editing}
-                    compact
-                    icon="pencil"
+                    icon={<Icon name="pencil" size={14} />}
+                    label={editing ? "Close" : "Edit"}
                     onClick={() => setEditingId(editing ? null : preset.id)}
-                  >
-                    {editing ? "Close" : "Edit"}
-                  </Button>
+                    size="sm"
+                  />
                   <Button
-                    aria-label={`Remove ${preset.label}`}
-                    compact
-                    disabled={presets.length <= 1}
-                    icon="close"
+                    icon={<Icon name="close" size={14} />}
+                    isDisabled={presets.length <= 1}
+                    isIconOnly
+                    label={`Remove ${preset.label}`}
                     onClick={() => {
                       if (editing) setEditingId(null);
                       void save(withRemovedPreset(settings, preset.id));
                     }}
-                    title="Remove from the menu"
-                    tone="danger"
+                    size="sm"
+                    tooltip="Remove from the menu"
+                    variant="destructive"
                   />
                 </span>
               </div>
@@ -108,22 +122,26 @@ export function WritingPresetList({ settings, save }: WritingPresetListProps) {
           );
         })}
       </ol>
-      <div className="writing-preset-list__footer">
+      <div {...stylex.props(styles.listFooter)}>
         <Button
-          compact
-          disabled={atCap}
-          icon="spark"
+          icon={<Icon name="spark" size={14} />}
+          isDisabled={atCap}
+          label={atCap ? `Up to ${MAX_WRITING_PRESETS} presets` : "Add preset"}
           onClick={() => {
             const preset = newCustomPreset();
             setEditingId(preset.id);
             void save(withAddedPreset(settings, preset));
           }}
-        >
-          {atCap ? `Up to ${MAX_WRITING_PRESETS} presets` : "Add preset"}
-        </Button>
-        <Button compact onClick={() => { setEditingId(null); void save(withResetAllPresets()); }}>
-          Reset all to defaults
-        </Button>
+          size="sm"
+        />
+        <Button
+          label="Reset all to defaults"
+          onClick={() => {
+            setEditingId(null);
+            void save(withResetAllPresets());
+          }}
+          size="sm"
+        />
       </div>
     </div>
   );
@@ -160,14 +178,14 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
 
   return (
     <form
-      className="writing-preset-form"
       onSubmit={(event) => {
         event.preventDefault();
         commit();
       }}
+      {...stylex.props(styles.form)}
     >
-      <label className="writing-preset-form__field">
-        <span>Name</span>
+      <label {...stylex.props(styles.field)}>
+        <span {...stylex.props(styles.fieldHeading)}>Name</span>
         <input
           autoComplete="off"
           maxLength={60}
@@ -175,31 +193,34 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
           placeholder="e.g. Make it polite"
           required
           value={draft.label}
+          {...stylex.props(styles.input)}
         />
       </label>
-      <label className="writing-preset-form__field">
-        <span>Description</span>
+      <label {...stylex.props(styles.field)}>
+        <span {...stylex.props(styles.fieldHeading)}>Description</span>
         <input
           autoComplete="off"
           maxLength={60}
           onChange={(event) => patch({ description: event.target.value })}
           placeholder="Shown under the name in the menu"
           value={draft.description}
+          {...stylex.props(styles.input)}
         />
       </label>
-      <label className="writing-preset-form__field">
-        <span>What it should do</span>
+      <label {...stylex.props(styles.field)}>
+        <span {...stylex.props(styles.fieldHeading)}>What it should do</span>
         <textarea
           onChange={(event) => patch({ instruction: event.target.value })}
           placeholder="Describe the change, e.g. Make the tone warmer and more conversational."
           required
           rows={3}
           value={draft.instruction}
+          {...stylex.props(styles.textarea)}
         />
       </label>
 
-      <div className="writing-preset-form__field">
-        <span>Result</span>
+      <div {...stylex.props(styles.field)}>
+        <span {...stylex.props(styles.fieldHeading)}>Result</span>
         <SegmentedControl
           ariaLabel="Result behavior"
           onChange={(value) => patch({ replacesSelection: value === "replace" })}
@@ -211,11 +232,15 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
         />
       </div>
 
-      <div className="writing-preset-form__field">
-        <span>Models</span>
+      <div {...stylex.props(styles.field)}>
+        <span {...stylex.props(styles.fieldHeading)}>Models</span>
         <SegmentedControl
           ariaLabel="Model priority"
-          onChange={(value) => patch({ models: value === "custom" ? modelsForPriority(draft.models, settings.aiModels) : [] })}
+          onChange={(value) =>
+            patch({
+              models: value === "custom" ? modelsForPriority(draft.models, settings.aiModels) : [],
+            })
+          }
           options={[
             { label: "Follow global models", value: "global" },
             { label: "Custom priority", value: "custom" },
@@ -223,7 +248,7 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
           value={useGlobalModels ? "global" : "custom"}
         />
         {useGlobalModels ? (
-          <p className="writing-preset-form__hint">Uses the ordered AI models from the AI settings.</p>
+          <p {...stylex.props(styles.hint)}>Uses the ordered AI models from the AI settings.</p>
         ) : (
           <ModelQueueEditor
             provider={provider}
@@ -233,57 +258,232 @@ function WritingPresetForm({ preset, settings, save, onClose }: WritingPresetFor
         )}
       </div>
 
-      <div className="writing-preset-form__advanced">
-        <button
+      <div {...stylex.props(styles.advanced)}>
+        <Button
           aria-expanded={showTemplate}
-          className="text-link"
+          label={showTemplate ? "Hide advanced prompt" : "Advanced: edit the prompt template"}
           onClick={() => setShowTemplate((value) => !value)}
-          type="button"
-        >
-          {showTemplate ? "Hide advanced prompt" : "Advanced: edit the prompt template"}
-        </button>
+          size="sm"
+          variant="ghost"
+          xstyle={styles.textLink}
+        />
         {showTemplate ? (
-          <div className="writing-preset-form__field">
-            <span>Prompt template</span>
+          <div {...stylex.props(styles.field)}>
+            <span {...stylex.props(styles.fieldHeading)}>Prompt template</span>
             <textarea
-              className="writing-preset-form__template"
               onChange={(event) => patch({ template: event.target.value })}
               rows={8}
               spellCheck={false}
               value={draft.template ?? DEFAULT_PRESET_TEMPLATE}
+              {...stylex.props(styles.textarea, styles.template)}
             />
-            <p className="writing-preset-form__hint">
-              {INSTRUCTION_PLACEHOLDER} is replaced with "What it should do"; {OUTPUT_RULE_PLACEHOLDER} with the result rule.
-              Remove a placeholder to stop substituting it.
+            <p {...stylex.props(styles.hint)}>
+              {INSTRUCTION_PLACEHOLDER} is replaced with "What it should do";{" "}
+              {OUTPUT_RULE_PLACEHOLDER} with the result rule. Remove a placeholder to stop
+              substituting it.
             </p>
             {draft.template != null ? (
-              <Button compact onClick={() => patch({ template: null })}>Reset template</Button>
+              <Button label="Reset template" onClick={() => patch({ template: null })} size="sm" />
             ) : null}
           </div>
         ) : null}
       </div>
 
-      <div className="writing-preset-form__footer">
+      <div {...stylex.props(styles.footer)}>
         {isBuiltInPreset(preset.id) ? (
           <Button
-            compact
+            label="Reset this preset"
             onClick={() => {
               void save(withResetPreset(settings, preset.id));
               onClose();
             }}
-          >
-            Reset this preset
-          </Button>
+            size="sm"
+          />
         ) : (
           <span />
         )}
-        <span className="writing-preset-form__footer-actions">
-          <Button compact onClick={onClose}>Cancel</Button>
-          <Button compact disabled={draft.label.trim() === "" || draft.instruction.trim() === ""} tone="primary" type="submit">
-            Save preset
-          </Button>
+        <span {...stylex.props(styles.footerActions)}>
+          <Button label="Cancel" onClick={onClose} size="sm" />
+          <Button
+            isDisabled={draft.label.trim() === "" || draft.instruction.trim() === ""}
+            label="Save preset"
+            size="sm"
+            type="submit"
+            variant="primary"
+          />
         </span>
       </div>
     </form>
   );
 }
+
+const styles = stylex.create({
+  list: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+  },
+  items: {
+    display: "grid",
+    gap: "8px",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  preset: {
+    overflow: "hidden",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+  },
+  presetEditing: {
+    borderColor: "var(--color-accent)",
+  },
+  summary: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "10px 12px",
+  },
+  position: {
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    width: "24px",
+    height: "24px",
+    color: "var(--color-text-secondary)",
+    fontSize: "11px",
+    fontWeight: 650,
+    fontVariantNumeric: "tabular-nums",
+    backgroundColor: "var(--color-background-muted)",
+    borderRadius: "50%",
+  },
+  positionFirst: {
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
+  },
+  icon: {
+    display: "grid",
+    placeItems: "center",
+    flexShrink: 0,
+    color: "var(--color-text-secondary)",
+  },
+  copy: {
+    display: "grid",
+    flex: 1,
+    gap: "2px",
+    minWidth: 0,
+  },
+  copyTitle: {
+    fontSize: "13px",
+    fontWeight: 620,
+  },
+  copyMeta: {
+    overflow: "hidden",
+    color: "var(--color-text-secondary)",
+    fontSize: "11px",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    gap: "4px",
+  },
+  form: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    backgroundColor: "var(--color-background-muted)",
+    borderBlockStartWidth: "1px",
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--color-border)",
+  },
+  field: {
+    display: "grid",
+    gap: "5px",
+  },
+  fieldHeading: {
+    color: "var(--color-text-secondary)",
+    fontSize: "11px",
+    fontWeight: 650,
+  },
+  input: {
+    width: "100%",
+    minHeight: "32px",
+    padding: "0 10px",
+    userSelect: "text",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border-emphasized)",
+    borderRadius: "var(--radius-element)",
+    ":focus": {
+      borderColor: "color-mix(in srgb, var(--color-accent) 55%, transparent)",
+      outline: "none",
+    },
+    "::placeholder": {
+      color: "var(--color-text-disabled)",
+    },
+  },
+  textarea: {
+    width: "100%",
+    padding: "8px 10px",
+    resize: "vertical",
+    userSelect: "text",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border-emphasized)",
+    borderRadius: "var(--radius-element)",
+    lineHeight: 1.5,
+    ":focus": {
+      borderColor: "color-mix(in srgb, var(--color-accent) 55%, transparent)",
+      outline: "none",
+    },
+    "::placeholder": {
+      color: "var(--color-text-disabled)",
+    },
+  },
+  template: {
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    fontSize: "11.5px",
+  },
+  hint: {
+    margin: 0,
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "11px",
+    lineHeight: 1.4,
+  },
+  advanced: {
+    display: "grid",
+    gap: "10px",
+  },
+  textLink: {
+    justifySelf: "start",
+    height: "auto",
+    padding: 0,
+    color: "var(--color-accent)",
+    fontSize: "12px",
+    fontWeight: 400,
+  },
+  footer: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+  },
+  footerActions: {
+    display: "flex",
+    gap: "7px",
+  },
+  listFooter: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "7px",
+  },
+});

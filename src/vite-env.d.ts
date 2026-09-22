@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
-interface Window {
-  __TAURI_INTERNALS__?: unknown;
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: unknown;
+  }
 }
+
+export {};

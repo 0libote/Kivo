@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import * as stylex from "@stylexjs/stylex";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import type {
-  AppContext,
-  AppSettings,
-  DictationSnapshot,
-  PermissionStatus,
-} from "../../types";
+import type { AppContext, AppSettings, DictationSnapshot, PermissionStatus } from "../../types";
 
 /**
  * Frontend-only dev bench (never a Tauri window, never IPC): one screen
@@ -51,14 +50,14 @@ export function GalleryWindow({
         ]);
         setPermissions(perms);
         setMics(micList.map((mic) => mic.name).join(", "));
-        setLanguages(langList.map((lang) => `${lang.code}${lang.installed ? "" : " (missing)"}`).join(", "));
-        setModels(modelList.map((model) => model.id).join(", "));
-        setKeyStatus(
-          `configured=${key.configured ? "yes" : "no"} connection=${key.connection}`,
+        setLanguages(
+          langList.map((lang) => `${lang.code}${lang.installed ? "" : " (missing)"}`).join(", "),
         );
+        setModels(modelList.map((model) => model.id).join(", "));
+        setKeyStatus(`configured=${key.configured ? "yes" : "no"} connection=${key.connection}`);
         setRecovery(rec);
-      } catch (error) {
-        setError(error instanceof Error ? error.message : "The probe failed.");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "The probe failed.");
       }
     })();
   }, [settings.aiProvider]);
@@ -79,8 +78,8 @@ export function GalleryWindow({
           ? "Replaced the text in place."
           : (response.text ?? "(empty result)"),
       );
-    } catch (error) {
-      setWriting(error instanceof Error ? `Failed: ${error.message}` : "Failed.");
+    } catch (cause) {
+      setWriting(cause instanceof Error ? `Failed: ${cause.message}` : "Failed.");
     }
   }
 
@@ -96,175 +95,391 @@ export function GalleryWindow({
           : "Round trip mismatch: restore did not persist.",
       );
       refresh();
-    } catch (error) {
-      setRoundTrip(error instanceof Error ? `Failed: ${error.message}` : "Failed.");
+    } catch (cause) {
+      setRoundTrip(cause instanceof Error ? `Failed: ${cause.message}` : "Failed.");
       refresh();
     }
   }
 
   return (
-    <main className="settings-window">
-      <aside className="settings-sidebar">
-        <div className="settings-sidebar__brand">
-          <span aria-hidden="true" className="settings-sidebar__mark">K</span>
+    <main data-testid="gallery" {...stylex.props(styles.window)}>
+      <aside {...stylex.props(styles.sidebar)}>
+        <div {...stylex.props(styles.brand)}>
+          <span aria-hidden="true" {...stylex.props(styles.mark)}>
+            K
+          </span>
           <span>Kivo bench</span>
         </div>
-        <p className="settings-sidebar__version">
-          {context.platform} · {nativeBridge.isNative ? "native core" : "mock harness"} · {context.version || "dev"}
+        <p {...stylex.props(styles.version)}>
+          {context.platform} · {nativeBridge.isNative ? "native core" : "mock harness"} ·{" "}
+          {context.version || "dev"}
         </p>
-        <p className="settings-sidebar__status">
+        <p {...stylex.props(styles.status)}>
+          <StatusDot
+            label={context.paused ? "Paused" : "Active"}
+            variant={context.paused ? "neutral" : "success"}
+          />
           {context.paused ? "Paused" : "Active"}
         </p>
       </aside>
-      <section className="settings-main">
-        <div className="settings-content">
-          <h1>Test bench</h1>
-          <p className="settings-note">
-            One screen over the active bridge. Green here means the shared
-            AppCore path works; only the thin per-OS adapter differs on
-            macOS and Windows.
+      <section {...stylex.props(styles.main)}>
+        <div {...stylex.props(styles.content)}>
+          <h1 {...stylex.props(styles.title)}>Test bench</h1>
+          <p {...stylex.props(styles.lead)}>
+            One screen over the active bridge. Green here means the shared AppCore path works; only
+            the thin per-OS adapter differs on macOS and Windows.
           </p>
-          {error ? (
-            <p className="settings-notice" role="alert">{error}</p>
-          ) : null}
+          {error ? <Banner status="error" title={error} xstyle={styles.errorBanner} /> : null}
 
-          <div className="settings-group">
-            <h2>Contract</h2>
-            <div className="settings-group__body">
-              <div className="setting-row">
-                <span className="setting-row__label">Dictation shortcut</span>
-                <span className="setting-row__control">{settings.dictationShortcut}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Writing shortcut</span>
-                <span className="setting-row__control">{settings.writingShortcut}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">AI provider / queue</span>
-                <span className="setting-row__control">
-                  {settings.aiProvider} · {settings.aiModels.join(", ")}
-                </span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Permissions</span>
-                <span className="setting-row__control">
-                  {permissions.length === 0
-                    ? "—"
-                    : permissions.map((p) => `${p.kind}=${p.state}${p.required ? "*" : ""}`).join(" · ")}
-                </span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Microphones</span>
-                <span className="setting-row__control">{mics}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Speech languages</span>
-                <span className="setting-row__control">{languages}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">AI models</span>
-                <span className="setting-row__control">{models}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">API key</span>
-                <span className="setting-row__control">{keyStatus}</span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Recovery text</span>
-                <span className="setting-row__control">
-                  {recovery === null ? "(none)" : recovery}
-                </span>
-              </div>
-              <div className="setting-row">
-                <span className="setting-row__label">Dictation event</span>
-                <span className="setting-row__control">
-                  {dictation === null ? "(no event yet)" : dictation.status}
-                </span>
-              </div>
-            </div>
-            <div className="settings-group__footer">
-              <button className="button button--compact" onClick={refresh} type="button">
-                Re-run probes
-              </button>
-            </div>
-          </div>
+          <Group
+            footer={
+              <Button label="Re-run probes" onClick={refresh} size="sm" variant="secondary" />
+            }
+            title="Contract"
+          >
+            <Row label="Dictation shortcut">{settings.dictationShortcut}</Row>
+            <Row label="Writing shortcut">{settings.writingShortcut}</Row>
+            <Row label="AI provider / queue">
+              {settings.aiProvider} · {settings.aiModels.join(", ")}
+            </Row>
+            <Row label="Permissions">
+              {permissions.length === 0
+                ? "—"
+                : permissions
+                    .map((p) => `${p.kind}=${p.state}${p.required ? "*" : ""}`)
+                    .join(" · ")}
+            </Row>
+            <Row label="Microphones">{mics}</Row>
+            <Row label="Speech languages">{languages}</Row>
+            <Row label="AI models">{models}</Row>
+            <Row label="API key">{keyStatus}</Row>
+            <Row label="Recovery text">{recovery === null ? "(none)" : recovery}</Row>
+            <Row label="Dictation event">
+              {dictation === null ? "(no event yet)" : dictation.status}
+            </Row>
+          </Group>
 
-          <div className="settings-group">
-            <h2>Dictation smoke</h2>
-            <p className="settings-note">
-              Drives the real start/stop/cancel path. On Linux the simulated
-              engine answers; in the mock harness the canned events answer.
-            </p>
-            <div className="settings-group__footer settings-group__footer--split">
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.startDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "start failed"))}
-                type="button"
-              >
-                Start
-              </button>
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.stopDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "stop failed"))}
-                type="button"
-              >
-                Stop
-              </button>
-              <button
-                className="button button--compact"
-                onClick={() => void nativeBridge.cancelDictation().catch((error: unknown) => setError(error instanceof Error ? error.message : "cancel failed"))}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
+          <Group
+            footer={
+              <>
+                <Button
+                  label="Start"
+                  onClick={() =>
+                    void nativeBridge
+                      .startDictation()
+                      .catch((cause: unknown) =>
+                        setError(cause instanceof Error ? cause.message : "start failed"),
+                      )
+                  }
+                  size="sm"
+                  variant="secondary"
+                />
+                <Button
+                  label="Stop"
+                  onClick={() =>
+                    void nativeBridge
+                      .stopDictation()
+                      .catch((cause: unknown) =>
+                        setError(cause instanceof Error ? cause.message : "stop failed"),
+                      )
+                  }
+                  size="sm"
+                  variant="secondary"
+                />
+                <Button
+                  label="Cancel"
+                  onClick={() =>
+                    void nativeBridge
+                      .cancelDictation()
+                      .catch((cause: unknown) =>
+                        setError(cause instanceof Error ? cause.message : "cancel failed"),
+                      )
+                  }
+                  size="sm"
+                  variant="secondary"
+                />
+              </>
+            }
+            footerSplit
+            note="Drives the real start/stop/cancel path. On Linux the simulated engine answers; in the mock harness the canned events answer."
+            title="Dictation smoke"
+          />
 
-          <div className="settings-group">
-            <h2>Writing smoke</h2>
-            <p className="settings-note">
-              Runs proofread on the sample text. Uses AI quota when a key is
-              configured against the live core.
-            </p>
-            <div className="settings-group__body">
-              <div className="setting-row">
-                <span className="setting-row__label">Result</span>
-                <span className="setting-row__control">{writing}</span>
-              </div>
-            </div>
-            <div className="settings-group__footer">
-              <button className="button button--compact" onClick={() => void runWritingProbe()} type="button">
-                Run proofread
-              </button>
-            </div>
-          </div>
+          <Group
+            footer={
+              <Button
+                label="Run proofread"
+                onClick={() => void runWritingProbe()}
+                size="sm"
+                variant="secondary"
+              />
+            }
+            note="Runs proofread on the sample text. Uses AI quota when a key is configured against the live core."
+            title="Writing smoke"
+          >
+            <Row label="Result">{writing}</Row>
+          </Group>
 
-          <div className="settings-group">
-            <h2>Settings round trip</h2>
-            <div className="settings-group__body">
-              <div className="setting-row">
-                <span className="setting-row__label">Result</span>
-                <span className="setting-row__control">{roundTrip}</span>
-              </div>
-            </div>
-            <div className="settings-group__footer">
-              <button className="button button--compact" onClick={() => void runSettingsRoundTrip()} type="button">
-                Write + restore
-              </button>
-            </div>
-          </div>
+          <Group
+            footer={
+              <Button
+                label="Write + restore"
+                onClick={() => void runSettingsRoundTrip()}
+                size="sm"
+                variant="secondary"
+              />
+            }
+            title="Settings round trip"
+          >
+            <Row label="Result">{roundTrip}</Row>
+          </Group>
 
-          <div className="settings-group">
-            <h2>Surfaces</h2>
-            <div className="settings-group__footer settings-group__footer--split">
-              <a className="button button--compact" href="?surface=flow-bar&harness=1">Flow Bar</a>
-              <a className="button button--compact" href="?surface=writing-tools&harness=1">Writing Tools</a>
-              <a className="button button--compact" href="?surface=settings&harness=1">Settings</a>
-              <a className="button button--compact" href="?surface=onboarding&harness=1">Onboarding</a>
-            </div>
-          </div>
+          <Group
+            footer={
+              <>
+                <Button
+                  href="?surface=flow-bar&harness=1"
+                  label="Flow Bar"
+                  size="sm"
+                  variant="secondary"
+                />
+                <Button
+                  href="?surface=writing-tools&harness=1"
+                  label="Writing Tools"
+                  size="sm"
+                  variant="secondary"
+                />
+                <Button
+                  href="?surface=settings&harness=1"
+                  label="Settings"
+                  size="sm"
+                  variant="secondary"
+                />
+                <Button
+                  href="?surface=onboarding&harness=1"
+                  label="Onboarding"
+                  size="sm"
+                  variant="secondary"
+                />
+              </>
+            }
+            footerSplit
+            title="Surfaces"
+          />
         </div>
       </section>
     </main>
   );
 }
+
+function Group({
+  title,
+  note,
+  footer,
+  footerSplit = false,
+  children,
+}: {
+  readonly title: string;
+  readonly note?: string;
+  readonly footer?: ReactNode;
+  readonly footerSplit?: boolean;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <section {...stylex.props(styles.group)}>
+      <h2 {...stylex.props(styles.groupTitle)}>{title}</h2>
+      {note ? <p {...stylex.props(styles.note)}>{note}</p> : null}
+      <div {...stylex.props(styles.groupBody)}>
+        {children}
+        {footer ? (
+          <div {...stylex.props(styles.footer, footerSplit && styles.footerSplit)}>{footer}</div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+function Row({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <div {...stylex.props(styles.row)}>
+      <span {...stylex.props(styles.rowLabel)}>{label}</span>
+      <span {...stylex.props(styles.rowControl)}>{children}</span>
+    </div>
+  );
+}
+
+const styles = stylex.create({
+  window: {
+    display: "grid",
+    gridTemplateColumns: "184px minmax(0, 1fr)",
+    width: "100%",
+    height: "100%",
+    backgroundColor: "var(--color-background-body)",
+    "@media (max-width: 680px)": {
+      gridTemplateColumns: "148px minmax(0, 1fr)",
+    },
+  },
+  sidebar: {
+    display: "flex",
+    flexDirection: "column",
+    minWidth: 0,
+    padding: "22px 10px 16px",
+    color: "var(--color-text-primary)",
+    backgroundColor: "var(--color-background-surface)",
+    borderInlineEndWidth: "1px",
+    borderInlineEndStyle: "solid",
+    borderInlineEndColor: "var(--color-border)",
+    "@media (max-width: 680px)": {
+      paddingInline: "8px",
+    },
+  },
+  brand: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    padding: "0 9px 23px",
+    fontSize: "16px",
+    letterSpacing: "-0.025em",
+    color: "var(--color-text-primary)",
+    "@media (max-width: 680px)": {
+      paddingInline: "6px",
+    },
+  },
+  mark: {
+    display: "grid",
+    placeItems: "center",
+    width: "27px",
+    height: "27px",
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
+    borderRadius: "7px",
+  },
+  version: {
+    margin: 0,
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "10px",
+    fontVariantNumeric: "tabular-nums",
+  },
+  status: {
+    display: "flex",
+    alignItems: "center",
+    gap: "9px",
+    margin: "auto 8px 0",
+    padding: "12px 0 0",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "10.5px",
+    borderBlockStartWidth: "1px",
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--color-border)",
+  },
+  main: {
+    minWidth: 0,
+    overflow: "auto",
+    scrollbarGutter: "stable",
+    padding: "42px 48px 36px",
+    backgroundColor: "var(--color-background-body)",
+    outline: "none",
+    "@media (max-width: 680px)": {
+      padding: "28px 22px",
+    },
+  },
+  content: {
+    maxWidth: "620px",
+    marginInline: "auto",
+  },
+  title: {
+    margin: "0 0 4px",
+    fontSize: "25px",
+    fontWeight: 650,
+    lineHeight: 1.2,
+    letterSpacing: "-0.03em",
+  },
+  lead: {
+    maxWidth: "560px",
+    margin: "2px 0 14px",
+    color: "var(--color-text-secondary)",
+    fontSize: "13px",
+  },
+  errorBanner: {
+    marginBlockEnd: "18px",
+  },
+  group: {
+    marginBlockEnd: "22px",
+  },
+  groupTitle: {
+    margin: "0 0 9px 2px",
+    color: "var(--kivo-text-tertiary)",
+    fontSize: "10px",
+    fontWeight: 750,
+    letterSpacing: "0.11em",
+    textTransform: "uppercase",
+  },
+  note: {
+    margin: "2px 0 14px",
+    color: "var(--color-text-secondary)",
+    fontSize: "12px",
+    lineHeight: 1.4,
+  },
+  groupBody: {
+    overflow: "hidden",
+    backgroundColor: "var(--color-background-card)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--color-border)",
+    borderRadius: "var(--radius-element)",
+  },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "18px",
+    minHeight: "62px",
+    padding: "12px 15px",
+    borderBlockStartWidth: "1px",
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--color-border)",
+    ":first-child": {
+      borderBlockStartWidth: 0,
+    },
+    "@media (max-width: 680px)": {
+      flexDirection: "column",
+      alignItems: "flex-start",
+      gap: "10px",
+    },
+  },
+  rowLabel: {
+    flexShrink: 0,
+    color: "var(--color-text-primary)",
+    fontSize: "13.5px",
+    fontWeight: 620,
+  },
+  rowControl: {
+    minWidth: 0,
+    maxWidth: "58%",
+    color: "var(--color-text-secondary)",
+    fontSize: "13px",
+    textAlign: "right",
+    overflowWrap: "anywhere",
+    "@media (max-width: 680px)": {
+      maxWidth: "100%",
+      textAlign: "left",
+    },
+  },
+  footer: {
+    display: "flex",
+    gap: "8px",
+    padding: "10px 12px",
+    borderBlockStartWidth: "1px",
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "var(--color-border)",
+    // Footer-only groups (dictation smoke, surfaces) have no row to separate
+    // from, so the first-child footer drops the divider line.
+    ":first-child": {
+      borderBlockStartWidth: 0,
+    },
+  },
+  footerSplit: {
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+  },
+});

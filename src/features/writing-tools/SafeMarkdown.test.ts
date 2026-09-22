@@ -1,5 +1,4 @@
-// @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "bun:test";
 import { renderMarkdown } from "./SafeMarkdown";
 
 /** Parse sanitized output in a real DOM so element queries are meaningful. */
@@ -52,7 +51,7 @@ describe("renderMarkdown safety", () => {
   });
 
   it("keeps javascript: links and images literal", () => {
-    const host = rendered('[x](javascript:alert(1))\n\n![alt](https://example.com/y.png)');
+    const host = rendered("[x](javascript:alert(1))\n\n![alt](https://example.com/y.png)");
     expect(host.querySelector("a")).toBeNull();
     expect(host.querySelector("img")).toBeNull();
     expect(host.textContent).toContain("javascript:alert(1)");
