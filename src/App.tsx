@@ -1,11 +1,11 @@
 import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Spinner } from "@astryxdesign/core/Spinner";
 import { Theme } from "@astryxdesign/core/theme";
-import { useEffect, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { DeveloperSurfaceMenu } from "./components/DeveloperSurfaceMenu";
 import { FlowBar } from "./features/dictation/FlowBar";
-import { GalleryWindow } from "./features/gallery/GalleryWindow";
-import { OnboardingWindow } from "./features/onboarding/OnboardingWindow";
-import { SettingsWindow } from "./features/settings/SettingsWindow";
 import { WritingToolsPopup } from "./features/writing-tools/WritingToolsPopup";
 import { useNativeEvent } from "./hooks/useNativeEvent";
 import { useSystemPreferences } from "./hooks/useSystemPreferences";
@@ -13,6 +13,23 @@ import { initialAppContext, nativeBridge } from "./platform/native";
 import { kivoTheme } from "./theme/built/kivo";
 import type { AppContext } from "./types";
 
+// Settings and onboarding load on demand. The event-driven overlays stay
+// eager so their native events cannot arrive before their listeners mount.
+const GalleryWindow = lazy(() =>
+  import("./features/gallery/GalleryWindow").then((module) => ({
+    default: module.GalleryWindow,
+  })),
+);
+const OnboardingWindow = lazy(() =>
+  import("./features/onboarding/OnboardingWindow").then((module) => ({
+    default: module.OnboardingWindow,
+  })),
+);
+const SettingsWindow = lazy(() =>
+  import("./features/settings/SettingsWindow").then((module) => ({
+    default: module.SettingsWindow,
+  })),
+);
 export function App() {
   // Render the window-label surface immediately; context hydrates async.
   const [context, setContext] = useState<AppContext>(() => initialAppContext());
@@ -61,11 +78,7 @@ export function App() {
           status="error"
           title="Kivo couldn’t load your settings"
           description={error}
-          endContent={
-            <button onClick={() => void retry()} type="button">
-              Try again
-            </button>
-          }
+          endContent={<Button label="Try again" onClick={() => void retry()} size="sm" />}
         />
       </Theme>
     );
@@ -112,8 +125,34 @@ export function App() {
           onDismiss={() => setContextError(null)}
         />
       ) : null}
-      {surface}
+      <Suspense
+        fallback={
+          <main {...stylex.props(styles.loading, overlay && styles.loadingOverlay)}>
+            <Spinner
+              size="md"
+              shade={overlay ? "onMedia" : "default"}
+              aria-label="Loading Kivo window"
+            />
+          </main>
+        }
+      >
+        {surface}
+      </Suspense>
       <DeveloperSurfaceMenu current={context.surface} />
     </Theme>
   );
 }
+
+const styles = stylex.create({
+  loading: {
+    alignItems: "center",
+    backgroundColor: "var(--color-background-body)",
+    display: "flex",
+    height: "100%",
+    justifyContent: "center",
+    width: "100%",
+  },
+  loadingOverlay: {
+    backgroundColor: "var(--kivo-overlay-bg)",
+  },
+});

@@ -1,8 +1,8 @@
 # Kivo
 
-Kivo is a small background desktop utility for system-wide dictation and focused writing assistance. It uses native operating-system speech recognition and text-access APIs, with optional Gemini cleanup and rewriting performed from the trusted Rust process.
+Kivo is a small background desktop utility for system-wide dictation and focused writing assistance. It uses native operating-system speech recognition and text-access APIs, with optional AI cleanup and rewriting performed from the trusted Rust process.
 
-Kivo has no account system, telemetry, hosted backend, or provider abstraction. Text is sent directly to Google's Gemini API only for an action the user invokes. API keys are stored in macOS Keychain or Windows Credential Manager and are never returned to the webview.
+Kivo has no account system, telemetry, or hosted backend. Writing actions send selected text from the Rust process to the provider chosen in Settings: Gemini, OpenCode Zen or Go, or a custom endpoint. Optional dictation cleanup also sends the transcript to that provider when enabled. Local endpoints keep those requests on this computer. API keys are stored in macOS Keychain or Windows Credential Manager and are never returned to the webview.
 
 ## Supported systems
 

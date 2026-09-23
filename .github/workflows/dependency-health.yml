@@ -1,0 +1,33 @@
+name: Dependency health
+
+# Dependabot's Bun updater cannot read the v2 lockfile yet. Run the same
+# vulnerability gates even in weeks without a code change, and list available
+# updates for the next manual maintenance pass.
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Weekly dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: List frontend updates
+        run: bun outdated
+      - name: Audit frontend dependencies
+        run: bun audit
+      - uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        with:
+          tool: cargo-audit
+      - name: Audit Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock

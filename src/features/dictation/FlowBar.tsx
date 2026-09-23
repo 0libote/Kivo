@@ -1,7 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import * as stylex from "@stylexjs/stylex";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useReducer } from "react";
 import { Icon } from "../../components/Icon";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -78,6 +78,7 @@ const barMotion: Record<DictationStatus, Record<string, number>> = {
 };
 
 export function FlowBar({ platform }: { readonly platform: Platform }) {
+  const reduceMotion = useReducedMotion();
   const [state, dispatch] = useReducer(dictationReducer, {
     ...initialDictationState,
     status: mockInitialStatus(),
@@ -126,15 +127,27 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
         data-testid="flow-bar"
         initial={false}
         animate={barMotion[state.status]}
-        transition={{ type: "spring", stiffness: 520, damping: 38, mass: 0.7 }}
+        transition={
+          reduceMotion
+            ? { duration: 0 }
+            : { type: "spring", stiffness: 520, damping: 38, mass: 0.7 }
+        }
         {...stylex.props(styles.bar, inert && styles.inert)}
       >
         <div {...stylex.props(styles.content)}>
           {state.status === "idle" ? (
             <span {...stylex.props(styles.idle)}>
               <motion.span
-                animate={{ opacity: [0.55, 0.18, 0.55], scale: [1, 0.86, 1] }}
-                transition={{ duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
+                animate={
+                  reduceMotion
+                    ? { opacity: 0.35, scale: 1 }
+                    : { opacity: [0.55, 0.18, 0.55], scale: [1, 0.86, 1] }
+                }
+                transition={
+                  reduceMotion
+                    ? { duration: 0 }
+                    : { duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }
+                }
                 {...stylex.props(styles.idleRing)}
               />
               <Icon name="microphone" size={13} />
@@ -145,8 +158,16 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
             <>
               <span {...stylex.props(styles.mic)}>
                 <motion.span
-                  animate={{ opacity: [0.5, 0, 0], scale: [0.7, 1.45, 1.45] }}
-                  transition={{ duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }}
+                  animate={
+                    reduceMotion
+                      ? { opacity: 0.35, scale: 1 }
+                      : { opacity: [0.5, 0, 0], scale: [0.7, 1.45, 1.45] }
+                  }
+                  transition={
+                    reduceMotion
+                      ? { duration: 0 }
+                      : { duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }
+                  }
                   {...stylex.props(styles.micRing)}
                 />
                 <Icon name="microphone" size={15} />
@@ -159,18 +180,22 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
                         3,
                         3 + Math.min(1, level * bar.weight + (bar.odd ? 0.08 : 0)) * 15,
                       ),
-                      scaleY: [0.55, 1, 0.55],
+                      scaleY: reduceMotion ? 1 : [0.55, 1, 0.55],
                     }}
                     key={bar.id}
-                    transition={{
-                      height: { duration: 0.075, ease: "linear" },
-                      scaleY: {
-                        duration: 0.72,
-                        repeat: Number.POSITIVE_INFINITY,
-                        ease: "easeInOut",
-                        delay: waveDelay(index),
-                      },
-                    }}
+                    transition={
+                      reduceMotion
+                        ? { duration: 0 }
+                        : {
+                            height: { duration: 0.075, ease: "linear" },
+                            scaleY: {
+                              duration: 0.72,
+                              repeat: Number.POSITIVE_INFINITY,
+                              ease: "easeInOut",
+                              delay: waveDelay(index),
+                            },
+                          }
+                    }
                     {...stylex.props(styles.waveBar)}
                   />
                 ))}
@@ -210,8 +235,10 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
 
           {state.status === "success" ? (
             <motion.span
-              animate={{ opacity: 1, scale: [0.65, 1] }}
-              transition={{ duration: 0.18, ease: [0.2, 0.9, 0.25, 1.2] }}
+              animate={{ opacity: 1, scale: reduceMotion ? 1 : [0.65, 1] }}
+              transition={
+                reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.9, 0.25, 1.2] }
+              }
               {...stylex.props(styles.success)}
             >
               <Icon name="check" size={17} />
