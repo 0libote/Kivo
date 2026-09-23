@@ -2,12 +2,17 @@ import { Button } from "@astryxdesign/core/Button";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import * as stylex from "@stylexjs/stylex";
 import { motion, useReducedMotion } from "motion/react";
-import { useCallback, useEffect, useReducer } from "react";
+import { type Dispatch, useCallback, useEffect, useReducer } from "react";
 import { Icon } from "../../components/Icon";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import type { DictationSnapshot, Platform } from "../../types";
-import { type DictationStatus, dictationReducer, initialDictationState } from "./state";
+import {
+  type DictationEvent,
+  type DictationStatus,
+  dictationReducer,
+  initialDictationState,
+} from "./state";
 
 const BARS: Array<{ readonly id: string; readonly weight: number; readonly odd: boolean }> = [
   { id: "bar-0", weight: 0.34, odd: false },
@@ -135,174 +140,206 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
         {...stylex.props(styles.bar, inert && styles.inert)}
       >
         <div {...stylex.props(styles.content)}>
-          {state.status === "idle" ? (
-            <span {...stylex.props(styles.idle)}>
-              <motion.span
-                animate={
-                  reduceMotion
-                    ? { opacity: 0.35, scale: 1 }
-                    : { opacity: [0.55, 0.18, 0.55], scale: [1, 0.86, 1] }
-                }
-                transition={
-                  reduceMotion
-                    ? { duration: 0 }
-                    : { duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }
-                }
-                {...stylex.props(styles.idleRing)}
-              />
-              <Icon name="microphone" size={13} />
-            </span>
-          ) : null}
+          {state.status === "idle" ? <IdleContent reduceMotion={reduceMotion} /> : null}
 
           {state.status === "listening" ? (
-            <>
-              <span {...stylex.props(styles.mic)}>
-                <motion.span
-                  animate={
-                    reduceMotion
-                      ? { opacity: 0.35, scale: 1 }
-                      : { opacity: [0.5, 0, 0], scale: [0.7, 1.45, 1.45] }
-                  }
-                  transition={
-                    reduceMotion
-                      ? { duration: 0 }
-                      : { duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }
-                  }
-                  {...stylex.props(styles.micRing)}
-                />
-                <Icon name="microphone" size={15} />
-              </span>
-              <span aria-hidden="true" {...stylex.props(styles.waveform)}>
-                {BARS.map((bar, index) => (
-                  <motion.i
-                    animate={{
-                      height: Math.max(
-                        3,
-                        3 + Math.min(1, level * bar.weight + (bar.odd ? 0.08 : 0)) * 15,
-                      ),
-                      scaleY: reduceMotion ? 1 : [0.55, 1, 0.55],
-                    }}
-                    key={bar.id}
-                    transition={
-                      reduceMotion
-                        ? { duration: 0 }
-                        : {
-                            height: { duration: 0.075, ease: "linear" },
-                            scaleY: {
-                              duration: 0.72,
-                              repeat: Number.POSITIVE_INFINITY,
-                              ease: "easeInOut",
-                              delay: waveDelay(index),
-                            },
-                          }
-                    }
-                    {...stylex.props(styles.waveBar)}
-                  />
-                ))}
-              </span>
-              <button
-                aria-label="Finish dictation"
-                onClick={() =>
-                  void nativeBridge.stopDictation().catch((error: unknown) =>
-                    dispatch({
-                      type: "FAIL",
-                      message:
-                        error instanceof Error ? error.message : "Dictation could not finish.",
-                      canRetry: true,
-                    }),
-                  )
-                }
-                type="button"
-                {...stylex.props(styles.stop)}
-              >
-                <span {...stylex.props(styles.stopGlyph)} />
-              </button>
-            </>
+            <ListeningContent level={level} reduceMotion={reduceMotion} dispatch={dispatch} />
           ) : null}
 
           {state.status === "processing" || state.status === "starting" ? (
-            <div {...stylex.props(styles.processing)}>
-              <Spinner
-                aria-label={
-                  state.status === "starting" ? "Starting microphone" : "Finishing dictation"
-                }
-                shade="onMedia"
-                size="sm"
-              />
-              <span>{state.status === "starting" ? "Starting" : "Finishing"}</span>
-            </div>
+            <ProcessingContent status={state.status} />
           ) : null}
 
-          {state.status === "success" ? (
-            <motion.span
-              animate={{ opacity: 1, scale: reduceMotion ? 1 : [0.65, 1] }}
-              transition={
-                reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.9, 0.25, 1.2] }
-              }
-              {...stylex.props(styles.success)}
-            >
-              <Icon name="check" size={17} />
-            </motion.span>
-          ) : null}
+          {state.status === "success" ? <SuccessContent reduceMotion={reduceMotion} /> : null}
 
           {state.status === "error" ? (
-            <div {...stylex.props(styles.error)}>
-              <Icon name="error" size={16} />
-              <span {...stylex.props(styles.errorMessage)}>{state.message}</span>
-              <div {...stylex.props(styles.errorActions)}>
-                <Button
-                  label="Open Kivo"
-                  onClick={() =>
-                    void nativeBridge.showSurface("settings").catch((error: unknown) =>
-                      dispatch({
-                        type: "FAIL",
-                        message:
-                          error instanceof Error
-                            ? error.message
-                            : "Kivo could not open its window.",
-                        canRetry: state.canRetry,
-                      }),
-                    )
-                  }
-                  size="sm"
-                  variant="secondary"
-                />
-                {state.canRetry ? (
-                  <Button
-                    label="Retry"
-                    onClick={() => {
-                      void nativeBridge.retryDictation().catch((error: unknown) =>
-                        dispatch({
-                          type: "FAIL",
-                          message:
-                            error instanceof Error ? error.message : "Dictation could not restart.",
-                          canRetry: true,
-                        }),
-                      );
-                    }}
-                    size="sm"
-                    variant="primary"
-                  />
-                ) : null}
-                <Button
-                  label="Dismiss dictation error"
-                  onClick={() => {
-                    dispatch({ type: "HIDE" });
-                    void nativeBridge.cancelDictation().catch(() => {
-                      // Local state already hid the error; nothing to report.
-                    });
-                  }}
-                  size="sm"
-                  variant="secondary"
-                >
-                  Dismiss
-                </Button>
-              </div>
-            </div>
+            <ErrorContent message={state.message} canRetry={state.canRetry} dispatch={dispatch} />
           ) : null}
         </div>
       </motion.section>
     </main>
+  );
+}
+
+function IdleContent({ reduceMotion }: { readonly reduceMotion: boolean | null }) {
+  return (
+    <span {...stylex.props(styles.idle)}>
+      <motion.span
+        animate={
+          reduceMotion
+            ? { opacity: 0.35, scale: 1 }
+            : { opacity: [0.55, 0.18, 0.55], scale: [1, 0.86, 1] }
+        }
+        transition={
+          reduceMotion
+            ? { duration: 0 }
+            : { duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }
+        }
+        {...stylex.props(styles.idleRing)}
+      />
+      <Icon name="microphone" size={13} />
+    </span>
+  );
+}
+
+function ProcessingContent({ status }: { readonly status: "processing" | "starting" }) {
+  return (
+    <div {...stylex.props(styles.processing)}>
+      <Spinner
+        aria-label={status === "starting" ? "Starting microphone" : "Finishing dictation"}
+        shade="onMedia"
+        size="sm"
+      />
+      <span>{status === "starting" ? "Starting" : "Finishing"}</span>
+    </div>
+  );
+}
+
+function SuccessContent({ reduceMotion }: { readonly reduceMotion: boolean | null }) {
+  return (
+    <motion.span
+      animate={{ opacity: 1, scale: reduceMotion ? 1 : [0.65, 1] }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.9, 0.25, 1.2] }}
+      {...stylex.props(styles.success)}
+    >
+      <Icon name="check" size={17} />
+    </motion.span>
+  );
+}
+
+type FlowDispatch = Dispatch<DictationEvent>;
+
+function ListeningContent({
+  level,
+  reduceMotion,
+  dispatch,
+}: {
+  readonly level: number;
+  readonly reduceMotion: boolean | null;
+  readonly dispatch: FlowDispatch;
+}) {
+  return (
+    <>
+      <span {...stylex.props(styles.mic)}>
+        <motion.span
+          animate={
+            reduceMotion
+              ? { opacity: 0.35, scale: 1 }
+              : { opacity: [0.5, 0, 0], scale: [0.7, 1.45, 1.45] }
+          }
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }
+          }
+          {...stylex.props(styles.micRing)}
+        />
+        <Icon name="microphone" size={15} />
+      </span>
+      <span aria-hidden="true" {...stylex.props(styles.waveform)}>
+        {BARS.map((bar, index) => (
+          <motion.i
+            animate={{
+              height: Math.max(3, 3 + Math.min(1, level * bar.weight + (bar.odd ? 0.08 : 0)) * 15),
+              scaleY: reduceMotion ? 1 : [0.55, 1, 0.55],
+            }}
+            key={bar.id}
+            transition={
+              reduceMotion
+                ? { duration: 0 }
+                : {
+                    height: { duration: 0.075, ease: "linear" },
+                    scaleY: {
+                      duration: 0.72,
+                      repeat: Number.POSITIVE_INFINITY,
+                      ease: "easeInOut",
+                      delay: waveDelay(index),
+                    },
+                  }
+            }
+            {...stylex.props(styles.waveBar)}
+          />
+        ))}
+      </span>
+      <button
+        aria-label="Finish dictation"
+        onClick={() =>
+          void nativeBridge.stopDictation().catch((error: unknown) =>
+            dispatch({
+              type: "FAIL",
+              message: error instanceof Error ? error.message : "Dictation could not finish.",
+              canRetry: true,
+            }),
+          )
+        }
+        type="button"
+        {...stylex.props(styles.stop)}
+      >
+        <span {...stylex.props(styles.stopGlyph)} />
+      </button>
+    </>
+  );
+}
+
+function ErrorContent({
+  message,
+  canRetry,
+  dispatch,
+}: {
+  readonly message: string | null;
+  readonly canRetry: boolean;
+  readonly dispatch: FlowDispatch;
+}) {
+  return (
+    <div {...stylex.props(styles.error)}>
+      <Icon name="error" size={16} />
+      <span {...stylex.props(styles.errorMessage)}>{message}</span>
+      <div {...stylex.props(styles.errorActions)}>
+        <Button
+          label="Open Kivo"
+          onClick={() =>
+            void nativeBridge.showSurface("settings").catch((error: unknown) =>
+              dispatch({
+                type: "FAIL",
+                message: error instanceof Error ? error.message : "Kivo could not open its window.",
+                canRetry: canRetry,
+              }),
+            )
+          }
+          size="sm"
+          variant="secondary"
+        />
+        {canRetry ? (
+          <Button
+            label="Retry"
+            onClick={() => {
+              void nativeBridge.retryDictation().catch((error: unknown) =>
+                dispatch({
+                  type: "FAIL",
+                  message: error instanceof Error ? error.message : "Dictation could not restart.",
+                  canRetry: true,
+                }),
+              );
+            }}
+            size="sm"
+            variant="primary"
+          />
+        ) : null}
+        <Button
+          label="Dismiss dictation error"
+          onClick={() => {
+            dispatch({ type: "HIDE" });
+            void nativeBridge.cancelDictation().catch(() => {
+              // Local state already hid the error; nothing to report.
+            });
+          }}
+          size="sm"
+          variant="secondary"
+        >
+          Dismiss
+        </Button>
+      </div>
+    </div>
   );
 }
 
