@@ -1210,13 +1210,7 @@ function AboutSection({
       <SettingsGroup>
         <SettingRow
           label="Software updates"
-          description={
-            installed
-              ? busy === "restart"
-                ? "Update installed. Restarting…"
-                : "Update installed. Restart Kivo to finish."
-              : updateDescription(updateResult)
-          }
+          description={updateStatusDescription(installed, busy, updateResult)}
         >
           {installed ? (
             <Button
@@ -1258,10 +1252,7 @@ function AboutSection({
           )}
         </SettingRow>
         {updateAvailable && !installed && !installUnsupported ? (
-          <SettingRow
-            label="Install update"
-            description={`${updateResult.channel === "beta" ? "The latest beta build" : `Version ${updateResult.availableVersion}`} can be installed without leaving Kivo.`}
-          >
+          <SettingRow label="Install update" description={installUpdateDescription(updateResult)}>
             <Button
               isDisabled={busy !== null}
               label={installButtonLabel(busy)}
@@ -1349,6 +1340,25 @@ function AboutSection({
       </p>
     </SettingsContent>
   );
+}
+
+function updateStatusDescription(
+  installed: boolean,
+  busy: string | null,
+  updateResult: UpdateResult | null,
+): string {
+  if (!installed) return updateDescription(updateResult);
+  return busy === "restart"
+    ? "Update installed. Restarting…"
+    : "Update installed. Restart Kivo to finish.";
+}
+
+function installUpdateDescription(updateResult: UpdateResult): string {
+  const version =
+    updateResult.channel === "beta"
+      ? "The latest beta build"
+      : `Version ${updateResult.availableVersion}`;
+  return `${version} can be installed without leaving Kivo.`;
 }
 
 function installButtonLabel(busy: string | null): string {
