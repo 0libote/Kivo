@@ -123,13 +123,12 @@ jobs:
       - run: bun run check:platform-parity
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-      # NSIS needs no paid certificate or store account. The Tauri updater
-      # artifacts (.nsis.zip + .sig, merged into latest.json by tauri-action)
-      # are signed with the same TAURI_SIGNING_* key as macOS, so Windows
-      # offers the same in-app Download and Install path. If an Authenticode
-      # certificate is available, sign the final .exe installer afterwards
-      # and re-upload it: Authenticode only touches the manual .exe, never
-      # the updater .nsis.zip signature.
+      # NSIS needs no paid certificate or store account. Tauri v2
+      # (`createUpdaterArtifacts: true`) re-uses the installer itself as the
+      # update bundle and signs it in place, so the artifacts are
+      # `-setup.exe` + `-setup.exe.sig` (merged into latest.json by
+      # tauri-action) — not the legacy `-setup.nsis.zip` pair, which only
+      # `v1Compatible` produces.
       - run: bun run prepare:release
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
@@ -163,14 +162,32 @@ jobs:
               }
             } finally { Remove-Item -LiteralPath $certificateFile -ErrorAction SilentlyContinue }
           }
-      - name: Re-upload signed .exe when a certificate is configured
+      - name: Re-sign updater artifacts when a certificate is configured
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           if ($env:WINDOWS_CERTIFICATE_BASE64) {
             $version = (Get-Content package.json | ConvertFrom-Json).version
             $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "app-v$version" }
-            gh release upload $tag "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe" --clobber
+            $exe = "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe"
+            $assetName = Split-Path $exe -Leaf
+            # Authenticode rewrote the installer, and clobbering its asset
+            # gives it a new id, so the signature and the id-based url that
+            # tauri-action generated during the build both stop matching it.
+            bun tauri signer sign --app-version $version $exe
+            if ($LASTEXITCODE -ne 0) { throw 'Updater signature refresh failed.' }
+            gh release upload $tag $exe "$exe.sig" --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Re-uploading the signed installer failed.' }
+            gh release download $tag --pattern latest.json --dir $env:RUNNER_TEMP --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Downloading latest.json failed.' }
+            $manifest = Join-Path $env:RUNNER_TEMP 'latest.json'
+            $assetUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$assetName"
+            bun scripts/refresh-updater-signature.ts $manifest "$exe.sig" windows-x86_64 $assetUrl
+            if ($LASTEXITCODE -ne 0) { throw 'latest.json refresh failed.' }
+            gh release upload $tag $manifest --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Re-uploading latest.json failed.' }
           }
