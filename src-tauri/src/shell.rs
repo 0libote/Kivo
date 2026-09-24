@@ -1453,9 +1453,8 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
         .map_err(|_| update_check_error())?;
     let user_agent = "Kivo desktop updater";
 
-    // 1. Prefer the latest stable release. When any stable release exists the
-    // rolling beta is obsolete by definition, so return here without checking
-    // `continuous` — stable installs never get dragged onto a beta.
+    // 1. Prefer a newer stable release. Stable installs never follow the beta
+    // channel; beta installs continue checking rolling builds once caught up.
     // A 404 just means no stable release has been published yet.
     let stable = client
         .get("https://api.github.com/repos/0libote/Kivo/releases/latest")
@@ -1474,25 +1473,27 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
         // read as "up to date": surface it as a check failure instead.
         let available_version = available_version.ok_or_else(update_check_error)?;
         let available = version_is_newer(&available_version, &current_version);
-        return Ok(UpdateResult {
-            current_version,
-            available_version: Some(available_version),
-            available,
-            download_url: Some(
-                release
-                    .html_url
-                    .unwrap_or_else(|| STABLE_RELEASES_URL.to_owned()),
-            ),
-            channel: Some("stable".into()),
-            current_sha,
-            available_sha: None,
-        });
+        if available || current_sha.is_none() {
+            return Ok(UpdateResult {
+                current_version,
+                available_version: Some(available_version),
+                available,
+                download_url: Some(
+                    release
+                        .html_url
+                        .unwrap_or_else(|| STABLE_RELEASES_URL.to_owned()),
+                ),
+                channel: Some("stable".into()),
+                current_sha,
+                available_sha: None,
+            });
+        }
     } else if stable.status() != reqwest::StatusCode::NOT_FOUND {
         return Err(update_check_error());
     }
 
-    // 2. No stable release yet: fall back to the rolling `continuous`
-    // pre-release. The version number rarely changes between betas, so a
+    // 2. For beta installs, or before the first stable release, check the
+    // rolling `continuous` pre-release. The version rarely changes, so a
     // same-version build with a different commit SHA is still an update.
     let continuous = client
         .get("https://github.com/0libote/Kivo/releases/download/continuous/continuous.json")
@@ -1514,7 +1515,14 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
         );
         return Ok(UpdateResult {
             current_version,
-            available_version: Some(manifest.version),
+            available_version: Some(
+                manifest
+                    .version
+                    .split('+')
+                    .next()
+                    .unwrap_or(&manifest.version)
+                    .to_owned(),
+            ),
             available,
             download_url: Some(CONTINUOUS_RELEASE_URL.to_owned()),
             channel: Some("beta".into()),
@@ -1558,22 +1566,56 @@ fn update_check_error() -> CommandError {
     }
 }
 
-/// Install the pending stable update in-app via the Tauri updater plugin
-/// (signed artifacts from `latest.json`, published for both desktops by the
-/// stable release workflow). Only offered for the stable channel: beta builds
-/// are ad-hoc signed and local builds carry no trusted updater key, so those
-/// keep the manual GitHub download. Identical Rust on both desktops; platform
-/// differences (installer exit on Windows vs. relaunch on macOS) are handled
-/// by the plugin and the explicit `restart_app` step below, which the UI
-/// invokes automatically after a successful install (with a manual
-/// "Restart now" fallback).
+/// Install a signed stable or continuous update. The channel and availability
+/// are checked again here so the installer cannot silently switch channels
+/// when one manifest is temporarily missing.
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
     use tauri_plugin_updater::UpdaterExt;
-    let updater = app.updater().map_err(|_| {
+    let offered = check_for_updates(&app).await?;
+    if !offered.available {
+        return Err(update_install_error(
+            "update_not_available",
+            "No newer update was found. Check again in a moment.",
+        ));
+    }
+    let endpoint = if offered.channel.as_deref() == Some("beta") {
+        "https://github.com/0libote/Kivo/releases/download/continuous/continuous.json"
+    } else {
+        "https://github.com/0libote/Kivo/releases/latest/download/latest.json"
+    };
+    let updater = app
+        .updater_builder()
+        .endpoints(vec![
+            endpoint.parse().expect("static updater endpoint is valid"),
+        ])
+        .map_err(|_| {
+            update_install_error(
+                "update_install_unavailable",
+                "The update source is unavailable.",
+            )
+        })?;
+    let updater = if offered.channel.as_deref() == Some("beta") {
+        let current_sha = offered.current_sha;
+        updater.version_comparator(move |current, release| {
+            // Build metadata identifies rolling builds while preserving the
+            // app's public version. Semver's default comparison ignores it.
+            let remote_sha = release.version.build.as_str();
+            (release.version > current
+                || (release.version.major == current.major
+                    && release.version.minor == current.minor
+                    && release.version.patch == current.patch
+                    && release.version.pre == current.pre))
+                && !remote_sha.is_empty()
+                && current_sha.as_deref() != Some(remote_sha)
+        })
+    } else {
+        updater
+    };
+    let updater = updater.build().map_err(|_| {
         update_install_error(
             "update_install_unavailable",
-            "This build can’t install updates itself. Use the download link instead.",
+            "This build can’t install updates itself.",
         )
     })?;
     let update = updater
@@ -1649,8 +1691,15 @@ fn beta_is_newer(
     manifest_version: &str,
     current_version: &str,
 ) -> bool {
+    let manifest_version = manifest_version
+        .split('+')
+        .next()
+        .unwrap_or(manifest_version);
     if version_is_newer(manifest_version, current_version) {
         return true;
+    }
+    if manifest_version != current_version {
+        return false;
     }
     match (current_sha, manifest_sha) {
         (Some(current), Some(manifest)) => current != manifest,
@@ -1779,6 +1828,18 @@ mod tests {
         // The normal rolling-beta case: version never bumps, SHA changes.
         assert!(beta_is_newer(Some("aaa"), Some("bbb"), "0.1.0", "0.1.0"));
         assert!(!beta_is_newer(Some("aaa"), Some("aaa"), "0.1.0", "0.1.0"));
+        assert!(beta_is_newer(
+            Some("aaa"),
+            Some("bbb"),
+            "0.1.0+bbb",
+            "0.1.0"
+        ));
+        assert!(!beta_is_newer(
+            Some("aaa"),
+            Some("bbb"),
+            "0.0.9+bbb",
+            "0.1.0"
+        ));
     }
 
     #[test]
