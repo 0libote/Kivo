@@ -488,10 +488,13 @@ jobs:
           name: kivo-beta-windows
           # Consumed minutes later by `publish-continuous`; not for humans.
           retention-days: 1
+          # Tauri v2 (`createUpdaterArtifacts: true`) re-uses the NSIS
+          # installer itself as the update bundle and signs it in place, so
+          # the artifacts are `-setup.exe` + `-setup.exe.sig`. The legacy
+          # `-setup.nsis.zip` pair is only produced by `v1Compatible`.
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*.nsis.zip
-            src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
 
   publish-continuous:
     name: Publish the continuous pre-release
@@ -531,12 +534,14 @@ jobs:
           # so locate by name instead of assuming a flat layout.
           dmg="$(find beta/macos -maxdepth 3 -name '*.dmg' | head -n 1)"
           mac_archive="$(find beta/macos -name '*.app.tar.gz' | head -n 1)"
-          win_archive="$(find beta/windows -name '*.nsis.zip' | head -n 1)"
-          exe="$(find beta/windows -name '*-setup.exe' | head -n 1)"
+          # Tauri v2 signs the NSIS installer in place and re-uses it as the
+          # Windows update bundle, so the installer is the archive.
+          win_installer="$(find beta/windows -name '*-setup.exe' | head -n 1)"
           test -n "$dmg" || { echo "macOS dmg not found in artifact"; exit 1; }
           test -n "$mac_archive" || { echo "macOS updater archive not found in artifact"; exit 1; }
-          test -n "$win_archive" || { echo "Windows updater archive not found in artifact"; exit 1; }
-          test -n "$exe" || { echo "Windows installer not found in artifact"; exit 1; }
+          test -f "$mac_archive.sig" || { echo "macOS updater signature not found in artifact"; exit 1; }
+          test -n "$win_installer" || { echo "Windows installer not found in artifact"; exit 1; }
+          test -f "$win_installer.sig" || { echo "Windows updater signature not found in artifact"; exit 1; }
           # Publishers serialize, but they may arrive out of commit order.
           if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
             latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')"
@@ -545,7 +550,7 @@ jobs:
               exit 0
             fi
           fi
-          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$mac_archive" "$win_archive"
+          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$mac_archive" "$win_installer"
           # Keep the old release available if an upload fails. Publish the
           # manifest last, after its corresponding assets have arrived.
           if ! gh release view continuous > /dev/null 2>&1; then
@@ -555,7 +560,7 @@ jobs:
               --title "Kivo continuous (beta)" \
               --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
           fi
-          gh release upload continuous "$dmg" "$mac_archive" "$mac_archive.sig" "$exe" "$win_archive" "$win_archive.sig" --clobber
+          gh release upload continuous "$dmg" "$mac_archive" "$mac_archive.sig" "$win_installer" "$win_installer.sig" --clobber
           gh release upload continuous beta/continuous.json --clobber
           gh release edit continuous \
             --prerelease \
