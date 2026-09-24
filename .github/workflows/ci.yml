@@ -1,6 +1,6 @@
 name: CI & Build
 
-# Unified pipeline: CI checks -> code/security review -> unsigned beta build.
+# Unified pipeline: checks and unsigned beta builds -> gated publication.
 #
 # - pull_request (opened/synchronize/reopened): runs CI + review. Windows +
 #   macOS preview bundles build only when the PR has the `preview` label, and
@@ -10,9 +10,8 @@ name: CI & Build
 # - pull_request (closed): retires the sticky preview comment (artifacts
 #   expire on their own). Only `cleanup-pr-preview` runs on `closed`; every
 #   other job skips, so merging never re-runs the suite a second time.
-# - push to main / workflow_dispatch: runs CI, then review, then the rolling
-#   unsigned beta (continuous pre-release) only if everything ahead passes.
-# Takes longer end-to-end, but a red check anywhere stops the build.
+# - push to main / workflow_dispatch: runs CI and builds the unsigned beta
+#   in parallel, then publishes it only after every required check passes.
 #
 # The tag-based `Release` workflow remains the separate signed path for
 # stable `app-v*` releases.
@@ -174,6 +173,12 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    env:
+      # CI never debugs these binaries. Full debug info made the Windows
+      # dependency cache 1.77 GB and took five minutes just to save.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     concurrency:
       group: ci-native-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -210,7 +215,7 @@ jobs:
   # Automated code review / security gates. Each gate runs independently and
   # starts immediately (no `needs` on the CI jobs above) so one slow suite
   # never hides the signal from the others. The `security-gate` aggregator
-  # must pass before any beta build starts.
+  # must pass before beta artifacts are published.
   # NOTE: CodeQL only scans javascript-typescript (it has no Rust support);
   # Rust review is clippy -D warnings (per-OS in `native`) plus cargo-audit
   # in the `audit` job, enforced for both desktop targets.
@@ -325,15 +330,12 @@ jobs:
       - if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
 
-  # Aggregator: keeps one required check and one `needs` target for the beta
-  # builds. codeql/audit/e2e/packaging run on every event and must be
-  # `success` — a `skipped` there means an upstream CI job failed and must
-  # not look green. dep-review completes (never skips) on every event:
-  # success on PRs, no-op success elsewhere — see its note about downstream
-  # outputs.
+  # Aggregator: the sole branch-protection check must cover every required
+  # build and test job, as well as the security jobs. A green review must
+  # never allow a PR with failing frontend or native checks to merge.
   security-gate:
     name: Code review / security gate
-    needs: [codeql, audit, e2e, dep-review, packaging]
+    needs: [frontend, frontend-windows, rust-static, native, codeql, audit, e2e, dep-review, packaging]
     if: always() && (github.event_name != 'pull_request' || github.event.action != 'closed')
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -343,7 +345,7 @@ jobs:
       - name: Verify all gates passed
         run: |
           fail=0
-          for gate in "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}" "packaging:${{ needs.packaging.result }}"; do
+          for gate in "frontend:${{ needs.frontend.result }}" "frontend-windows:${{ needs.frontend-windows.result }}" "rust-static:${{ needs.rust-static.result }}" "native:${{ needs.native.result }}" "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}" "packaging:${{ needs.packaging.result }}"; do
             echo "$gate"
             result="${gate##*:}"
             if [ "$result" != "success" ]; then
@@ -359,9 +361,8 @@ jobs:
             fail=1
           fi
           exit $fail
-      # Beta eligibility decided here in shell (visible in the gate log)
-      # so the beta jobs only do a trivial output comparison. Betas run on
-      # manual dispatch (any branch) and on pushes to main — never on PRs.
+      # Beta eligibility is recorded here for the publisher. Builders run on
+      # manual dispatch (any branch) and main pushes, but never on PRs.
       - id: decide
         if: always()
         run: |
@@ -374,15 +375,12 @@ jobs:
           fi
           cat "$GITHUB_OUTPUT"
 
-  # Beta delivery. The two desktop builds run IN PARALLEL and hand off via
-  # short-lived, run-scoped artifacts. A single `publish-continuous` job
-  # owns every mutation of the `continuous` release (delete/recreate, asset
-  # uploads, notes), so overlapping main pushes serialize there while the
-  # slow builders overlap. Beta wall time drops from ~7min serial to ~4.5min
-  # (the slower builder plus seconds to publish).
+  # Beta delivery. The two desktop builds run alongside the checks on main
+  # and hand off via short-lived, run-scoped artifacts. Publication waits for
+  # the full security-gate, which also covers frontend and native checks.
+  # A failed check can waste build minutes, but cannot publish a red SHA.
   macos-beta:
-    needs: [frontend, frontend-windows, native, rust-static, security-gate]
-    if: needs.security-gate.outputs.beta_ready == 'true'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 45
     permissions:
@@ -410,16 +408,18 @@ jobs:
         with:
           workspaces: src-tauri
       - run: bun install --frozen-lockfile --ignore-scripts
-      # No typecheck/test rerun: this is the same SHA the `frontend` and
-      # `native` gates just passed, so rerunning them only burns macOS
-      # minutes (`windows-beta` never reran them either).
-      # No APPLE_* / TAURI_SIGNING_* secrets: builds ad-hoc signed
-      # (signingIdentity "-" in tauri.conf.json, free). No prepare:release
-      # step: without TAURI_UPDATER_PUBKEY there are no signed updater
-      # artifacts, so this ships a plain beta .dmg that needs a one-time
-      # Privacy & Security approval on first launch (see release notes).
+      # No typecheck/test rerun: the `frontend` and `native` gates check this
+      # same SHA in parallel, and publication requires their success.
+      # Apple code signing remains ad-hoc; Tauri's separate updater signing
+      # key authenticates the archives downloaded by installed beta builds.
+      - run: bun run prepare:release
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
       - name: Build ad-hoc signed app bundle (beta)
-        run: bun tauri build --target aarch64-apple-darwin
+        run: bun tauri build --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Upload bundle for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -430,11 +430,11 @@ jobs:
           # target/<triple>/release, not target/release.
           path: |
             src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
 
   windows-beta:
-    needs: [frontend, frontend-windows, native, rust-static, security-gate]
-    if: needs.security-gate.outputs.beta_ready == 'true'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -472,26 +472,35 @@ jobs:
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
       - run: bun install --frozen-lockfile --ignore-scripts
-      # No signing keys: the NSIS .exe installs with a bypassable
-      # SmartScreen warning ("More info" -> "Run anyway").
+      # The updater archive is signed with Tauri's key; the manual .exe
+      # remains unsigned and may display a SmartScreen warning.
+      - run: bun run prepare:release
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
       - name: Build unsigned NSIS installer (beta, untrusted)
-        run: bun tauri build --bundles nsis
+        run: bun tauri build --bundles nsis --config src-tauri/target/release-tauri.conf.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Upload installer for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: kivo-beta-windows
           # Consumed minutes later by `publish-continuous`; not for humans.
           retention-days: 1
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*.nsis.zip
+            src-tauri/target/release/bundle/nsis/*.nsis.zip.sig
 
   publish-continuous:
     name: Publish the continuous pre-release
-    # Owns every mutation of the `continuous` release (delete/recreate,
-    # asset uploads, notes) so overlapping main pushes serialize here
+    # Owns every mutation of the `continuous` release (asset uploads and
+    # notes) so overlapping main pushes serialize here
     # while the builders above overlap. Asset names match what the old
     # tauri-action/gh flow shipped (dmg + app tarball + setup exe).
-    needs: [macos-beta, windows-beta]
-    if: needs.macos-beta.result == 'success' && needs.windows-beta.result == 'success'
+    needs: [macos-beta, windows-beta, security-gate]
+    if: needs.macos-beta.result == 'success' && needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
@@ -501,6 +510,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: kivo-beta-macos
@@ -518,28 +530,41 @@ jobs:
           # upload-artifact preserves the matched parents (dmg/…, macos/…),
           # so locate by name instead of assuming a flat layout.
           dmg="$(find beta/macos -maxdepth 3 -name '*.dmg' | head -n 1)"
-          appdir="$(find beta/macos -maxdepth 3 -name '*.app' | head -n 1)"
+          mac_archive="$(find beta/macos -name '*.app.tar.gz' | head -n 1)"
+          win_archive="$(find beta/windows -name '*.nsis.zip' | head -n 1)"
           exe="$(find beta/windows -name '*-setup.exe' | head -n 1)"
           test -n "$dmg" || { echo "macOS dmg not found in artifact"; exit 1; }
-          test -n "$appdir" || { echo "macOS .app not found in artifact"; exit 1; }
+          test -n "$mac_archive" || { echo "macOS updater archive not found in artifact"; exit 1; }
+          test -n "$win_archive" || { echo "Windows updater archive not found in artifact"; exit 1; }
           test -n "$exe" || { echo "Windows installer not found in artifact"; exit 1; }
-          tarball="beta/Kivo_${version}_aarch64.app.tar.gz"
-          tar -czf "$tarball" -C "$(dirname "$appdir")" "$(basename "$appdir")"
-          # Rolling beta manifest for the in-app updater. The version number
-          # rarely changes between betas, so the app detects new builds by
-          # commit SHA (see check_for_updates in src-tauri/src/shell.rs).
-          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          VERSION="$version" BUILT_AT="$built_at" node -e "const fs = require('node:fs'); fs.writeFileSync('beta/continuous.json', JSON.stringify({ version: process.env.VERSION, sha: process.env.GITHUB_SHA, builtAt: process.env.BUILT_AT }, null, 2) + '\n');"
-          gh release delete continuous --yes --cleanup-tag > /dev/null 2>&1 || true
-          gh release create continuous \
-            --prerelease \
-            --title "Kivo continuous (beta)" \
-            --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
-          gh release upload continuous "$dmg" "$tarball" "$exe" beta/continuous.json --clobber
+          # Publishers serialize, but they may arrive out of commit order.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')"
+            if [ "$latest_sha" != "$GITHUB_SHA" ]; then
+              echo "Skipping stale beta $GITHUB_SHA; main is $latest_sha."
+              exit 0
+            fi
+          fi
+          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$mac_archive" "$win_archive"
+          # Keep the old release available if an upload fails. Publish the
+          # manifest last, after its corresponding assets have arrived.
+          if ! gh release view continuous > /dev/null 2>&1; then
+            gh release create continuous \
+              --target "$GITHUB_SHA" \
+              --prerelease \
+              --title "Kivo continuous (beta)" \
+              --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+          fi
+          gh release upload continuous "$dmg" "$mac_archive" "$mac_archive.sig" "$exe" "$win_archive" "$win_archive.sig" --clobber
+          gh release upload continuous beta/continuous.json --clobber
           gh release edit continuous \
             --prerelease \
             --title "Kivo continuous (beta)" \
             --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+          # Keep the tag behind the release page's Source code links aligned
+          # with the binary SHA after every asset has been published.
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \
+            -X PATCH -f sha="$GITHUB_SHA" -F force=true > /dev/null
 
   windows-pr:
     name: Windows PR preview

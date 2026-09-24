@@ -2,9 +2,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import * as stylex from "@stylexjs/stylex";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import {
   type Dispatch,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -27,7 +29,6 @@ import {
   type WritingRequest,
 } from "../../types";
 import { builtinActionFor, resolvePresetPrompt, resolveWritingPresets } from "./presets";
-import { SafeMarkdown } from "./SafeMarkdown";
 import {
   initialWritingToolsState,
   type WritingToolsEvent,
@@ -39,6 +40,10 @@ interface WritingToolsPopupProps {
   readonly platform: Platform;
   readonly settings: AppSettings;
 }
+
+const SafeMarkdown = lazy(() =>
+  import("./SafeMarkdown").then((module) => ({ default: module.SafeMarkdown })),
+);
 
 type RunAction = (presetId: string) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
@@ -137,6 +142,7 @@ function useWritingHotkeys(options: {
 }
 
 export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps) {
+  const reduceMotion = useReducedMotion();
   const [state, dispatch] = useReducer(writingToolsReducer, initialWritingToolsState);
   const requestGeneration = useRef(0);
   const requestInFlight = useRef(false);
@@ -292,9 +298,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
       >
         <motion.div
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          initial={{ opacity: 0, y: -3, scale: 0.985 }}
+          initial={reduceMotion ? false : { opacity: 0, y: -3, scale: 0.985 }}
           key={state.mode}
-          transition={{ duration: 0.15, ease: [0.2, 0.82, 0.24, 1] }}
+          transition={
+            reduceMotion ? { duration: 0 } : { duration: 0.15, ease: [0.2, 0.82, 0.24, 1] }
+          }
           {...stylex.props(styles.modeSurface)}
         >
           <PopupContent
@@ -581,7 +589,9 @@ function ResultView({ close, canReplace, dispatch, label, resultText, source }: 
         </div>
       ) : null}
       <div aria-live="polite" {...stylex.props(styles.resultBody)}>
-        <SafeMarkdown>{resultText}</SafeMarkdown>
+        <Suspense fallback={<Spinner label="Preparing result" size="sm" shade="onMedia" />}>
+          <SafeMarkdown>{resultText}</SafeMarkdown>
+        </Suspense>
       </div>
       {copyError ? (
         <p role="alert" {...stylex.props(styles.resultError)}>

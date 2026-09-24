@@ -1,8 +1,8 @@
 # Kivo
 
-Kivo is a small background desktop utility for system-wide dictation and focused writing assistance. It uses native operating-system speech recognition and text-access APIs, with optional Gemini cleanup and rewriting performed from the trusted Rust process.
+Kivo is a small background desktop utility for system-wide dictation and focused writing assistance. It uses native operating-system speech recognition and text-access APIs, with optional AI cleanup and rewriting performed from the trusted Rust process.
 
-Kivo has no account system, telemetry, hosted backend, or provider abstraction. Text is sent directly to Google's Gemini API only for an action the user invokes. API keys are stored in macOS Keychain or Windows Credential Manager and are never returned to the webview.
+Kivo has no account system, telemetry, or hosted backend. Writing actions send selected text from the Rust process to the provider chosen in Settings: Gemini, OpenCode Zen or Go, or a custom endpoint. Optional dictation cleanup also sends the transcript to that provider when enabled. Local endpoints keep those requests on this computer. API keys are stored in macOS Keychain or Windows Credential Manager and are never returned to the webview.
 
 ## Supported systems
 
@@ -225,7 +225,7 @@ Unsigned builds work but may receive SmartScreen warnings; free hosting does not
 
 ### GitHub Releases and updates
 
-Pushing an `app-v*` tag runs `.github/workflows/release.yml`, builds macOS and Windows artifacts, and drafts a GitHub Release. For signed macOS distribution and updates, configure these repository secrets:
+Pushing an `app-v*` tag runs `.github/workflows/release.yml`, builds macOS and Windows artifacts, and drafts a GitHub Release. Both stable and rolling beta in-app updates use these repository secrets:
 
 - `TAURI_UPDATER_PUBKEY`
 - `TAURI_SIGNING_PRIVATE_KEY`
@@ -236,7 +236,7 @@ Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: stable releases take precedence, and while no stable release exists the rolling `continuous` beta is detected by commit SHA (`continuous.json`, stamped into beta builds via `KIVO_BUILD_SHA`) so same-version rebuilds still show up. An up-to-date stable installation is not offered a rolling beta. When a stable update is available, Settings → About offers **Download and Install** in the app (signed `latest.json` updater artifacts are published for both macOS and Windows; installing automatically restarts to finish — the Windows installer exits the app itself — with a **Restart now** fallback if the app is still alive). Install failures, unsigned local builds, and beta builds fall back to the manual GitHub download. Beta builds are ad-hoc signed (free, not notarized) and always require a manual download plus the one-time macOS approval above.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: a newer stable release takes precedence; beta installations also follow the rolling `continuous` release when stable is already current. The beta manifest identifies same-version rebuilds by commit SHA and carries signed updater archives for both platforms. An up-to-date stable installation is not offered a rolling beta. Settings → About offers **Download and Install** for available stable or beta updates, then restarts automatically to finish, with a **Restart now** fallback if the app remains open. Existing beta installations without an embedded updater public key require one manual upgrade to a signed beta build before in-app updates can work. Beta builds remain ad-hoc signed on macOS (free, not notarized), so first installation may require the one-time macOS approval above.
 
 ## Privacy and diagnostics
 

@@ -1190,11 +1190,9 @@ function AboutSection({
   readonly updateResult: UpdateResult | null;
 }) {
   const [installed, setInstalled] = useState(false);
-  // Unsigned builds (beta, local) have no trusted updater key, so in-app
-  // install always fails: remember the definitive failure and stop offering
-  // the button, leaving the manual download link as the path.
+  // Older builds without an updater key cannot install signed updates.
   const [installUnsupported, setInstallUnsupported] = useState(false);
-  const stableAvailable = updateResult?.available === true && updateResult.channel !== "beta";
+  const updateAvailable = updateResult?.available === true;
   return (
     <SettingsContent
       title="About"
@@ -1212,13 +1210,7 @@ function AboutSection({
       <SettingsGroup>
         <SettingRow
           label="Software updates"
-          description={
-            installed
-              ? busy === "restart"
-                ? "Update installed. Restarting…"
-                : "Update installed. Restart Kivo to finish."
-              : updateDescription(updateResult)
-          }
+          description={updateStatusDescription(installed, busy, updateResult)}
         >
           {installed ? (
             <Button
@@ -1259,11 +1251,8 @@ function AboutSection({
             />
           )}
         </SettingRow>
-        {stableAvailable && !installed && !installUnsupported ? (
-          <SettingRow
-            label="Install update"
-            description={`Version ${updateResult.availableVersion} can be installed without leaving Kivo.`}
-          >
+        {updateAvailable && !installed && !installUnsupported ? (
+          <SettingRow label="Install update" description={installUpdateDescription(updateResult)}>
             <Button
               isDisabled={busy !== null}
               label={installButtonLabel(busy)}
@@ -1290,8 +1279,7 @@ function AboutSection({
                   })
                   .catch((error: unknown) => {
                     const code = error instanceof NativeError ? error.code : "";
-                    // No installable update on this build (unsigned/beta):
-                    // drop the button instead of looping on the same error.
+                    // Older builds may lack the updater key.
                     if (code === "update_install_unavailable" || code === "update_not_available")
                       setInstallUnsupported(true);
                     setNotice(
@@ -1352,6 +1340,25 @@ function AboutSection({
       </p>
     </SettingsContent>
   );
+}
+
+function updateStatusDescription(
+  installed: boolean,
+  busy: string | null,
+  updateResult: UpdateResult | null,
+): string {
+  if (!installed) return updateDescription(updateResult);
+  return busy === "restart"
+    ? "Update installed. Restarting…"
+    : "Update installed. Restart Kivo to finish.";
+}
+
+function installUpdateDescription(updateResult: UpdateResult): string {
+  const version =
+    updateResult.channel === "beta"
+      ? "The latest beta build"
+      : `Version ${updateResult.availableVersion}`;
+  return `${version} can be installed without leaving Kivo.`;
 }
 
 function installButtonLabel(busy: string | null): string {
