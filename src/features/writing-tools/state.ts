@@ -9,6 +9,8 @@ export type WritingMode =
   | "result"
   | "error";
 
+const RUNNABLE_MODES = new Set<WritingMode>(["menu", "custom", "summary", "error"]);
+
 export interface WritingToolsState {
   mode: WritingMode;
   context: SelectionContext | null;
@@ -106,6 +108,44 @@ function backState(state: WritingToolsState): WritingToolsState {
   };
 }
 
+function summaryChoiceState(state: WritingToolsState): WritingToolsState {
+  return state.mode === "menu"
+    ? { ...state, mode: "summary", activeAction: "summarize", error: null }
+    : state;
+}
+
+function runState(
+  state: WritingToolsState,
+  event: Extract<WritingToolsEvent, { type: "RUN" }>,
+): WritingToolsState {
+  if (!RUNNABLE_MODES.has(state.mode)) return state;
+  if (!state.context?.hasSelection) return state;
+  return {
+    ...state,
+    mode: "processing",
+    activeAction: event.action,
+    requestReplacesSelection: event.replacesSelection,
+    error: null,
+    canRetry: false,
+  };
+}
+
+function resultState(
+  state: WritingToolsState,
+  event: Extract<WritingToolsEvent, { type: "RESULT" }>,
+): WritingToolsState {
+  if (state.mode !== "processing") return state;
+  return {
+    ...state,
+    mode: "result",
+    resultText: event.text,
+    resultSource: event.source,
+    resultCanReplace:
+      !state.isLinkSummary && (event.canReplace ?? state.context?.canReplace ?? false),
+    error: null,
+  };
+}
+
 export function writingToolsReducer(
   state: WritingToolsState,
   event: WritingToolsEvent,
@@ -139,35 +179,13 @@ export function writingToolsReducer(
           }
         : state;
     case "OPEN_SUMMARY":
-      return state.mode === "menu"
-        ? { ...state, mode: "summary", activeAction: "summarize", error: null }
-        : state;
+      return summaryChoiceState(state);
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
     case "RUN":
-      return ["menu", "custom", "summary", "error"].includes(state.mode) &&
-        state.context?.hasSelection
-        ? {
-            ...state,
-            mode: "processing",
-            activeAction: event.action,
-            requestReplacesSelection: event.replacesSelection,
-            error: null,
-            canRetry: false,
-          }
-        : state;
+      return runState(state, event);
     case "RESULT":
-      return state.mode === "processing"
-        ? {
-            ...state,
-            mode: "result",
-            resultText: event.text,
-            resultSource: event.source,
-            resultCanReplace:
-              !state.isLinkSummary && (event.canReplace ?? state.context?.canReplace ?? false),
-            error: null,
-          }
-        : state;
+      return resultState(state, event);
     case "REPLACED":
     case "CLOSE":
       return initialWritingToolsState;

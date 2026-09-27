@@ -48,6 +48,14 @@ const SafeMarkdown = lazy(() =>
 type RunAction = (presetId: string, replacesSelection?: boolean) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
 
+function shouldOpenSummaryChoice(presetId: string, mode: WritingToolsState["mode"]): boolean {
+  return presetId === "summarize" && mode === "menu";
+}
+
+function isSummaryDisabled(presetId: string, summarizeEnabled: boolean): boolean {
+  return presetId === "summarize" && !summarizeEnabled;
+}
+
 function getActiveDefinition(
   activeAction: string | null,
   presets: WritingPreset[],
@@ -234,10 +242,10 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   const runAction = useCallback(
     async (presetId: string, replacesSelection?: boolean) => {
       if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
-      if (presetId === "summarize" && !summarizeEnabled) return;
+      if (isSummaryDisabled(presetId, summarizeEnabled)) return;
       const preset = presets.find((candidate) => candidate.id === presetId);
       if (!preset) return;
-      if (presetId === "summarize" && state.mode === "menu") {
+      if (shouldOpenSummaryChoice(presetId, state.mode)) {
         dispatch({ type: "OPEN_SUMMARY" });
         return;
       }
