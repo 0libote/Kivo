@@ -1203,7 +1203,7 @@ function AboutSection({
         const relevant = rows.filter((row) => row.kind === "dictation" && row.action === "dictate");
         const characters = relevant.reduce((total, row) => total + row.charsOut, 0);
         if (characters === 0) return;
-        const first = relevant.map((row) => row.date).sort()[0];
+        const first = relevant.map((row) => row.date).sort((a, b) => a.localeCompare(b))[0];
         const since = first
           ? new Date(`${first}T00:00:00Z`).toLocaleDateString(undefined, {
               month: "short",

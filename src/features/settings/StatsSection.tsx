@@ -98,7 +98,10 @@ async function exportCsv() {
   saveFile("kivo-statistics.csv", "text/csv", [header, ...lines].join("\n"));
 }
 
-export function StatsSection({ settings, save }: { settings: AppSettings; save: SaveSettings }) {
+export function StatsSection({
+  settings,
+  save,
+}: Readonly<{ settings: AppSettings; save: SaveSettings }>) {
   const [stats, setStats] = useState(empty);
   const [now, setNow] = useState(0);
   const [goModels, setGoModels] = useState<AiModelInfo[]>([]);
@@ -227,7 +230,7 @@ export function StatsSection({ settings, save }: { settings: AppSettings; save: 
         onChange={(value) => void save({ statsEnabled: value })}
       />
       <label {...stylex.props(styles.control)}>
-        Keep statistics
+        <span>Keep statistics</span>
         <select
           aria-label="Statistics retention"
           disabled={!settings.statsEnabled}
@@ -312,7 +315,7 @@ export function StatsSection({ settings, save }: { settings: AppSettings; save: 
             />
           </div>
           <label {...stylex.props(styles.control)}>
-            Chart range
+            <span>Chart range</span>
             <select
               aria-label="Statistics chart range"
               value={chartDays}
@@ -435,7 +438,11 @@ export function StatsSection({ settings, save }: { settings: AppSettings; save: 
   );
 }
 
-function Metric({ title, value, detail }: { title: string; value: string; detail: string }) {
+function Metric({
+  title,
+  value,
+  detail,
+}: Readonly<{ title: string; value: string; detail: string }>) {
   return (
     <article {...stylex.props(styles.metric)}>
       <strong>{value}</strong>
@@ -444,7 +451,7 @@ function Metric({ title, value, detail }: { title: string; value: string; detail
     </article>
   );
 }
-function ChartPanel({ title, children }: React.PropsWithChildren<{ title: string }>) {
+function ChartPanel({ title, children }: Readonly<React.PropsWithChildren<{ title: string }>>) {
   return (
     <article {...stylex.props(styles.panel)}>
       <h3>{title}</h3>
@@ -452,7 +459,7 @@ function ChartPanel({ title, children }: React.PropsWithChildren<{ title: string
     </article>
   );
 }
-function Heatmap({ rows, now }: { rows: StatsRow[]; now: number }) {
+function Heatmap({ rows, now }: Readonly<{ rows: StatsRow[]; now: number }>) {
   const dates = Array.from({ length: 84 }, (_, index) => {
     const date = new Date(now);
     date.setUTCDate(date.getUTCDate() - (83 - index));
