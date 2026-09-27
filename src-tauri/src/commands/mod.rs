@@ -55,6 +55,7 @@ pub struct AppCore {
     last_cursor: Mutex<Option<ScreenPoint>>,
     writing_generation: AtomicU64,
     writing_cancel: tokio::sync::watch::Sender<()>,
+    stats: Mutex<Option<Arc<crate::stats::StatsStore>>>,
 }
 
 impl AppCore {
@@ -89,6 +90,7 @@ impl AppCore {
             last_cursor: Mutex::new(None),
             writing_generation: AtomicU64::new(0),
             writing_cancel: tokio::sync::watch::channel(()).0,
+            stats: Mutex::new(None),
         })
     }
 
@@ -260,8 +262,33 @@ impl AppCore {
         self.load_provider_key(provider).ok().flatten()
     }
 
+    pub fn attach_stats(&self, stats: Arc<crate::stats::StatsStore>) {
+        if let Ok(mut slot) = self.stats.lock() {
+            *slot = Some(stats);
+        }
+    }
+
+    fn record_writing_disposition(&self, disposition: &str) {
+        if !self.settings().is_ok_and(|settings| settings.stats.enabled) {
+            return;
+        }
+        if let Ok(slot) = self.stats.lock()
+            && let Some(stats) = slot.as_ref()
+        {
+            stats.record(crate::stats::StatsRow {
+                date: crate::stats::utc_date(),
+                kind: "writing".into(),
+                action: disposition.into(),
+                count: 1,
+                ok: 1,
+                ..Default::default()
+            });
+        }
+    }
+
     /// Generate text on the configured provider, trying each queued model in
     /// order until one succeeds (see the clients' `generate_in_order`).
+    #[allow(clippy::too_many_arguments)]
     async fn generate_text(
         &self,
         provider: AiProvider,
@@ -270,12 +297,14 @@ impl AppCore {
         base_url: Option<&str>,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
+        action: &str,
     ) -> Result<String, AppCoreError> {
-        match provider {
+        let started = std::time::Instant::now();
+        let result: Result<_, AppCoreError> = match provider {
             AiProvider::Gemini => {
                 let api_key = api_key.ok_or(AppCoreError::AiNotConfigured { provider })?;
                 self.ai
-                    .generate_in_order(api_key, models, prompt, reasoning_mode)
+                    .generate_in_order_with_model(api_key, models, prompt, reasoning_mode)
                     .await
                     .map_err(Into::into)
             }
@@ -284,11 +313,84 @@ impl AppCore {
                     .resolve_chat_url(base_url)
                     .ok_or(AppCoreError::AiNotConfigured { provider })?;
                 self.compat
-                    .generate_in_order(provider, &chat_url, api_key, models, prompt, reasoning_mode)
+                    .generate_in_order_with_model(
+                        provider,
+                        &chat_url,
+                        api_key,
+                        models,
+                        prompt,
+                        reasoning_mode,
+                    )
                     .await
                     .map_err(Into::into)
             }
+        };
+        let enabled = self.settings().is_ok_and(|settings| settings.stats.enabled);
+        if enabled
+            && let Ok(slot) = self.stats.lock()
+            && let Some(stats) = slot.as_ref()
+        {
+            let model = result
+                .as_ref()
+                .ok()
+                .map(|(_, model, _, _)| model.clone())
+                .or_else(|| models.first().cloned());
+            let failovers_rescued = result
+                .as_ref()
+                .ok()
+                .and_then(|(_, winning, _, _)| models.iter().position(|model| model == winning))
+                .unwrap_or_default() as u64;
+            let chars_in = prompt.input.chars().count() as u64;
+            let chars_out = result
+                .as_ref()
+                .map_or(0, |(text, _, _, _)| text.chars().count() as u64);
+            let tokens_in = result
+                .as_ref()
+                .ok()
+                .and_then(|(_, _, tokens, _)| *tokens)
+                .unwrap_or_else(|| chars_in.div_ceil(4));
+            let tokens_out_estimate = chars_out.div_ceil(4);
+            let tokens_out = result
+                .as_ref()
+                .ok()
+                .and_then(|(_, _, _, tokens)| *tokens)
+                .unwrap_or(tokens_out_estimate);
+            let price = model
+                .as_deref()
+                .and_then(|id| crate::ai::providers::price_for(provider, id));
+            let cost = price.map(|price| {
+                ((tokens_in as f64 * price.input_per_1m + tokens_out as f64 * price.output_per_1m)
+                    / 1_000_000.0
+                    * 1_000_000.0)
+                    .round() as u64
+            });
+            stats.record(crate::stats::StatsRow {
+                date: crate::stats::utc_date(),
+                kind: if action == "dictation-cleanup" {
+                    "dictation"
+                } else {
+                    "writing"
+                }
+                .into(),
+                action: action.into(),
+                provider: Some(provider.as_str().to_owned()),
+                model,
+                error_category: result.as_ref().err().map(|error| error.code().to_owned()),
+                count: 1,
+                ok: u64::from(result.is_ok()),
+                fail: u64::from(result.is_err()),
+                failovers_rescued,
+                chars_in,
+                chars_out,
+                ms_sum: started.elapsed().as_millis() as u64,
+                ms_max: started.elapsed().as_millis() as u64,
+                tokens_in: Some(tokens_in),
+                tokens_out: result.as_ref().ok().map(|_| tokens_out),
+                cost_micro_usd: cost,
+                ..Default::default()
+            });
         }
+        result.map(|(text, _, _, _)| text)
     }
 
     /// List models on the configured provider. Dynamic source of truth with
@@ -486,7 +588,7 @@ impl AppCore {
                 let cleaned = tokio::select! {
                     biased;
                     _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &cleanup_models, ai_base_url.as_deref(), &prompt, AiReasoningMode::Fast)) => result,
+                    result = tokio::time::timeout(DICTATION_AI_DEADLINE, self.generate_text(ai_provider, api_key.as_ref(), &cleanup_models, ai_base_url.as_deref(), &prompt, AiReasoningMode::Fast, "dictation-cleanup")) => result,
                 };
                 if let Ok(Ok(cleaned)) = cleaned {
                     final_text = cleaned;
@@ -717,10 +819,34 @@ impl AppCore {
                     ));
                 }
                 let api_key = self.require_provider_key(provider)?;
-                let result = self
+                let started = std::time::Instant::now();
+                let (result, model) = self
                     .ai
                     .summarize_link_in_order(&api_key, &models, &source, reasoning_mode)
                     .await?;
+                if self.settings().is_ok_and(|settings| settings.stats.enabled)
+                    && let Ok(slot) = self.stats.lock()
+                    && let Some(stats) = slot.as_ref()
+                {
+                    let tokens_in = source.url.chars().count() as u64 / 4;
+                    let tokens_out = result.chars().count() as u64 / 4;
+                    stats.record(crate::stats::StatsRow {
+                        date: crate::stats::utc_date(),
+                        kind: "writing".into(),
+                        action: "summarize".into(),
+                        provider: Some(provider.as_str().to_owned()),
+                        model: Some(model),
+                        count: 1,
+                        ok: 1,
+                        chars_in: source.url.chars().count() as u64,
+                        chars_out: result.chars().count() as u64,
+                        ms_sum: started.elapsed().as_millis() as u64,
+                        ms_max: started.elapsed().as_millis() as u64,
+                        tokens_in: Some(tokens_in),
+                        tokens_out: Some(tokens_out),
+                        ..Default::default()
+                    });
+                }
                 Ok::<_, AppCoreError>((result, Some(source)))
             } else {
                 let prompt = match system_instruction.as_deref() {
@@ -749,6 +875,7 @@ impl AppCore {
                         base_url.as_deref(),
                         &prompt,
                         reasoning_mode,
+                        action.as_str(),
                     )
                     .await?;
                 Ok((result, None))
@@ -805,12 +932,14 @@ impl AppCore {
                 });
             }
             machine.complete_replacement()?;
+            self.record_writing_disposition("applied");
             self.clear_writing_context()?;
             Ok(WritingOutcome::Replaced)
         } else {
             let mut machine = self.writing.lock().map_err(|_| AppCoreError::Unavailable)?;
             self.check_writing_generation(generation)?;
             machine.show_result()?;
+            self.record_writing_disposition("kept");
             let can_replace = source.is_none() && selection.is_some();
             *self
                 .last_result
@@ -1175,6 +1304,10 @@ fn parse_speech_engine(value: &str) -> SpeechEnginePreference {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FrontendSettings {
+    #[serde(default = "default_true")]
+    pub stats_enabled: bool,
+    #[serde(default)]
+    pub stats_retention_days: u16,
     pub launch_at_login: bool,
     pub theme: String,
     pub show_idle_flow_bar: bool,
@@ -1233,6 +1366,8 @@ fn default_ai_reasoning_mode() -> String {
 impl From<AppSettings> for FrontendSettings {
     fn from(settings: AppSettings) -> Self {
         Self {
+            stats_enabled: settings.stats.enabled,
+            stats_retention_days: settings.stats.retention_days,
             launch_at_login: settings.general.launch_at_login,
             theme: match settings.general.theme {
                 crate::config::ThemePreference::System => "system",
@@ -1346,6 +1481,10 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 ai_reasoning_mode,
                 ai_custom_base_url,
             ),
+            stats: crate::config::StatsSettings {
+                enabled: settings.stats_enabled,
+                retention_days: settings.stats_retention_days,
+            },
         })
     }
 }
@@ -1353,6 +1492,8 @@ impl TryFrom<FrontendSettings> for AppSettings {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsPatch {
+    stats_enabled: Option<bool>,
+    stats_retention_days: Option<u16>,
     launch_at_login: Option<bool>,
     theme: Option<String>,
     show_idle_flow_bar: Option<bool>,
@@ -1397,6 +1538,8 @@ impl SettingsPatch {
             };
         }
         assign!(launch_at_login);
+        assign!(stats_enabled);
+        assign!(stats_retention_days);
         assign!(theme);
         assign!(show_idle_flow_bar);
         assign!(start_in_background);
@@ -1528,9 +1671,38 @@ pub fn get_settings(core: State<'_, AppCore>) -> Result<FrontendSettings, Comman
 }
 
 #[tauri::command]
+pub fn get_stats_summary(
+    stats: State<'_, Arc<crate::stats::StatsStore>>,
+) -> crate::stats::StatsDocument {
+    stats.snapshot()
+}
+
+#[tauri::command]
+pub fn get_stats_series(
+    stats: State<'_, Arc<crate::stats::StatsStore>>,
+) -> crate::stats::StatsDocument {
+    stats.snapshot()
+}
+
+#[tauri::command]
+pub fn clear_stats(app: AppHandle, stats: State<'_, Arc<crate::stats::StatsStore>>) {
+    stats.clear();
+    let _ = app.emit("stats-changed", ());
+    crate::shell::refresh_stats_tray(&app);
+}
+
+#[tauri::command]
+pub fn export_stats(
+    stats: State<'_, Arc<crate::stats::StatsStore>>,
+) -> crate::stats::StatsDocument {
+    stats.snapshot()
+}
+
+#[tauri::command]
 pub fn update_settings(
     app: AppHandle,
     core: State<'_, AppCore>,
+    stats: State<'_, Arc<crate::stats::StatsStore>>,
     patch: SettingsPatch,
 ) -> Result<FrontendSettings, CommandError> {
     let current = FrontendSettings::from(core.settings().map_err(CommandError::from)?);
@@ -1541,6 +1713,10 @@ pub fn update_settings(
         .map(FrontendSettings::from)
         .map_err(CommandError::from)?;
     let _ = app.emit("settings-changed", &saved);
+    if saved.stats_retention_days > 0 {
+        stats.prune_before(&crate::stats::utc_date_days_ago(saved.stats_retention_days));
+    }
+    crate::shell::refresh_stats_tray(&app);
     Ok(saved)
 }
 
@@ -1835,8 +2011,27 @@ pub async fn stop_dictation(app: AppHandle, core: State<'_, AppCore>) -> Result<
 pub async fn cancel_dictation(
     app: AppHandle,
     core: State<'_, AppCore>,
+    stats: State<'_, Arc<crate::stats::StatsStore>>,
 ) -> Result<(), CommandError> {
+    let was_active = core.dictation_phase().is_ok_and(|phase| {
+        matches!(
+            phase,
+            DictationPhase::Starting | DictationPhase::Listening | DictationPhase::Processing
+        )
+    });
     core.cancel_dictation().await.map_err(CommandError::from)?;
+    if was_active && core.settings().is_ok_and(|settings| settings.stats.enabled) {
+        stats.record(crate::stats::StatsRow {
+            date: crate::stats::utc_date(),
+            kind: "dictation".into(),
+            action: "dictate".into(),
+            count: 1,
+            cancel: 1,
+            ..Default::default()
+        });
+        let _ = app.emit("stats-changed", ());
+        crate::shell::refresh_stats_tray(&app);
+    }
     crate::shell::unregister_cancel_shortcut(&app);
     crate::shell::sync_idle_flow_bar(&app);
     Ok(())
@@ -1866,6 +2061,7 @@ pub async fn get_writing_context(
 
 #[tauri::command]
 pub async fn run_writing_action(
+    app: AppHandle,
     core: State<'_, AppCore>,
     request: WritingRequest,
 ) -> Result<WritingResponse, CommandError> {
@@ -1873,7 +2069,7 @@ pub async fn run_writing_action(
     let provider = core.ai_provider();
     let models_override = (!request.models.is_empty())
         .then(|| crate::ai::normalize_model_list(provider, &request.models));
-    match core
+    let result = core
         .run_writing_action_with(
             action,
             request.preset_id.as_deref(),
@@ -1884,9 +2080,10 @@ pub async fn run_writing_action(
             request.replaces_selection,
             models_override,
         )
-        .await
-        .map_err(CommandError::from)?
-    {
+        .await;
+    let _ = app.emit("stats-changed", ());
+    crate::shell::refresh_stats_tray(&app);
+    match result.map_err(CommandError::from)? {
         WritingOutcome::Replaced => Ok(WritingResponse::Replaced),
         WritingOutcome::Result {
             markdown,

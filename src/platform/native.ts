@@ -30,6 +30,7 @@ import {
   type Platform,
   type SelectionContext,
   type SpeechLanguage,
+  type StatsDocument,
   type Surface,
   type WritingRequest,
   type WritingResponse,
@@ -48,6 +49,7 @@ type NativeEventMap = {
   "local-models-changed": LocalSpeechModelInfo[];
   "local-model-progress": LocalModelProgress;
   "local-ai-install-progress": LocalAiInstallProgress;
+  "stats-changed": null;
 };
 
 export interface UpdateResult {
@@ -64,6 +66,10 @@ export interface NativeBridge {
   readonly isNative: boolean;
   getContext(): Promise<AppContext>;
   getSettings(): Promise<AppSettings>;
+  getStatsSummary(): Promise<StatsDocument>;
+  getStatsSeries(): Promise<StatsDocument>;
+  clearStats(): Promise<void>;
+  exportStats(): Promise<StatsDocument>;
   getDictationRecovery(): Promise<string | null>;
   clearDictationRecovery(): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
@@ -168,6 +174,10 @@ class TauriBridge implements NativeBridge {
   }
 
   getSettings = () => call<AppSettings>("get_settings");
+  getStatsSummary = () => call<StatsDocument>("get_stats_summary");
+  getStatsSeries = () => call<StatsDocument>("get_stats_series");
+  clearStats = () => call<void>("clear_stats");
+  exportStats = () => call<StatsDocument>("export_stats");
   getDictationRecovery = () => call<string | null>("get_dictation_recovery");
   clearDictationRecovery = () => call<void>("clear_dictation_recovery");
   updateSettings = (patch: Partial<AppSettings>) => call<AppSettings>("update_settings", { patch });
@@ -233,6 +243,7 @@ class MockBridge implements NativeBridge {
   readonly isNative = false;
   private readonly platform = detectedPlatform();
   private settings: AppSettings;
+  private stats: StatsDocument = { schemaVersion: 1, rows: [] };
   private permissions: PermissionStatus[];
   private paused = false;
   private apiKeyStatuses: Record<AiProviderId, ApiKeyStatus> = {
@@ -297,6 +308,20 @@ class MockBridge implements NativeBridge {
 
   async getSettings() {
     return structuredClone(this.settings);
+  }
+
+  async getStatsSummary() {
+    return structuredClone(this.stats);
+  }
+  async getStatsSeries() {
+    return structuredClone(this.stats);
+  }
+  async clearStats() {
+    this.stats = { schemaVersion: 1, rows: [] };
+    this.emit("stats-changed", null);
+  }
+  async exportStats() {
+    return structuredClone(this.stats);
   }
 
   async updateSettings(patch: Partial<AppSettings>) {

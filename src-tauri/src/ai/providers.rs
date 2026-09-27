@@ -1275,7 +1275,7 @@ impl OpenAiCompatClient {
         model: &str,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, OpencodeError> {
+    ) -> Result<(String, Option<u64>, Option<u64>), OpencodeError> {
         let model = Self::resolve_model(provider, model);
         let request = ChatCompletionRequest {
             model: model.as_str(),
@@ -1332,7 +1332,7 @@ impl OpenAiCompatClient {
             .json::<serde_json::Value>()
             .await
             .map_err(OpencodeError::InvalidResponse)?;
-        parse_completion(protocol, completion)
+        parse_completion_with_usage(protocol, completion)
     }
 
     /// Authenticated generation probe: public model listings cannot validate a key.
@@ -1410,7 +1410,7 @@ impl OpenAiCompatClient {
     /// limits, unknown model ids, server errors, empty responses — falls
     /// through to the next model, and the last error is returned when all
     /// fail.
-    pub async fn generate_in_order(
+    pub async fn generate_in_order_with_model(
         &self,
         provider: AiProvider,
         chat_url: &str,
@@ -1418,7 +1418,7 @@ impl OpenAiCompatClient {
         models: &[String],
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, OpencodeError> {
+    ) -> Result<(String, String, Option<u64>, Option<u64>), OpencodeError> {
         let normalized = normalize_model_list_for(provider, models);
         let session = Self::next_opencode_session(provider);
         let context = CompatRequestContext {
@@ -1432,7 +1432,9 @@ impl OpenAiCompatClient {
                 .generate_one(provider, context, model, prompt, reasoning_mode)
                 .await
             {
-                Ok(output) => return Ok(output),
+                Ok((text, tokens_in, tokens_out)) => {
+                    return Ok((text, model.clone(), tokens_in, tokens_out));
+                }
                 Err(error) if is_failover_terminal(&error) => return Err(error),
                 Err(error) => last_error = Some(error),
             }
@@ -1615,10 +1617,40 @@ fn completion_request(
     }
 }
 
+#[cfg(test)]
 fn parse_completion(
     protocol: CompletionProtocol,
     body: serde_json::Value,
 ) -> Result<String, OpencodeError> {
+    parse_completion_with_usage(protocol, body).map(|(text, _, _)| text)
+}
+
+fn parse_completion_with_usage(
+    protocol: CompletionProtocol,
+    body: serde_json::Value,
+) -> Result<(String, Option<u64>, Option<u64>), OpencodeError> {
+    let usage = body.get("usage").or_else(|| body.get("usageMetadata"));
+    let token = |names: &[&str]| {
+        usage.and_then(|value| {
+            names
+                .iter()
+                .find_map(|name| value.get(name).and_then(serde_json::Value::as_u64))
+        })
+    };
+    let (tokens_in, tokens_out) = match protocol {
+        CompletionProtocol::Messages => (
+            token(&["input_tokens", "prompt_tokens"]),
+            token(&["output_tokens", "completion_tokens"]),
+        ),
+        CompletionProtocol::Google => (
+            token(&["promptTokenCount", "prompt_tokens"]),
+            token(&["candidatesTokenCount", "completion_tokens"]),
+        ),
+        CompletionProtocol::Chat | CompletionProtocol::Responses => (
+            token(&["prompt_tokens", "input_tokens"]),
+            token(&["completion_tokens", "output_tokens"]),
+        ),
+    };
     let incomplete = match protocol {
         CompletionProtocol::Messages => matches!(
             body["stop_reason"].as_str(),
@@ -1645,7 +1677,7 @@ fn parse_completion(
     if protocol == CompletionProtocol::Chat {
         // Malformed successful payloads must not count as completed writing.
         let response = serde_json::from_value(body).map_err(|_| OpencodeError::EmptyResponse)?;
-        return parse_chat_completion(response);
+        return parse_chat_completion(response).map(|text| (text, tokens_in, tokens_out));
     }
     let parts: Vec<&serde_json::Value> = match protocol {
         CompletionProtocol::Messages => body
@@ -1694,7 +1726,7 @@ fn parse_completion(
     if output.is_empty() {
         Err(OpencodeError::EmptyResponse)
     } else {
-        Ok(output.to_owned())
+        Ok((output.to_owned(), tokens_in, tokens_out))
     }
 }
 
@@ -1884,6 +1916,35 @@ fn parse_chat_completion(response: ChatCompletionResponse) -> Result<String, Ope
 mod tests {
     use super::*;
 
+    #[test]
+    fn parses_usage_for_openai_messages_responses_and_google_shapes() {
+        let cases = [
+            (
+                CompletionProtocol::Chat,
+                serde_json::json!({"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":12,"completion_tokens":4}}),
+                Some(12),
+                Some(4),
+            ),
+            (
+                CompletionProtocol::Messages,
+                serde_json::json!({"content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":13,"output_tokens":5}}),
+                Some(13),
+                Some(5),
+            ),
+            (
+                CompletionProtocol::Google,
+                serde_json::json!({"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":14,"candidatesTokenCount":6}}),
+                Some(14),
+                Some(6),
+            ),
+        ];
+        for (protocol, body, expected_in, expected_out) in cases {
+            let (_, tokens_in, tokens_out) = parse_completion_with_usage(protocol, body).unwrap();
+            assert_eq!(tokens_in, expected_in);
+            assert_eq!(tokens_out, expected_out);
+        }
+    }
+
     #[tokio::test]
     async fn go_probe_omits_optional_tuning_but_generation_keeps_it() {
         use std::io::{Read, Write};
@@ -1961,7 +2022,7 @@ mod tests {
         };
         assert_eq!(
             client
-                .generate_in_order(
+                .generate_in_order_with_model(
                     AiProvider::Go,
                     &url,
                     Some(&key),
@@ -1971,7 +2032,7 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            "hello world"
+            ("hello world".to_owned(), "glm-5.3".to_owned(), None, None)
         );
         server.join().unwrap();
         let custom = client

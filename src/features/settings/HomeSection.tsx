@@ -22,6 +22,10 @@ export function HomeSection({
 }) {
   const [recovery, setRecovery] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [todayStats, setTodayStats] = useState<{ words: number; rewrites: number }>({
+    words: 0,
+    rewrites: 0,
+  });
   const paused = context.paused;
   const refresh = () => {
     void nativeBridge
@@ -31,6 +35,24 @@ export function HomeSection({
   };
   useEffect(refresh, []);
   useNativeEvent("recovery-changed", refresh);
+  const refreshStats = () => {
+    void nativeBridge
+      .getStatsSummary()
+      .then((document) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const rows = document.rows.filter((row) => row.date === today);
+        const chars = rows
+          .filter((row) => row.kind === "dictation" && row.action === "dictate")
+          .reduce((n, row) => n + row.charsOut, 0);
+        const rewrites = rows
+          .filter((row) => row.kind === "writing")
+          .reduce((n, row) => n + row.ok, 0);
+        setTodayStats({ words: Math.round(chars / 5), rewrites });
+      })
+      .catch(() => {});
+  };
+  useEffect(refreshStats, []);
+  useNativeEvent("stats-changed", refreshStats);
 
   return (
     <section {...stylex.props(styles.content)}>
@@ -75,6 +97,14 @@ export function HomeSection({
         />
       </div>
       <DictationPractice platform={context.platform} shortcut={settings.dictationShortcut} />
+      {settings.statsEnabled ? (
+        <section aria-label="Today's activity" {...stylex.props(styles.today)}>
+          <strong>Today</strong>
+          <span>
+            ≈ {todayStats.words.toLocaleString()} words · {todayStats.rewrites} rewrites
+          </span>
+        </section>
+      ) : null}
       {recovery ? (
         <section aria-label="Last dictation" {...stylex.props(styles.recovery)}>
           <div {...stylex.props(styles.recoveryHeader)}>
@@ -335,5 +365,13 @@ const styles = stylex.create({
     margin: "12px 0 0",
     color: "var(--color-text-secondary)",
     fontSize: "12px",
+  },
+  today: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "var(--spacing-3)",
+    padding: "var(--spacing-4)",
+    borderRadius: "var(--radius-md)",
+    backgroundColor: "var(--color-background-card)",
   },
 });

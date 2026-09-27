@@ -182,7 +182,7 @@ impl GeminiClient {
         models: &[String],
         source: &LinkSource,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, GeminiError> {
+    ) -> Result<(String, String), GeminiError> {
         let mut models = models.iter();
         let first = models.next().map(|model| super::normalize_model(model));
         let mut current = first.unwrap_or_else(|| super::DEFAULT_GEMINI_MODEL.to_owned());
@@ -191,7 +191,7 @@ impl GeminiClient {
                 .summarize_link(api_key, &current, source, reasoning_mode)
                 .await
             {
-                Ok(output) => return Ok(output),
+                Ok(output) => return Ok((output, current)),
                 Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
                     let Some(next) = models.next() else {
@@ -312,6 +312,8 @@ fn parse_link_summary(
     let output = parse_interaction(InteractionResponse {
         status: response.status,
         steps: response.steps.into_iter().map(|step| step.output).collect(),
+        usage: None,
+        usage_metadata: None,
     })?;
     if output.contains(UNAVAILABLE_SENTINEL) {
         return Err(GeminiError::InaccessibleSource);

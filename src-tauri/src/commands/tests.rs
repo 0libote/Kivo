@@ -129,11 +129,12 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
         last_cursor: Mutex::new(None),
         writing_generation: AtomicU64::new(0),
         writing_cancel: tokio::sync::watch::channel(()).0,
+        stats: Mutex::new(None),
     };
     (Arc::new(core), text)
 }
 
-const TEXT_RESPONSE: &str = r#"{"status":"completed","outputs":[{"type":"text","text":"Summary"}],"steps":[{"type":"model_output","content":[{"type":"text","text":"Summary"}]}]}"#;
+const TEXT_RESPONSE: &str = r#"{"status":"completed","usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":3},"outputs":[{"type":"text","text":"Summary"}],"steps":[{"type":"model_output","content":[{"type":"text","text":"Summary"}]}]}"#;
 const WEBSITE_RESPONSE: &str = r#"{"status":"completed","steps":[{"type":"url_context_result","result":[{"status":"success","url":"https://example.com/article"}]},{"type":"model_output","content":[{"type":"text","text":"Summary"}]}]}"#;
 
 /// Accept one fixture connection and return the stream plus its parsed JSON
@@ -1130,7 +1131,7 @@ async fn gemini_generation_timeout_tries_the_next_model() {
         .unwrap()
         .with_timeout(Duration::from_millis(500));
     let result = client
-        .generate_in_order(
+        .generate_in_order_with_model(
             &SecretString::new("test-key".into()).unwrap(),
             &["gemini-3.8-flash".into(), "gemini-3.5-flash".into()],
             &AiPrompt {
@@ -1141,7 +1142,15 @@ async fn gemini_generation_timeout_tries_the_next_model() {
         )
         .await
         .unwrap();
-    assert_eq!(result, "Summary");
+    assert_eq!(
+        result,
+        (
+            "Summary".to_owned(),
+            "gemini-3.5-flash".to_owned(),
+            Some(10),
+            Some(3)
+        )
+    );
     assert_eq!(server.next_request()["model"], "gemini-3.8-flash");
     assert_eq!(server.next_request()["model"], "gemini-3.5-flash");
 }
