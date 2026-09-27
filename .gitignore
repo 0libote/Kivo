@@ -19,3 +19,5 @@ src-tauri/keys/
 *.key
 
 .playwright-mcp/
+
+.tools/

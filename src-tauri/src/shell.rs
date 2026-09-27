@@ -31,8 +31,10 @@ pub(crate) struct ShellState {
     dictation_held: AtomicBool,
     dictation_press: Mutex<DictationPress>,
     dictation_cancel_epoch: AtomicU64,
+    flow_size_epoch: AtomicU64,
     escape_shortcut_registered: AtomicBool,
     pause_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+    stats_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
     writing_shortcut: Mutex<Option<String>>,
     dictation_shortcut: Mutex<Option<ActiveDictationShortcut>>,
 }
@@ -80,8 +82,10 @@ impl ShellState {
             dictation_held: AtomicBool::new(false),
             dictation_press: Mutex::new(DictationPress::default()),
             dictation_cancel_epoch: AtomicU64::new(0),
+            flow_size_epoch: AtomicU64::new(0),
             escape_shortcut_registered: AtomicBool::new(false),
             pause_item: Mutex::new(None),
+            stats_item: Mutex::new(None),
             writing_shortcut: Mutex::new(None),
             dictation_shortcut: Mutex::new(None),
         }
@@ -190,12 +194,24 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     if let Ok(mut slot) = app.state::<ShellState>().pause_item.lock() {
         *slot = Some(pause.clone());
     }
+    let stats_item = tauri::menu::MenuItem::with_id(
+        app,
+        "stats",
+        "This week · 0 words dictated",
+        false,
+        None::<&str>,
+    )?;
+    if let Ok(mut slot) = app.state::<ShellState>().stats_item.lock() {
+        *slot = Some(stats_item.clone());
+    }
     let menu = MenuBuilder::new(app)
         // Primary actions first, then configuration, then lifecycle — the
         // standard tray convention so Dictation/Writing Tools are always at
         // the top where a background utility needs them.
         .text("dictation", "Start Dictation")
         .text("writing-tools", "Writing Tools")
+        .separator()
+        .item(&stats_item)
         .separator()
         .text("settings", "Settings…")
         .text("about", "About Kivo")
@@ -240,6 +256,43 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     }
     tray.build(app)?;
     Ok(())
+}
+
+pub(crate) fn refresh_stats_tray(app: &AppHandle) {
+    let state = app.state::<ShellState>();
+    let Ok(slot) = state.stats_item.lock() else {
+        return;
+    };
+    let Some(item) = slot.as_ref() else { return };
+    let enabled = app
+        .try_state::<AppCore>()
+        .and_then(|core| core.settings().ok())
+        .is_some_and(|settings| settings.stats.enabled);
+    let words = if enabled {
+        app.try_state::<Arc<crate::stats::StatsStore>>()
+            .map(|stats| {
+                let cutoff = crate::stats::utc_date_days_ago(6);
+                stats
+                    .snapshot()
+                    .rows
+                    .into_iter()
+                    .filter(|row| {
+                        row.kind == "dictation" && row.action == "dictate" && row.date >= cutoff
+                    })
+                    .map(|row| row.chars_out)
+                    .sum::<u64>()
+                    / 5
+            })
+            .unwrap_or_default()
+    } else {
+        0
+    };
+    let label = if enabled {
+        format!("This week · {words} words dictated")
+    } else {
+        "Usage statistics are off".into()
+    };
+    let _ = item.set_text(label);
 }
 
 fn build_window(
@@ -873,6 +926,7 @@ pub(crate) async fn finish_dictation(app: &AppHandle, core: &AppCore) -> Result<
     }
     let generation = core.dictation_generation();
     emit_dictation(app, "processing", None, false);
+    let started = Instant::now();
     let result = core.finish_dictation().await;
     if core.dictation_generation() != generation {
         return Ok(());
@@ -885,6 +939,28 @@ pub(crate) async fn finish_dictation(app: &AppHandle, core: &AppCore) -> Result<
             Ok(())
         }
         Ok(_) => {
+            if core.settings().is_ok_and(|settings| settings.stats.enabled)
+                && let Ok(Some(transcript)) = core.recovery_text()
+            {
+                app.state::<std::sync::Arc<crate::stats::StatsStore>>()
+                    .record(crate::stats::StatsRow {
+                        date: crate::stats::utc_date(),
+                        kind: "dictation".into(),
+                        action: "dictate".into(),
+                        engine: core
+                            .settings()
+                            .ok()
+                            .map(|s| format!("{:?}", s.dictation.speech_engine).to_lowercase()),
+                        count: 1,
+                        ok: 1,
+                        chars_out: transcript.chars().count() as u64,
+                        ms_sum: started.elapsed().as_millis() as u64,
+                        ms_max: started.elapsed().as_millis() as u64,
+                        ..Default::default()
+                    });
+                let _ = app.emit("stats-changed", ());
+                refresh_stats_tray(app);
+            }
             play_dictation_feedback(core, FeedbackMoment::Finish);
             emit_dictation(app, "success", None, false);
             let app = app.clone();
@@ -900,6 +976,25 @@ pub(crate) async fn finish_dictation(app: &AppHandle, core: &AppCore) -> Result<
             Ok(())
         }
         Err(error) => {
+            if core.settings().is_ok_and(|settings| settings.stats.enabled) {
+                app.state::<std::sync::Arc<crate::stats::StatsStore>>()
+                    .record(crate::stats::StatsRow {
+                        date: crate::stats::utc_date(),
+                        kind: "dictation".into(),
+                        action: "dictate".into(),
+                        engine: core
+                            .settings()
+                            .ok()
+                            .map(|s| format!("{:?}", s.dictation.speech_engine).to_lowercase()),
+                        count: 1,
+                        fail: 1,
+                        ms_sum: started.elapsed().as_millis() as u64,
+                        ms_max: started.elapsed().as_millis() as u64,
+                        ..Default::default()
+                    });
+                let _ = app.emit("stats-changed", ());
+                refresh_stats_tray(app);
+            }
             let recovered = matches!(error, crate::commands::AppCoreError::Text(_));
             let error = CommandError::from(error);
             let message = if recovered && core.recovery_text().ok().flatten().is_some() {
@@ -971,10 +1066,41 @@ fn size_flow_bar(app: &AppHandle, status: &str) {
         "error" => (380.0, 96.0),
         _ => (40.0, 40.0),
     };
-    if let Some(window) = app.get_webview_window("flow-bar") {
-        let _ = window.set_size(Size::Logical(LogicalSize::new(width, height)));
-        position_flow_bar(app, &window);
-    }
+    let Some(window) = app.get_webview_window("flow-bar") else {
+        return;
+    };
+    let state = app.state::<ShellState>();
+    let epoch = state.flow_size_epoch.fetch_add(1, Ordering::AcqRel) + 1;
+    let Ok(current) = window.inner_size() else {
+        return;
+    };
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let start_width = f64::from(current.width) / scale;
+    let start_height = f64::from(current.height) / scale;
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        const STEPS: u32 = 12;
+        for step in 1..=STEPS {
+            let Some(window) = app.get_webview_window("flow-bar") else {
+                return;
+            };
+            if app
+                .state::<ShellState>()
+                .flow_size_epoch
+                .load(Ordering::Acquire)
+                != epoch
+            {
+                return;
+            }
+            let t = f64::from(step) / f64::from(STEPS);
+            let eased = 1.0 - (1.0 - t).powi(3);
+            let w = start_width + (width - start_width) * eased;
+            let h = start_height + (height - start_height) * eased;
+            let _ = window.set_size(Size::Logical(LogicalSize::new(w, h)));
+            position_flow_bar(&app, &window);
+            tokio::time::sleep(std::time::Duration::from_millis(12)).await;
+        }
+    });
 }
 
 pub(crate) fn size_writing_surface(

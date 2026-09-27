@@ -297,11 +297,17 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         {...stylex.props(styles.popup)}
       >
         <motion.div
+          layout
           animate={{ opacity: 1, y: 0, scale: 1 }}
           initial={reduceMotion ? false : { opacity: 0, y: -3, scale: 0.985 }}
-          key={state.mode}
           transition={
-            reduceMotion ? { duration: 0 } : { duration: 0.15, ease: [0.2, 0.82, 0.24, 1] }
+            reduceMotion
+              ? { duration: 0 }
+              : {
+                  layout: { type: "spring", stiffness: 420, damping: 36 },
+                  duration: 0.15,
+                  ease: [0.2, 0.82, 0.24, 1],
+                }
           }
           {...stylex.props(styles.modeSurface)}
         >
@@ -374,6 +380,7 @@ function PopupContent({ state, presets, close, dispatch, runAction }: PopupConte
           canReplace={state.resultCanReplace}
           dispatch={dispatch}
           source={state.resultSource}
+          sourceText={state.sourceText}
           label={activeDefinition?.label}
           resultText={state.resultText}
         />
@@ -559,11 +566,43 @@ interface ResultViewProps {
   readonly label: string | undefined;
   readonly resultText: string;
   readonly source: SummarySource | undefined;
+  readonly sourceText: string;
 }
 
-function ResultView({ close, canReplace, dispatch, label, resultText, source }: ResultViewProps) {
+function ResultView({
+  close,
+  canReplace,
+  dispatch,
+  label,
+  resultText,
+  source,
+  sourceText,
+}: ResultViewProps) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [costEstimate, setCostEstimate] = useState<number | null>(null);
+  const tokenEstimate = Math.ceil((sourceText.length + resultText.length) / 4);
+  useEffect(() => {
+    let active = true;
+    if (source)
+      return () => {
+        active = false;
+      };
+    void nativeBridge
+      .getSettings()
+      .then(async (settings) => {
+        const models = await nativeBridge.listAiModels(settings.aiProvider);
+        const model = models.find((candidate) => candidate.id === settings.aiModels[0]);
+        if (!active || model?.inputPer1M == null || model.outputPer1M == null) return;
+        const input = Math.ceil(sourceText.length / 4);
+        const output = Math.ceil(resultText.length / 4);
+        setCostEstimate((input * model.inputPer1M + output * model.outputPer1M) / 1_000_000);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [resultText, source, sourceText]);
   return (
     <div {...stylex.props(styles.result)}>
       <header data-tauri-drag-region {...stylex.props(styles.resultHeader)}>
@@ -599,6 +638,14 @@ function ResultView({ close, canReplace, dispatch, label, resultText, source }: 
         </p>
       ) : null}
       <footer {...stylex.props(styles.resultFooter)}>
+        {!source ? (
+          <small aria-label="Estimated request usage">
+            ≈ {tokenEstimate.toLocaleString()} tokens ·{" "}
+            {costEstimate == null
+              ? "cost estimate unavailable"
+              : `≈ $${costEstimate.toFixed(6)} estimate`}
+          </small>
+        ) : null}
         <Button
           icon={<Icon name={copied ? "check" : "copy"} size={14} />}
           label={copied ? "Copied" : "Copy"}

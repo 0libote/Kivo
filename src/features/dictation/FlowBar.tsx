@@ -1,7 +1,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import * as stylex from "@stylexjs/stylex";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type Dispatch, useCallback, useEffect, useReducer } from "react";
 import { Icon } from "../../components/Icon";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -139,23 +139,32 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
         }
         {...stylex.props(styles.bar, inert && styles.inert)}
       >
-        <div {...stylex.props(styles.content)}>
-          {state.status === "idle" ? <IdleContent reduceMotion={reduceMotion} /> : null}
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.div
+            key={state.status === "starting" ? "processing" : state.status}
+            initial={reduceMotion ? false : { opacity: 0, scale: 0.92, y: 2 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={reduceMotion ? undefined : { opacity: 0, scale: 0.94 }}
+            transition={reduceMotion ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
+            {...stylex.props(styles.content)}
+          >
+            {state.status === "idle" ? <IdleContent reduceMotion={reduceMotion} /> : null}
 
-          {state.status === "listening" ? (
-            <ListeningContent level={level} reduceMotion={reduceMotion} dispatch={dispatch} />
-          ) : null}
+            {state.status === "listening" ? (
+              <ListeningContent level={level} reduceMotion={reduceMotion} dispatch={dispatch} />
+            ) : null}
 
-          {state.status === "processing" || state.status === "starting" ? (
-            <ProcessingContent status={state.status} />
-          ) : null}
+            {state.status === "processing" || state.status === "starting" ? (
+              <ProcessingContent status={state.status} />
+            ) : null}
 
-          {state.status === "success" ? <SuccessContent reduceMotion={reduceMotion} /> : null}
+            {state.status === "success" ? <SuccessContent reduceMotion={reduceMotion} /> : null}
 
-          {state.status === "error" ? (
-            <ErrorContent message={state.message} canRetry={state.canRetry} dispatch={dispatch} />
-          ) : null}
-        </div>
+            {state.status === "error" ? (
+              <ErrorContent message={state.message} canRetry={state.canRetry} dispatch={dispatch} />
+            ) : null}
+          </motion.div>
+        </AnimatePresence>
       </motion.section>
     </main>
   );

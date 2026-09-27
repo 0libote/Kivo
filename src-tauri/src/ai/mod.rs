@@ -538,7 +538,7 @@ impl GeminiClient {
         model: &str,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, GeminiError> {
+    ) -> Result<(String, Option<u64>, Option<u64>), GeminiError> {
         // ponytail: upstream retries 5xx 3x with doubling 500ms backoff; same.
         let mut delay = Duration::from_millis(500);
         for _ in 0..3 {
@@ -563,7 +563,7 @@ impl GeminiClient {
         model: &str,
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, GeminiError> {
+    ) -> Result<(String, Option<u64>, Option<u64>), GeminiError> {
         let api_key =
             HeaderValue::from_str(api_key.expose()).map_err(|_| GeminiError::InvalidApiKey)?;
         let model = Self::resolve_model(model);
@@ -605,7 +605,33 @@ impl GeminiClient {
             .json::<InteractionResponse>()
             .await
             .map_err(GeminiError::InvalidResponse)?;
-        parse_interaction(interaction)
+        let usage = interaction
+            .usage
+            .as_ref()
+            .or(interaction.usage_metadata.as_ref());
+        let tokens_in = usage.and_then(|value| {
+            usage_count(
+                value,
+                &[
+                    "promptTokenCount",
+                    "prompt_tokens",
+                    "input_tokens",
+                    "total_input_tokens",
+                ],
+            )
+        });
+        let tokens_out = usage.and_then(|value| {
+            usage_count(
+                value,
+                &[
+                    "candidatesTokenCount",
+                    "completion_tokens",
+                    "output_tokens",
+                    "total_output_tokens",
+                ],
+            )
+        });
+        parse_interaction(interaction).map(|text| (text, tokens_in, tokens_out))
     }
 
     /// Dynamic model picker source: `GET /v1beta/models?pageSize=1000`
@@ -674,13 +700,13 @@ impl GeminiClient {
     /// quota and add latency. Anything else — rate limits, unknown model
     /// ids, server errors, generation timeouts, empty responses — falls through to the next
     /// model, and the last error is returned when all fail.
-    pub async fn generate_in_order(
+    pub async fn generate_in_order_with_model(
         &self,
         api_key: &SecretString,
         models: &[String],
         prompt: &AiPrompt,
         reasoning_mode: AiReasoningMode,
-    ) -> Result<String, GeminiError> {
+    ) -> Result<(String, String, Option<u64>, Option<u64>), GeminiError> {
         let mut models = models.iter();
         let first = models.next().map(|model| Self::resolve_model(model));
         let mut current = match first {
@@ -692,7 +718,9 @@ impl GeminiClient {
                 .generate(api_key, &current, prompt, reasoning_mode)
                 .await
             {
-                Ok(output) => return Ok(output),
+                Ok((text, tokens_in, tokens_out)) => {
+                    return Ok((text, current, tokens_in, tokens_out));
+                }
                 Err(error) if error.is_failover_terminal() => return Err(error),
                 Err(error) => {
                     let Some(next) = models.next() else {
@@ -803,6 +831,10 @@ struct InteractionResponse {
     status: String,
     #[serde(default)]
     steps: Vec<InteractionStep>,
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
+    #[serde(default, rename = "usageMetadata")]
+    usage_metadata: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -915,6 +947,12 @@ fn parse_interaction(response: InteractionResponse) -> Result<String, GeminiErro
         return Err(GeminiError::EmptyResponse);
     }
     Ok(output.to_owned())
+}
+
+fn usage_count(value: &serde_json::Value, names: &[&str]) -> Option<u64> {
+    names
+        .iter()
+        .find_map(|name| value.get(name).and_then(serde_json::Value::as_u64))
 }
 
 #[derive(Debug)]
