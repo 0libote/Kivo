@@ -45,7 +45,7 @@ const SafeMarkdown = lazy(() =>
   import("./SafeMarkdown").then((module) => ({ default: module.SafeMarkdown })),
 );
 
-type RunAction = (presetId: string) => Promise<void>;
+type RunAction = (presetId: string, replacesSelection?: boolean) => Promise<void>;
 type PopupDispatch = Dispatch<WritingToolsEvent>;
 
 function getActiveDefinition(
@@ -232,22 +232,26 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
   }, []);
 
   const runAction = useCallback(
-    async (presetId: string) => {
+    async (presetId: string, replacesSelection?: boolean) => {
       if (requestInFlight.current || state.mode === "closed" || state.mode === "processing") return;
       if (presetId === "summarize" && !summarizeEnabled) return;
       const preset = presets.find((candidate) => candidate.id === presetId);
       if (!preset) return;
+      if (presetId === "summarize" && state.mode === "menu") {
+        dispatch({ type: "OPEN_SUMMARY" });
+        return;
+      }
       if (presetId === "custom" && state.mode !== "custom" && state.mode !== "error") {
         dispatch({ type: "OPEN_CUSTOM" });
         return;
       }
-      const request = prepareWritingRequest(state, preset);
+      const request = prepareWritingRequest(state, preset, replacesSelection);
       if (!request) return;
 
       const generation = ++requestGeneration.current;
       requestInFlight.current = true;
 
-      dispatch({ type: "RUN", action: presetId });
+      dispatch({ type: "RUN", action: presetId, replacesSelection });
       try {
         const response = await nativeBridge.runWritingAction(request);
         if (generation !== requestGeneration.current) return;
@@ -350,10 +354,12 @@ function PopupContent({ state, presets, close, dispatch, runAction }: PopupConte
       );
     case "summary":
       return (
-        <LinkSummaryView
+        <SummaryChoiceView
           close={close}
+          canReplace={state.context?.canReplace ?? false}
           dispatch={dispatch}
           runAction={runAction}
+          isLinkSummary={state.isLinkSummary}
           url={state.sourceText.trim()}
         />
       );
@@ -395,6 +401,7 @@ function PopupContent({ state, presets, close, dispatch, runAction }: PopupConte
           hasContext={state.context?.hasSelection ?? false}
           message={state.error ?? ""}
           runAction={runAction}
+          requestReplacesSelection={state.requestReplacesSelection}
         />
       );
     default:
@@ -646,6 +653,7 @@ function ResultView({
               : `≈ $${costEstimate.toFixed(6)} estimate`}
           </small>
         ) : null}
+        <Button label="Keep original" onClick={close} size="sm" variant="secondary" />
         <Button
           icon={<Icon name={copied ? "check" : "copy"} size={14} />}
           label={copied ? "Copied" : "Copy"}
@@ -694,6 +702,7 @@ interface ErrorViewProps {
   readonly hasContext: boolean;
   readonly message: string;
   readonly runAction: RunAction;
+  readonly requestReplacesSelection: boolean | undefined;
 }
 
 function ErrorView({
@@ -704,6 +713,7 @@ function ErrorView({
   hasContext,
   message,
   runAction,
+  requestReplacesSelection,
 }: ErrorViewProps) {
   const canShowRetry = canRetry && activeAction !== null;
   return (
@@ -717,7 +727,7 @@ function ErrorView({
         {canShowRetry && activeAction ? (
           <Button
             label="Retry"
-            onClick={() => void runAction(activeAction)}
+            onClick={() => void runAction(activeAction, requestReplacesSelection)}
             size="sm"
             variant="secondary"
           />
@@ -746,25 +756,28 @@ function failureForError(error: unknown): WritingToolsEvent {
   };
 }
 
-interface LinkSummaryViewProps {
+interface SummaryChoiceViewProps {
   readonly close: () => void;
   readonly dispatch: PopupDispatch;
   readonly runAction: RunAction;
+  readonly canReplace: boolean;
+  readonly isLinkSummary: boolean;
   readonly url: string;
 }
 
-function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewProps) {
-  const hostname = new URL(url).hostname.replace(/^www\./u, "");
+function SummaryChoiceView({
+  close,
+  dispatch,
+  runAction,
+  canReplace,
+  isLinkSummary,
+  url,
+}: SummaryChoiceViewProps) {
+  const hostname = isLinkSummary ? new URL(url).hostname.replace(/^www\./u, "") : null;
   return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        void runAction("summarize");
-      }}
-      {...stylex.props(styles.summary)}
-    >
+    <div {...stylex.props(styles.summary)}>
       <header data-tauri-drag-region {...stylex.props(styles.popupHeader)}>
-        <span>Summarize link</span>
+        <span>{isLinkSummary ? "Summarize link" : "Summarize selection"}</span>
         <IconButton
           icon={<Icon name="close" size={14} />}
           label="Close Writing Tools"
@@ -774,15 +787,22 @@ function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewPro
           xstyle={styles.overlayIconButton}
         />
       </header>
-      <div {...stylex.props(styles.summaryLink)}>
-        <Icon name="connection" size={17} />
-        <span {...stylex.props(styles.summaryLinkCopy)}>
-          <strong {...stylex.props(styles.summaryLinkHost)}>{hostname}</strong>
-          <small title={url} {...stylex.props(styles.summaryLinkUrl)}>
-            {url}
-          </small>
-        </span>
-      </div>
+      {hostname ? (
+        <div {...stylex.props(styles.summaryLink)}>
+          <Icon name="connection" size={17} />
+          <span {...stylex.props(styles.summaryLinkCopy)}>
+            <strong {...stylex.props(styles.summaryLinkHost)}>{hostname}</strong>
+            <small title={url} {...stylex.props(styles.summaryLinkUrl)}>
+              {url}
+            </small>
+          </span>
+        </div>
+      ) : (
+        <p {...stylex.props(styles.summaryHint)}>
+          Choose how to use the summary. Preview keeps your selected text unchanged until you choose
+          Replace.
+        </p>
+      )}
       <footer {...stylex.props(styles.summaryFooter)}>
         <Button
           label="Other actions"
@@ -790,15 +810,29 @@ function LinkSummaryView({ close, dispatch, runAction, url }: LinkSummaryViewPro
           size="sm"
           variant="secondary"
         />
-        <Button label="Summarize" size="sm" type="submit" variant="primary" />
+        {canReplace && !isLinkSummary ? (
+          <Button
+            label="Replace selection"
+            onClick={() => void runAction("summarize", true)}
+            size="sm"
+            variant="secondary"
+          />
+        ) : null}
+        <Button
+          label={isLinkSummary ? "Preview summary" : "Preview first"}
+          onClick={() => void runAction("summarize", false)}
+          size="sm"
+          variant="primary"
+        />
       </footer>
-    </form>
+    </div>
   );
 }
 
 function prepareWritingRequest(
   state: WritingToolsState,
   preset: WritingPreset,
+  replacesSelection?: boolean,
 ): WritingRequest | undefined {
   const typed = state.customInstruction.trim();
   const isQuickCustom = preset.id === "custom";
@@ -809,13 +843,17 @@ function prepareWritingRequest(
   if (preset.id === "summarize") sourceKind = state.isLinkSummary ? "link" : "text";
   // The quick "custom" entry folds the typed text into the preset's
   // instruction, so an edited custom template still applies.
-  const effective: WritingPreset = isQuickCustom ? { ...preset, instruction: typed } : preset;
+  const effective: WritingPreset = {
+    ...preset,
+    ...(isQuickCustom ? { instruction: typed } : {}),
+    ...(replacesSelection === undefined ? {} : { replacesSelection }),
+  };
   return {
     action: builtinActionFor(preset.id),
     presetId: preset.id,
     instruction: isQuickCustom ? typed : undefined,
     systemInstruction: resolvePresetPrompt(effective),
-    replacesSelection: preset.replacesSelection,
+    replacesSelection: effective.replacesSelection,
     models: preset.models,
     text,
     sourceKind,
@@ -1129,6 +1167,14 @@ const styles = stylex.create({
     color: "var(--kivo-overlay-text-secondary)",
     backgroundColor: "var(--kivo-overlay-selected)",
     borderRadius: "10px",
+  },
+  summaryHint: {
+    margin: "0",
+    paddingBlock: "var(--spacing-3)",
+    paddingInline: "var(--spacing-3)",
+    color: "var(--kivo-overlay-text-secondary)",
+    fontSize: "var(--font-size-sm)",
+    lineHeight: 1.5,
   },
   summaryLinkCopy: {
     display: "grid",

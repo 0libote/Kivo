@@ -76,7 +76,9 @@ test("Every writing action is visible and recording can finish from its indicato
   for (let index = 0; index < 5; index++) await page.keyboard.press("ArrowDown");
   await expect(page.getByRole("menuitem", { name: "Summarize", exact: true })).toBeVisible();
   await page.keyboard.press("Enter");
+  await page.getByRole("button", { name: "Preview first", exact: true }).click();
   await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Keep original", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 164, height: 48 });
   await page.goto("/?surface=flow-bar&state=listening");
   await expect(page.getByRole("button", { name: "Finish dictation" })).toBeInViewport();

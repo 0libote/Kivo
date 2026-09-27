@@ -22,6 +22,7 @@ export interface WritingToolsState {
   resultSource?: SummarySource;
   resultCanReplace: boolean;
   resultText: string;
+  requestReplacesSelection?: boolean;
   error: string | null;
   canRetry: boolean;
 }
@@ -32,7 +33,8 @@ export type WritingToolsEvent =
   | { type: "SELECT"; index: number }
   | { type: "OPEN_CUSTOM"; initialValue?: string }
   | { type: "SET_CUSTOM"; value: string }
-  | { type: "RUN"; action: string }
+  | { type: "OPEN_SUMMARY" }
+  | { type: "RUN"; action: string; replacesSelection?: boolean }
   | { type: "RESULT"; text: string; source?: SummarySource; canReplace?: boolean }
   | { type: "REPLACED" }
   | { type: "FAIL"; message: string; canRetry?: boolean }
@@ -50,6 +52,7 @@ export const initialWritingToolsState: WritingToolsState = {
   isLinkSummary: false,
   resultCanReplace: false,
   resultText: "",
+  requestReplacesSelection: undefined,
   error: null,
   canRetry: false,
 };
@@ -135,12 +138,23 @@ export function writingToolsReducer(
             error: null,
           }
         : state;
+    case "OPEN_SUMMARY":
+      return state.mode === "menu"
+        ? { ...state, mode: "summary", activeAction: "summarize", error: null }
+        : state;
     case "SET_CUSTOM":
       return state.mode === "custom" ? { ...state, customInstruction: event.value } : state;
     case "RUN":
       return ["menu", "custom", "summary", "error"].includes(state.mode) &&
         state.context?.hasSelection
-        ? { ...state, mode: "processing", activeAction: event.action, error: null, canRetry: false }
+        ? {
+            ...state,
+            mode: "processing",
+            activeAction: event.action,
+            requestReplacesSelection: event.replacesSelection,
+            error: null,
+            canRetry: false,
+          }
         : state;
     case "RESULT":
       return state.mode === "processing"
