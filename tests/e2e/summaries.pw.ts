@@ -68,27 +68,48 @@ for (const platform of ["macos", "windows"] as const) {
       await installHarness(page, textSelection);
 
       await page.getByRole("menuitem", { name: "Summarize", exact: true }).click();
+      await expect(page.getByText(/Preview keeps your selected text unchanged/)).toBeVisible();
+      await page.getByRole("button", { name: "Preview first", exact: true }).click();
       await expect
         .poll(() => page.evaluate(() => window.summaryTest.requests))
         .toMatchObject([
-          { action: "summarize", text: textSelection.initialText, sourceKind: "text" },
+          {
+            action: "summarize",
+            text: textSelection.initialText,
+            sourceKind: "text",
+            replacesSelection: false,
+          },
         ]);
       await page.evaluate(() =>
         window.summaryTest.pending[0].resolve({
           kind: "result",
           text: "A useful summary.",
-          canReplace: false,
+          canReplace: true,
         }),
       );
       await expect(page.getByRole("button", { name: "Copy", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Keep original", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Replace", exact: true })).toBeVisible();
+
+      await page.evaluate((selection) => window.summaryTest.open(selection), textSelection);
+      await page.getByRole("menuitem", { name: "Summarize", exact: true }).click();
+      await page.getByRole("button", { name: "Replace selection", exact: true }).click();
+      await expect
+        .poll(() => page.evaluate(() => window.summaryTest.requests[1]))
+        .toMatchObject({
+          action: "summarize",
+          text: textSelection.initialText,
+          sourceKind: "text",
+          replacesSelection: true,
+        });
 
       await page.evaluate((selection) => window.summaryTest.open(selection), linkSelection);
       await expect(page.getByText("example.com", { exact: true })).toBeVisible();
       await expect(page.getByRole("textbox")).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("link-confirmation.png") });
-      await page.getByRole("button", { name: "Summarize", exact: true }).click();
+      await page.getByRole("button", { name: "Preview summary", exact: true }).click();
       await expect
-        .poll(() => page.evaluate(() => window.summaryTest.requests[1]))
+        .poll(() => page.evaluate(() => window.summaryTest.requests[2]))
         .toMatchObject({
           action: "summarize",
           text: linkSelection.initialText,
@@ -96,7 +117,7 @@ for (const platform of ["macos", "windows"] as const) {
         });
       await page.evaluate(
         (url) =>
-          window.summaryTest.pending[1].resolve({
+          window.summaryTest.pending[2].resolve({
             kind: "result",
             text: "A link summary.",
             source: { kind: "website", url },
@@ -123,7 +144,7 @@ test("empty selections stop at guidance instead of becoming a general AI textbox
 test("link summary retry keeps the captured URL without editable fallback", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 240 });
   await installHarness(page, linkSelection);
-  await page.getByRole("button", { name: "Summarize", exact: true }).click();
+  await page.getByRole("button", { name: "Preview summary", exact: true }).click();
   await page.evaluate(async () => {
     const path = "/src/types.ts";
     const { NativeError } = await import(path);

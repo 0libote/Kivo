@@ -209,8 +209,10 @@ test("writing tools supports keyboard custom instructions and informational resu
   await expect(page.getByLabel("Custom writing instruction")).toHaveValue("Translate to French");
   await page.keyboard.press("Escape");
   await page.getByRole("menuitem", { name: "Summarize" }).click();
+  await page.getByRole("button", { name: "Preview first", exact: true }).click();
   await expect(page.getByText(/short greeting/)).toBeVisible({ timeout: 2_000 });
   await expect(page.getByRole("button", { name: "Copy" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Keep original" })).toBeVisible();
   assertNoErrors();
 });
 
