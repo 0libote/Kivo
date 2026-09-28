@@ -34,6 +34,11 @@ cpal = "0.18"
 rubato = "5.0"
 earshot = "1.2.2"
 
+# Tauri's GTK 0.18 stack cannot yet use glib 0.20. Carry the upstream
+# VariantStrIter soundness fix until that dependency stack can be upgraded.
+[patch.crates-io]
+glib = { path = "vendor/glib-0.18.5" }
+
 # On-device transcription runtime (whisper-family GGML/GGUF), static and
 # self-contained (no DLLs to ship). Backend per target: Metal on macOS, Vulkan
 # on Windows x86_64, CPU elsewhere.
