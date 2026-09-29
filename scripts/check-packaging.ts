@@ -181,12 +181,6 @@ check(
   tauriConf.bundle.macOS?.signingIdentity === "-",
   `got ${JSON.stringify(tauriConf.bundle.macOS?.signingIdentity)}; null skips bundle signing and ships a half-signed .app that Gatekeeper reports as "damaged" with no bypass. "-" ad-hoc signs for free; release.yml still overrides with a real Developer ID via APPLE_SIGNING_IDENTITY`,
 );
-check(
-  "macOS installer script exists",
-  existsSync(join(root, "scripts/install-macos.sh")),
-  "the continuous release notes point at this one-liner; a missing file breaks the free install path",
-);
-
 // --- Windows floor consistency --------------------------------------------------
 const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");
 const hookBuild = /\$\{AtLeastBuild\}\s*(\d+)/.exec(hooksSource)?.[1];

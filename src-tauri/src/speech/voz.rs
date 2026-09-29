@@ -130,8 +130,10 @@ pub trait VozRuntime: Send + Sync {
 /// Safe fallback used by platforms without an installed Voz adapter (including
 /// the Linux development harness). It never claims availability or redirects
 /// audio to another engine.
+#[cfg(any(test, not(any(windows, target_os = "macos"))))]
 pub struct UnavailableVozRuntime;
 
+#[cfg(any(test, not(any(windows, target_os = "macos"))))]
 impl VozRuntime for UnavailableVozRuntime {
     fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>> {
         Box::pin(async {

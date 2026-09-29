@@ -51,7 +51,7 @@ public func kivoVozDownload(_ root: UnsafePointer<CChar>?, _ callback: ProgressC
     Task {
         do {
             DesertAnt.usageDisabled = true
-            let ear = Ear(cacheRoot: "\(root)/ear")
+            let ear = Ear(directory: nil, cacheRoot: "\(root)/ear")
             try await ear.download()
             loadedEar.set(ear)
             try await Voz.download(cacheRoot: root) { progress in progressSink.report(progress.fraction) }
@@ -71,7 +71,7 @@ public func kivoVozPrepare(_ root: UnsafePointer<CChar>?) -> UnsafeMutablePointe
         do {
             DesertAnt.usageDisabled = true
             if loadedEar.get() == nil {
-                let ear = Ear(cacheRoot: "\(root)/ear")
+                let ear = Ear(directory: nil, cacheRoot: "\(root)/ear")
                 try await ear.download()
                 loadedEar.set(ear)
             }
@@ -94,7 +94,7 @@ public func kivoVozTranscribe(_ samples: UnsafePointer<Float>?, _ count: Int, _ 
     Task {
         do {
             DesertAnt.usageDisabled = true
-            let ear = loadedEar.get() ?? Ear(cacheRoot: "\(root)/ear")
+            let ear = loadedEar.get() ?? Ear(directory: nil, cacheRoot: "\(root)/ear")
             loadedEar.set(ear)
             let detection = try await ear.identify(samples: input, sampleRate: 16_000)
             let selected = language.split(whereSeparator: { $0 == "-" || $0 == "_" }).first.map(String.init)?.lowercased() ?? language.lowercased()

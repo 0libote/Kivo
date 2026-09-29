@@ -202,11 +202,7 @@ What to check on the Mac:
 
 `bun tauri build` produces the macOS app and DMG. The bundle is ad-hoc signed by default (`signingIdentity: "-"` in `src-tauri/tauri.conf.json`, free, no certificate needed) so Gatekeeper shows a recoverable unverified-developer approval instead of the dead-end "damaged" dialog. The stable release workflow overrides this with a real Developer ID via `APPLE_SIGNING_IDENTITY` when the Apple signing/notarization secrets are configured. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
 
-Easiest beta install (Apple Silicon, macOS 26+):
-
-```sh
-curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash
-```
+Beta builds are available from the [continuous releases](https://github.com/0libote/Kivo/releases/tag/continuous). Download the DMG and install it manually.
 
 Manual DMG install: drag `Kivo.app` to `/Applications`, then run once:
 
