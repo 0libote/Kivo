@@ -74,3 +74,11 @@ bun check:rust && cargo clippy --locked --all-targets -- -D warnings && cargo te
 
 Lefthook runs Biome + Oxlint on staged files at commit time and typecheck +
 `bun test` on push. `bun install` installs the hooks.
+
+## Bun runtime policy
+
+- Bun is the primary JavaScript/TypeScript runtime as well as the package manager and test runner.
+- For compatible JavaScript CLIs, use `bun --bun <cli>` when the intent is to execute the CLI on Bun rather than following a Node shebang. Vite and TypeScript scripts are deliberately run this way.
+- Prefer `Bun.file()`, `Bun.write()`, Web APIs, and other Bun-native APIs in project scripts when they simplify the code.
+- Do not mechanically replace every `node:` import. Filesystem/path operations and third-party tool compatibility can make Bun's Node-compatible APIs the clearer choice.
+- Before adding a JavaScript dependency, check Bun and Web-platform capabilities first. Keep framework/tool dependencies when they provide real project value.
