@@ -13,11 +13,7 @@
  *
  * Run: `bun run check:bridge`
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const root = fileURLToPath(new URL("..", import.meta.url));
+const root = new URL("../", import.meta.url);
 let failures = 0;
 
 function pass(name: string) {
@@ -29,8 +25,8 @@ function fail(name: string, detail: string) {
   console.error(`FAIL - ${name}: ${detail}`);
 }
 
-function read(relative: string): string {
-  return readFileSync(join(root, relative), "utf8");
+function read(relative: string): Promise<string> {
+  return Bun.file(new URL(relative, root)).text();
 }
 
 /** Deterministic display order for the per-item checks below. */
@@ -38,13 +34,15 @@ function byName(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-const nativeTs = read("src/platform/native.ts");
-const typesTs = read("src/types.ts");
-const commandsRs = read("src-tauri/src/commands/mod.rs");
-const shellRs = read("src-tauri/src/shell.rs");
-const modelStoreRs = read("src-tauri/src/speech/model_store.rs");
-const localAiRs = read("src-tauri/src/ai/local.rs");
-const libRs = read("src-tauri/src/lib.rs");
+const [nativeTs, typesTs, commandsRs, shellRs, modelStoreRs, localAiRs, libRs] = await Promise.all([
+  read("src/platform/native.ts"),
+  read("src/types.ts"),
+  read("src-tauri/src/commands/mod.rs"),
+  read("src-tauri/src/shell.rs"),
+  read("src-tauri/src/speech/model_store.rs"),
+  read("src-tauri/src/ai/local.rs"),
+  read("src-tauri/src/lib.rs"),
+]);
 
 // --- 1. Every invoked command exists in Rust --------------------------------
 // `call<T>("name")`, including generics with `>` inside like
