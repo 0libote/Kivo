@@ -4,17 +4,16 @@
  *
  * Run: `bun run generate:models`
  */
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { extractGenerated, renderGeneratedAiModels, spliceGenerated } from "./ai-model-codegen.ts";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
-const rustPath = join(root, "src-tauri/src/ai/mod.rs");
-const tsPath = join(root, "src/ai/models.ts");
+const root = new URL("..", import.meta.url);
+const rustPath = new URL("src-tauri/src/ai/mod.rs", root);
+const tsPath = new URL("src/ai/models.ts", root);
 
-const rustSource = readFileSync(rustPath, "utf8");
-const tsRaw = readFileSync(tsPath, "utf8");
+const [rustSource, tsRaw] = await Promise.all([
+  Bun.file(rustPath).text(),
+  Bun.file(tsPath).text(),
+]);
 // Compare canonical LF, but write back in the file's own convention so a
 // CRLF checkout is never rewritten with mixed endings.
 const crlf = tsRaw.includes("\r\n");
@@ -41,7 +40,7 @@ if (currentBlocked !== generated.blockedPatterns) {
 }
 
 if (updated !== tsSource) {
-  writeFileSync(tsPath, toFile(updated));
+  await Bun.write(tsPath, toFile(updated));
   console.info("wrote src/ai/models.ts");
 } else {
   console.info("src/ai/models.ts is up to date");
