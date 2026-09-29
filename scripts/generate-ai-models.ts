@@ -10,10 +10,7 @@ const root = new URL("..", import.meta.url);
 const rustPath = new URL("src-tauri/src/ai/mod.rs", root);
 const tsPath = new URL("src/ai/models.ts", root);
 
-const [rustSource, tsRaw] = await Promise.all([
-  Bun.file(rustPath).text(),
-  Bun.file(tsPath).text(),
-]);
+const [rustSource, tsRaw] = await Promise.all([Bun.file(rustPath).text(), Bun.file(tsPath).text()]);
 // Compare canonical LF, but write back in the file's own convention so a
 // CRLF checkout is never rewritten with mixed endings.
 const crlf = tsRaw.includes("\r\n");
