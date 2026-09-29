@@ -312,42 +312,44 @@ class MockBridge implements NativeBridge {
     ];
   }
 
-  async getContext(): Promise<AppContext> {
-    return {
+  getContext(): Promise<AppContext> {
+    return Promise.resolve({
       platform: this.platform,
       surface: surfaceFromLabel(undefined),
       version: "0.1.0-dev",
       development: true,
       paused: this.paused,
-    };
+    });
   }
 
-  async getDictationRecovery(): Promise<string | null> {
-    return null;
+  getDictationRecovery(): Promise<string | null> {
+    return Promise.resolve(null);
   }
-  async clearDictationRecovery() {
+  clearDictationRecovery(): Promise<void> {
     this.emit("recovery-changed", null);
+    return Promise.resolve();
   }
 
-  async getSettings() {
-    return structuredClone(this.settings);
+  getSettings(): Promise<AppSettings> {
+    return Promise.resolve(structuredClone(this.settings));
   }
 
-  async getStatsSummary() {
-    return structuredClone(this.stats);
+  getStatsSummary(): Promise<StatsDocument> {
+    return Promise.resolve(structuredClone(this.stats));
   }
-  async getStatsSeries() {
-    return structuredClone(this.stats);
+  getStatsSeries(): Promise<StatsDocument> {
+    return Promise.resolve(structuredClone(this.stats));
   }
-  async clearStats() {
+  clearStats(): Promise<void> {
     this.stats = { schemaVersion: 1, rows: [] };
     this.emit("stats-changed", null);
+    return Promise.resolve();
   }
-  async exportStats() {
-    return structuredClone(this.stats);
+  exportStats(): Promise<StatsDocument> {
+    return Promise.resolve(structuredClone(this.stats));
   }
 
-  async updateSettings(patch: Partial<AppSettings>) {
+  updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
     const previousProvider = this.settings.aiProvider;
     this.settings = { ...this.settings, ...patch };
     // Mirror SettingsPatch: provider-specific IDs must not carry over by default.
@@ -373,11 +375,11 @@ class MockBridge implements NativeBridge {
     }
     window.localStorage.setItem("kivo-dev-settings", JSON.stringify(this.settings));
     this.emit("settings-changed", structuredClone(this.settings));
-    return structuredClone(this.settings);
+    return Promise.resolve(structuredClone(this.settings));
   }
 
-  async getPermissions() {
-    return structuredClone(this.permissions);
+  getPermissions(): Promise<PermissionStatus[]> {
+    return Promise.resolve(structuredClone(this.permissions));
   }
 
   async requestPermission(kind: PermissionKind) {
@@ -393,8 +395,9 @@ class MockBridge implements NativeBridge {
     return structuredClone(this.permissions);
   }
 
-  async openPermissionSettings() {
+  openPermissionSettings(): Promise<void> {
     // Intentional no-op: browser harness has no OS settings screen to open.
+    return Promise.resolve();
   }
 
   async resetPermissionGrants() {
@@ -409,20 +412,20 @@ class MockBridge implements NativeBridge {
     return structuredClone(this.permissions);
   }
 
-  async listMicrophones() {
-    return [
+  listMicrophones(): Promise<MicrophoneDevice[]> {
+    return Promise.resolve([
       { id: "default", name: "System Default", isDefault: true },
       { id: "studio-display", name: "Studio Display Microphone", isDefault: false },
-    ];
+    ]);
   }
 
-  async listSpeechLanguages() {
-    return [
+  listSpeechLanguages(): Promise<SpeechLanguage[]> {
+    return Promise.resolve([
       { code: "auto", name: "Automatic", installed: true, downloadable: false },
       { code: "en-GB", name: "English (United Kingdom)", installed: true, downloadable: false },
       { code: "en-US", name: "English (United States)", installed: true, downloadable: false },
       { code: "fr-FR", name: "French (France)", installed: false, downloadable: true },
-    ];
+    ]);
   }
 
   // Illustrative catalog mirroring src-tauri/src/speech/model_store.rs; the
@@ -570,8 +573,8 @@ class MockBridge implements NativeBridge {
     },
   ];
 
-  async listLocalSpeechModels() {
-    return structuredClone(this.localModels);
+  listLocalSpeechModels(): Promise<LocalSpeechModelInfo[]> {
+    return Promise.resolve(structuredClone(this.localModels));
   }
 
   async downloadLocalSpeechModel(modelId: string) {
@@ -595,15 +598,16 @@ class MockBridge implements NativeBridge {
     return structuredClone(this.localModels);
   }
 
-  async cancelLocalSpeechModelDownload() {
+  cancelLocalSpeechModelDownload(): Promise<void> {
     // Intentional no-op: the harness download resolves immediately.
+    return Promise.resolve();
   }
 
-  async deleteLocalSpeechModel(modelId: string) {
+  deleteLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]> {
     const model = this.localModels.find((candidate) => candidate.id === modelId);
     if (model) model.downloaded = false;
     this.emit("local-models-changed", structuredClone(this.localModels));
-    return structuredClone(this.localModels);
+    return Promise.resolve(structuredClone(this.localModels));
   }
 
   getVozModelStatus(): Promise<VozModelStatus> {
@@ -651,16 +655,16 @@ class MockBridge implements NativeBridge {
     return Promise.resolve();
   }
 
-  async listAiProviders(): Promise<AiProviderInfo[]> {
-    return structuredClone(FALLBACK_AI_PROVIDERS);
+  listAiProviders(): Promise<AiProviderInfo[]> {
+    return Promise.resolve(structuredClone(FALLBACK_AI_PROVIDERS));
   }
 
-  async listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]> {
-    return structuredClone(fallbackAiModels(provider ?? this.settings.aiProvider));
+  listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]> {
+    return Promise.resolve(structuredClone(fallbackAiModels(provider ?? this.settings.aiProvider)));
   }
 
-  async detectLocalAiServers(): Promise<LocalAiServerInfo[]> {
-    return [
+  detectLocalAiServers(): Promise<LocalAiServerInfo[]> {
+    return Promise.resolve([
       {
         id: "ollama",
         name: "Ollama",
@@ -682,19 +686,20 @@ class MockBridge implements NativeBridge {
         running: false,
         models: [],
       },
-    ];
+    ]);
   }
 
-  async installLocalAiRuntime(): Promise<void> {
+  installLocalAiRuntime(): Promise<void> {
     // Intentional no-op: the browser harness does not download installers.
+    return Promise.resolve();
   }
 
   private currentKeyStatus(): ApiKeyStatus {
     return { ...this.apiKeyStatuses[this.settings.aiProvider] };
   }
 
-  async getApiKeyStatus() {
-    return this.currentKeyStatus();
+  getApiKeyStatus(): Promise<ApiKeyStatus> {
+    return Promise.resolve(this.currentKeyStatus());
   }
 
   async saveApiKey(apiKey: string) {
@@ -707,9 +712,9 @@ class MockBridge implements NativeBridge {
     return this.currentKeyStatus();
   }
 
-  async clearApiKey() {
+  clearApiKey(): Promise<ApiKeyStatus> {
     this.apiKeyStatuses[this.settings.aiProvider] = { configured: false, connection: "untested" };
-    return this.currentKeyStatus();
+    return Promise.resolve(this.currentKeyStatus());
   }
 
   async testApiKey() {
@@ -723,8 +728,9 @@ class MockBridge implements NativeBridge {
     return this.currentKeyStatus();
   }
 
-  async startDictation() {
+  startDictation(): Promise<void> {
     this.emit("dictation-state", { status: "listening", sessionId: crypto.randomUUID() });
+    return Promise.resolve();
   }
 
   async stopDictation() {
@@ -733,27 +739,28 @@ class MockBridge implements NativeBridge {
     this.emit("dictation-state", { status: "success" });
   }
 
-  async cancelDictation() {
+  cancelDictation(): Promise<void> {
     this.emit("dictation-state", { status: "hidden" });
+    return Promise.resolve();
   }
 
-  async retryDictation() {
-    await this.startDictation();
+  retryDictation(): Promise<void> {
+    return this.startDictation();
   }
 
-  async getWritingContext() {
+  getWritingContext(): Promise<SelectionContext> {
     const applicationNames: Record<Platform, string> = {
       macos: "TextEdit",
       windows: "Notepad",
       linux: "Text Editor",
     };
-    return {
+    return Promise.resolve({
       hasSelection: true,
       applicationName: applicationNames[this.platform],
       canReplace: true,
       bounds: { x: 480, y: 320, width: 164, height: 22 },
       initialText: "Hello, how are you?",
-    };
+    });
   }
 
   async runWritingAction(request: WritingRequest): Promise<WritingResponse> {
@@ -795,29 +802,34 @@ class MockBridge implements NativeBridge {
     return { kind: "replaced" };
   }
 
-  async replaceWritingResult() {
+  replaceWritingResult(): Promise<void> {
     // Intentional no-op: browser harness previews results instead of replacing text.
+    return Promise.resolve();
   }
 
   async copyText(text: string) {
     await navigator.clipboard?.writeText(text);
   }
 
-  async closeSurface() {
+  closeSurface(): Promise<void> {
     // Intentional no-op: browser harness keeps surfaces visible for development.
+    return Promise.resolve();
   }
-  async showSurface(surface: Surface) {
+  showSurface(surface: Surface): Promise<void> {
     window.location.search = `?surface=${surface}&harness=1`;
+    return Promise.resolve();
   }
-  async setSurfaceMode() {
+  setSurfaceMode(): Promise<void> {
     // Intentional no-op: browser harness does not resize native windows.
+    return Promise.resolve();
   }
-  async completeOnboarding() {
-    await this.updateSettings({ onboardingComplete: true });
+  completeOnboarding(): Promise<void> {
+    return this.updateSettings({ onboardingComplete: true }).then(() => undefined);
   }
-  async setPaused(paused: boolean) {
+  setPaused(paused: boolean): Promise<void> {
     this.paused = paused;
     this.emit("pause-changed", paused);
+    return Promise.resolve();
   }
   async checkForUpdates() {
     await delay(450);
@@ -826,21 +838,23 @@ class MockBridge implements NativeBridge {
   async installUpdate() {
     await delay(800);
   }
-  async restartApp() {
+  restartApp(): Promise<void> {
     // Intentional no-op: browser harness keeps running for development.
+    return Promise.resolve();
   }
-  async openExternal(url: string) {
+  openExternal(url: string): Promise<void> {
     window.open(url, "_blank", "noopener,noreferrer");
+    return Promise.resolve();
   }
 
-  async on<K extends keyof NativeEventMap>(
+  on<K extends keyof NativeEventMap>(
     event: K,
     handler: (payload: NativeEventMap[K]) => void,
   ): Promise<UnlistenFn> {
     const listeners = (this.listeners[event] ??= new Set());
     const listener: UntypedListener = (payload) => handler(payload as NativeEventMap[K]);
     listeners.add(listener);
-    return () => listeners.delete(listener);
+    return Promise.resolve(() => listeners.delete(listener));
   }
 
   private emit<K extends keyof NativeEventMap>(event: K, payload: NativeEventMap[K]) {
