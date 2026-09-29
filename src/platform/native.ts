@@ -243,7 +243,7 @@ class TauriBridge implements NativeBridge {
   restartApp = () => call<void>("restart_app");
   openExternal = (url: string) => call<void>("open_external", { url });
 
-  async on<K extends keyof NativeEventMap>(
+  on<K extends keyof NativeEventMap>(
     event: K,
     handler: (payload: NativeEventMap[K]) => void,
   ): Promise<UnlistenFn> {
