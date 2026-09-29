@@ -68,6 +68,25 @@ describe("writingToolsReducer", () => {
     ).toBe(true);
   });
 
+  it("opens the summary choice before running and retains its mode on retry", () => {
+    const chosen = writingToolsReducer(open(), { type: "OPEN_SUMMARY" });
+    expect(chosen).toMatchObject({ mode: "summary", activeAction: "summarize" });
+
+    const preview = writingToolsReducer(chosen, {
+      type: "RUN",
+      action: "summarize",
+      replacesSelection: false,
+    });
+    expect(preview).toMatchObject({ mode: "processing", requestReplacesSelection: false });
+
+    const failed = writingToolsReducer(preview, {
+      type: "FAIL",
+      message: "Try again",
+      canRetry: true,
+    });
+    expect(failed.requestReplacesSelection).toBe(false);
+  });
+
   it("dismisses after replacement and keeps errors retryable", () => {
     const processing = writingToolsReducer(open(), { type: "RUN", action: "proofread" });
     expect(writingToolsReducer(processing, { type: "REPLACED" })).toEqual(initialWritingToolsState);

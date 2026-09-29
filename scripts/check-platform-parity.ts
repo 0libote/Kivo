@@ -12,12 +12,9 @@
  *
  * Run: `bun run check:platform-parity`
  */
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { extractGenerated, renderGeneratedAiModels } from "./ai-model-codegen.ts";
 
-const root = fileURLToPath(new URL("..", import.meta.url));
+const root = new URL("../", import.meta.url);
 let failures = 0;
 
 function check(name: string, ok: boolean, detail: string) {
@@ -29,8 +26,8 @@ function check(name: string, ok: boolean, detail: string) {
   }
 }
 
-function read(relative: string): string {
-  return readFileSync(join(root, relative), "utf8");
+function read(relative: string): Promise<string> {
+  return Bun.file(new URL(relative, root)).text();
 }
 
 /** Slice a top-level `fn name ... \n}\n` body so literal checks stay scoped. */
@@ -44,21 +41,37 @@ function fnBody(source: string, name: string): string {
   return end === -1 ? "" : tail.slice(0, end);
 }
 
-const configRs = read("src-tauri/src/config/mod.rs");
-const typesTs = read("src/types.ts");
-const shellRs = read("src-tauri/src/shell.rs");
-const commandsRs = read("src-tauri/src/commands/mod.rs");
-const nativeTs = read("src/platform/native.ts");
-const aiRs = read("src-tauri/src/ai/mod.rs");
-const aiProvidersRs = read("src-tauri/src/ai/providers.rs");
-const aiModelsTs = read("src/ai/models.ts");
-const vozRs = read("src-tauri/src/speech/voz.rs");
-const vozWorker = read("src/features/dictation/voz.worker.ts");
-const vozBridgeSwift = read(
-  "src-tauri/native/macos/VozBridge/Sources/KivoVozBridge/VozBridge.swift",
-);
-const vozPackage = read("src-tauri/native/macos/VozBridge/Package.swift");
-const appTs = read("src/App.tsx");
+const [
+  configRs,
+  typesTs,
+  shellRs,
+  commandsRs,
+  nativeTs,
+  aiRs,
+  aiProvidersRs,
+  aiModelsTs,
+  vozRs,
+  vozWorker,
+  vozBridgeSwift,
+  vozPackage,
+  appTs,
+  libRs,
+] = await Promise.all([
+  read("src-tauri/src/config/mod.rs"),
+  read("src/types.ts"),
+  read("src-tauri/src/shell.rs"),
+  read("src-tauri/src/commands/mod.rs"),
+  read("src/platform/native.ts"),
+  read("src-tauri/src/ai/mod.rs"),
+  read("src-tauri/src/ai/providers.rs"),
+  read("src/ai/models.ts"),
+  read("src-tauri/src/speech/voz.rs"),
+  read("src/features/dictation/voz.worker.ts"),
+  read("src-tauri/native/macos/VozBridge/Sources/KivoVozBridge/VozBridge.swift"),
+  read("src-tauri/native/macos/VozBridge/Package.swift"),
+  read("src/App.tsx"),
+  read("src-tauri/src/lib.rs"),
+]);
 
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
 function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): string | null {
@@ -391,7 +404,7 @@ check(
 check(
   "Linux keeps Voz unavailable in the native harness",
   vozRs.includes("UnavailableVozRuntime") &&
-    read("src-tauri/src/lib.rs").includes('not(any(windows, target_os = "macos"))'),
+    libRs.includes('not(any(windows, target_os = "macos"))'),
   "Linux must retain the simulated speech engine without claiming Voz support",
 );
 

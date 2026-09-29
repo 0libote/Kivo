@@ -58,9 +58,22 @@ async function load(requestId: string, needsDownload: boolean) {
   }
 }
 
-self.addEventListener("message", (event: MessageEvent<VozWorkerRequest>) => {
+self.addEventListener("message", (event: MessageEvent<unknown>) => {
+  // The worker is only intended to accept requests from Kivo's own WebView.
+  // Reject cross-origin messages before reading or acting on their payload.
+  if (event.origin !== self.location.origin) return;
+  if (!isVozWorkerRequest(event.data)) return;
   void handle(event.data);
 });
+
+function isVozWorkerRequest(value: unknown): value is VozWorkerRequest {
+  if (typeof value !== "object" || value === null) return false;
+  const request = value as Partial<VozWorkerRequest>;
+  return (
+    typeof request.requestId === "string" &&
+    ["status", "download", "prepare", "remove", "transcribe"].includes(request.operation as string)
+  );
+}
 
 async function handle(request: VozWorkerRequest) {
   try {

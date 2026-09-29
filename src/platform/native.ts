@@ -771,7 +771,11 @@ class MockBridge implements NativeBridge {
       };
     }
     if (request.action === "summarize") {
-      return { kind: "result", text: "A short greeting that asks how the other person is doing." };
+      return {
+        kind: "result",
+        text: "A short greeting that asks how the other person is doing.",
+        canReplace: true,
+      };
     }
     if (request.action === "key-points") {
       return {

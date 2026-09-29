@@ -39,7 +39,7 @@ The site needs **no build command** — Cloudflare serves the folder directly.
 **Option B — direct upload with Wrangler:**
 
 ```sh
-npx wrangler pages deploy website --project-name kivo
+bunx --bun wrangler pages deploy website --project-name kivo
 ```
 
 **Custom domain (either option):** Pages project → **Custom domains** → **Set up a custom domain**, then point your DNS at Cloudflare. The download CTAs link to the GitHub repo (`https://github.com/0libote/Kivo`), so no environment variables or redirects are needed.
