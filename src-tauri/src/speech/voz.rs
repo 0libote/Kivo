@@ -16,8 +16,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use tauri::{AppHandle, Emitter};
 
-#[cfg(target_os = "macos")]
-use super::VozWord;
 use super::{
     MicrophoneDevice, SpeechBackend, SpeechEngine, SpeechError, SpeechEventSink, SpeechFuture,
     SpeechSessionId, SpeechStartOptions, SpeechTranscript, VozTranscript, capture::AudioCapture,
@@ -175,14 +173,13 @@ impl VozRuntime for UnavailableVozRuntime {
 mod macos {
     use std::{
         ffi::{CStr, CString, c_char, c_void},
-        path::PathBuf,
+        path::{Path, PathBuf},
     };
 
     use tauri::{AppHandle, Emitter};
 
     use super::{
         SpeechError, SpeechFuture, VozModelPhase, VozModelStatus, VozRuntime, VozTranscript,
-        VozWord,
     };
 
     unsafe extern "C" {
@@ -203,7 +200,7 @@ mod macos {
         fn kivo_voz_free(pointer: *mut c_char);
     }
 
-    fn root_cstring(root: &PathBuf) -> Result<CString, SpeechError> {
+    fn root_cstring(root: &Path) -> Result<CString, SpeechError> {
         CString::new(root.to_string_lossy().as_bytes()).map_err(|_| SpeechError::Backend)
     }
 
