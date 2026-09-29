@@ -41,9 +41,6 @@ fn build_speech_bridge() {
     // The bridge uses no post-15 API. Keep its deployment target at the
     // upstream SDK's macOS floor; the containing Kivo app still declares 26+.
     let swift_triple = format!("{swift_arch}-apple-macosx15.0");
-    let library = package_build
-        .join(&swift_triple)
-        .join("release/libKivoVozBridge.dylib");
     let packaged_library = package.join("libKivoVozBridge.dylib");
     println!(
         "cargo:rerun-if-changed={}",
@@ -67,6 +64,30 @@ fn build_speech_bridge() {
         .status()
         .expect("Swift 6.2 must be available to build the official Voz package");
     assert!(status.success(), "the native Voz bridge failed to compile");
+
+    // SwiftPM has changed the shape of its build output directory across
+    // toolchain releases. Ask Swift for the actual product directory instead
+    // of reconstructing it from the target triple.
+    let bin_path = Command::new("swift")
+        .args(["build", "--package-path"])
+        .arg(&package)
+        .args(["--build-path"])
+        .arg(&package_build)
+        .args(["--triple"])
+        .arg(&swift_triple)
+        .args(["--configuration", "release", "--show-bin-path"])
+        .output()
+        .expect("SwiftPM must report the Voz product directory");
+    assert!(
+        bin_path.status.success(),
+        "could not locate the Voz product"
+    );
+    let bin_path = PathBuf::from(
+        String::from_utf8(bin_path.stdout)
+            .expect("SwiftPM product directory is UTF-8")
+            .trim(),
+    );
+    let library = bin_path.join("libKivoVozBridge.dylib");
     let install_name_status = Command::new("install_name_tool")
         .args(["-id", "@rpath/libKivoVozBridge.dylib"])
         .arg(&library)
@@ -128,10 +149,7 @@ fn build_speech_bridge() {
     .join("usr/lib/swift");
 
     println!("cargo:rustc-link-search=native={}", output.display());
-    println!(
-        "cargo:rustc-link-search=native={}",
-        package_build.join(&swift_triple).join("release").display()
-    );
+    println!("cargo:rustc-link-search=native={}", bin_path.display());
     println!(
         "cargo:rustc-link-search=native={}",
         toolchain_swift.display()

@@ -82,6 +82,8 @@ VOZ_LANGUAGES.unshift({
   downloadable: false,
 });
 
+const VOZ_LANGUAGE_CODES = new Set(VOZ_LANGUAGES.map(({ code }) => code));
+
 interface SettingsWindowProps {
   readonly context: AppContext;
   readonly settings: AppSettings;
@@ -653,67 +655,26 @@ function DictationSection({
     runtime: "Checking availability",
     error: null,
   });
-  const vozLanguageCodes = new Set([
-    "bg",
-    "cs",
-    "da",
-    "de",
-    "el",
-    "en",
-    "es",
-    "et",
-    "fi",
-    "fr",
-    "hr",
-    "hu",
-    "it",
-    "lt",
-    "lv",
-    "mt",
-    "nl",
-    "pl",
-    "pt",
-    "ro",
-    "ru",
-    "sk",
-    "sl",
-    "sv",
-    "uk",
-  ]);
   const selectedLanguage = settings.dictationLanguage.split(/[-_]/)[0].toLowerCase();
   const vozLanguageSupported =
-    settings.dictationLanguage === "auto" || vozLanguageCodes.has(selectedLanguage);
+    settings.dictationLanguage === "auto" || VOZ_LANGUAGE_CODES.has(selectedLanguage);
   const languageOptions = settings.speechEngine === "voz" ? VOZ_LANGUAGES : languages;
   const shortcutNote =
     context.platform === "macos" && settings.dictationShortcut === "Fn"
       ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
       : undefined;
-  let languageDescription = "Automatic follows the current input language when supported.";
-  if (settings.speechEngine === "local") {
-    languageDescription =
-      "On-device models detect the spoken language automatically; set this only to force one.";
-  } else if (settings.speechEngine === "voz") {
-    languageDescription =
-      "Voz checks the spoken language on-device before transcription. Automatic needs a reliable match; otherwise Kivo asks you to choose another engine.";
-  } else if (context.platform === "windows") {
-    languageDescription =
-      "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
-  }
+  const languageDescription = dictationLanguageDescription(settings.speechEngine, context.platform);
+  const engineDescription =
+    settings.speechEngine === "local" || settings.speechEngine === "voz"
+      ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
+      : "System: uses the operating-system speech engine, which may use the network on some systems.";
   return (
     <SettingsContent
       title="Dictation"
       subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop."
     >
       <SettingsGroup header="Recognition">
-        <SettingRow
-          label="Transcription engine"
-          description={
-            settings.speechEngine === "local" || settings.speechEngine === "voz"
-              ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
-              : "System: uses the operating-system speech engine, which may use the network on some systems."
-          }
-          stacked
-        >
+        <SettingRow label="Transcription engine" description={engineDescription} stacked>
           <SegmentedControl
             ariaLabel="Transcription engine"
             onChange={(engine) =>
@@ -873,6 +834,22 @@ function DictationSection({
 function languageName(language: SpeechLanguage): string {
   if (language.downloadable && !language.installed) return `${language.name} — download required`;
   return language.name;
+}
+
+function dictationLanguageDescription(
+  engine: AppSettings["speechEngine"],
+  platform: AppContext["platform"],
+): string {
+  if (engine === "local") {
+    return "On-device models detect the spoken language automatically; set this only to force one.";
+  }
+  if (engine === "voz") {
+    return "Voz checks the spoken language on-device before transcription. Automatic needs a reliable match; otherwise Kivo asks you to choose another engine.";
+  }
+  if (platform === "windows") {
+    return "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
+  }
+  return "Automatic follows the current input language when supported.";
 }
 
 function NumberPreference({

@@ -2,7 +2,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import type { AppContext, VozModelProgress, VozModelStatus } from "../../types";
@@ -83,18 +83,54 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
   }
 
   const isWorking = status.phase === "downloading" || status.phase === "preparing";
-  const size =
-    context.platform === "windows"
-      ? "about 390 MB"
-      : context.platform === "macos"
-        ? "about 467 MB"
-        : "not available in the Linux test harness";
-  const machineNote =
-    context.platform === "windows"
-      ? "Uses WebGPU when available, with the SDK’s CPU fallback. The browser runtime can use about 1.2 GB of memory while loaded."
-      : context.platform === "macos"
-        ? "Uses Core ML on Apple Silicon. The first preparation after download can take about 20 seconds."
-        : "Voz runs only on supported macOS and Windows releases. The Linux harness keeps simulated speech for development and tests.";
+  const platformInfo = {
+    macos: {
+      size: "about 467 MB",
+      note: "Uses Core ML on Apple Silicon. The first preparation after download can take about 20 seconds.",
+    },
+    windows: {
+      size: "about 390 MB",
+      note: "Uses WebGPU when available, with the SDK’s CPU fallback. The browser runtime can use about 1.2 GB of memory while loaded.",
+    },
+    linux: {
+      size: "not available in the Linux test harness",
+      note: "Voz runs only on supported macOS and Windows releases. The Linux harness keeps simulated speech for development and tests.",
+    },
+  }[context.platform];
+  let modelAction: ReactNode;
+  if (isWorking) {
+    modelAction = (
+      <div {...stylex.props(styles.progress)}>
+        <ProgressBar
+          hasValueLabel={status.phase === "downloading" && status.progress !== null}
+          isIndeterminate={status.progress === null}
+          label={
+            status.phase === "downloading"
+              ? "Downloading Voz and language models"
+              : "Preparing Voz model"
+          }
+          value={(status.progress ?? 0) * 100}
+        />
+      </div>
+    );
+  } else if (status.downloaded) {
+    modelAction = (
+      <div {...stylex.props(styles.actions)}>
+        <span {...stylex.props(styles.ready)}>Downloaded and prepared</span>
+        <Button label="Remove model" onClick={() => void remove()} variant="ghost" />
+      </div>
+    );
+  } else {
+    modelAction = (
+      <Button
+        isDisabled={!status.supported || busy}
+        isLoading={busy}
+        label="Download and prepare Voz"
+        onClick={() => void install()}
+        variant="secondary"
+      />
+    );
+  }
 
   return (
     <div {...stylex.props(styles.root)}>
@@ -104,41 +140,15 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
           check the language locally before transcription. Audio stays on this computer.
         </p>
         <p>
-          Voz files: {size} · 25 supported languages · {status.runtime}
+          Voz files: {platformInfo.size} · 25 supported languages · {status.runtime}
         </p>
-        <p>{machineNote}</p>
+        <p>{platformInfo.note}</p>
       </div>
       {!status.supported ? (
         <Banner status="warning" title="Voz is unavailable on this platform." />
       ) : null}
       {status.error ? <Banner status="error" title={status.error} /> : null}
-      {isWorking ? (
-        <div {...stylex.props(styles.progress)}>
-          <ProgressBar
-            hasValueLabel={status.phase === "downloading" && status.progress !== null}
-            isIndeterminate={status.progress === null}
-            label={
-              status.phase === "downloading"
-                ? "Downloading Voz and language models"
-                : "Preparing Voz model"
-            }
-            value={(status.progress ?? 0) * 100}
-          />
-        </div>
-      ) : status.downloaded ? (
-        <div {...stylex.props(styles.actions)}>
-          <span {...stylex.props(styles.ready)}>Downloaded and prepared</span>
-          <Button label="Remove model" onClick={() => void remove()} variant="ghost" />
-        </div>
-      ) : (
-        <Button
-          isDisabled={!status.supported || busy}
-          isLoading={busy}
-          label="Download and prepare Voz"
-          onClick={() => void install()}
-          variant="secondary"
-        />
-      )}
+      {modelAction}
     </div>
   );
 }

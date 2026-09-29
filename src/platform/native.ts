@@ -577,18 +577,18 @@ class MockBridge implements NativeBridge {
   async downloadLocalSpeechModel(modelId: string) {
     const model = this.localModels.find((candidate) => candidate.id === modelId);
     if (model && !model.downloaded) {
-      const steps = 4;
-      for (let step = 1; step <= steps; step += 1) {
-        this.emit("local-model-progress", {
-          modelId,
-          downloaded: Math.round((model.sizeBytes * step) / steps),
-          total: model.sizeBytes,
-        });
-        // The harness simulates a sequential download progress stream;
-        // parallelizing would remove the intermediate states the UI renders.
-        // oxlint-disable-next-line no-await-in-loop
-        await delay(180);
-      }
+      await [1, 2, 3, 4].reduce(
+        (previous, step) =>
+          previous.then(() => {
+            this.emit("local-model-progress", {
+              modelId,
+              downloaded: Math.round((model.sizeBytes * step) / 4),
+              total: model.sizeBytes,
+            });
+            return delay(180);
+          }),
+        Promise.resolve(),
+      );
       model.downloaded = true;
     }
     this.emit("local-models-changed", structuredClone(this.localModels));
@@ -606,24 +606,27 @@ class MockBridge implements NativeBridge {
     return structuredClone(this.localModels);
   }
 
-  async getVozModelStatus() {
-    return structuredClone(this.vozStatus);
+  getVozModelStatus(): Promise<VozModelStatus> {
+    return Promise.resolve(structuredClone(this.vozStatus));
   }
 
   async downloadVozModel() {
     if (!this.vozStatus.supported || this.vozStatus.downloaded) return;
     this.vozStatus = { ...this.vozStatus, phase: "downloading", progress: 0 };
-    for (const progress of [0.2, 0.45, 0.7, 1]) {
-      this.vozStatus = { ...this.vozStatus, progress };
-      this.emit("voz-model-status", {
-        phase: "downloading",
-        progress,
-        error: null,
-      });
-      // The harness renders lifecycle states without fetching the real model.
-      // oxlint-disable-next-line no-await-in-loop
-      await delay(120);
-    }
+    await [0.2, 0.45, 0.7, 1].reduce(
+      (previous, progress) =>
+        previous.then(() => {
+          this.vozStatus = { ...this.vozStatus, progress };
+          this.emit("voz-model-status", {
+            phase: "downloading",
+            progress,
+            error: null,
+          });
+          // Keep each simulated progress state visible to the browser harness.
+          return delay(120);
+        }),
+      Promise.resolve(),
+    );
     this.vozStatus = { ...this.vozStatus, phase: "preparing", progress: null };
     this.emit("voz-model-status", { phase: "preparing", progress: null, error: null });
     await delay(240);
@@ -631,7 +634,7 @@ class MockBridge implements NativeBridge {
     this.emit("voz-model-status", { phase: "ready", progress: null, error: null });
   }
 
-  async deleteVozModel() {
+  deleteVozModel(): Promise<void> {
     this.vozStatus = {
       ...this.vozStatus,
       downloaded: false,
@@ -639,11 +642,13 @@ class MockBridge implements NativeBridge {
       progress: null,
     };
     this.emit("voz-model-status", { phase: "notDownloaded", progress: null, error: null });
+    return Promise.resolve();
   }
 
-  async completeVozWorkerRequest(_reply: VozWorkerReply) {
+  completeVozWorkerRequest(_reply: VozWorkerReply): Promise<void> {
     // The browser harness simulates the runtime directly; it never starts a
     // model worker or downloads Voz assets.
+    return Promise.resolve();
   }
 
   async listAiProviders(): Promise<AiProviderInfo[]> {

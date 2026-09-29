@@ -78,105 +78,19 @@ function isVozWorkerRequest(value: unknown): value is VozWorkerRequest {
 async function handle(request: VozWorkerRequest) {
   try {
     switch (request.operation) {
-      case "status": {
-        const cacheNames = typeof caches === "undefined" ? [] : await caches.keys();
-        const readyCache = await caches.open(stateCache);
-        const languageCheckInstalled = await readyCache.match(
-          new Request(new URL("/voz-language-check-ready", self.location.origin)),
-        );
-        const downloaded =
-          cacheNames.some((name) => name.startsWith("desert-ant-voz-")) &&
-          languageCheckInstalled !== undefined;
-        send({
-          requestId: request.requestId,
-          complete: true,
-          phase: downloaded ? "ready" : "notDownloaded",
-          progress: null,
-          downloaded,
-        });
+      case "status":
+        await reportStatus(request.requestId);
         return;
-      }
       case "download":
-      case "prepare": {
-        await loadEar(request.requestId);
-        const alreadyCached = await caches
-          .keys()
-          .then((names) => names.some((name) => name.startsWith("desert-ant-voz-")));
-        const loaded = await load(
-          request.requestId,
-          request.operation === "download" || !alreadyCached,
-        );
-        if (!loaded) throw new Error("Voz could not be loaded.");
-        send({
-          requestId: request.requestId,
-          complete: true,
-          phase: "ready",
-          progress: null,
-          downloaded: true,
-        });
+      case "prepare":
+        await install(request);
         return;
-      }
-      case "remove": {
-        recognizer = null;
-        identifier?.dispose();
-        identifier = null;
-        await setLanguageCheckReady(false);
-        const names = await caches.keys();
-        await Promise.all(
-          names
-            .filter((name) => name.startsWith("desert-ant-voz-"))
-            .map((name) => caches.delete(name)),
-        );
-        send({
-          requestId: request.requestId,
-          complete: true,
-          phase: "notDownloaded",
-          progress: null,
-          downloaded: false,
-        });
+      case "remove":
+        await remove(request.requestId);
         return;
-      }
-      case "transcribe": {
-        if (!request.samples || !request.language) {
-          throw new Error("Voz needs captured audio and a selected language.");
-        }
-        const ear = await loadEar(request.requestId);
-        const loaded = await load(request.requestId, false);
-        if (!loaded)
-          throw new Error("Voz is not prepared. Download it in Dictation settings first.");
-        const samples = Float32Array.from(request.samples);
-        const detection = await ear.identify(samples, 16000);
-        const supported =
-          "bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk".split(" ");
-        if (!detection.isReliable || !detection.language) {
-          throw new Error(
-            "Kivo could not reliably identify the spoken language. Choose another engine or set a clearer language selection.",
-          );
-        }
-        if (!supported.includes(detection.language)) {
-          throw new Error(
-            `Voz does not support the detected language (${detection.language}). Choose System or Kivo On-device.`,
-          );
-        }
-        const selected = request.language.split(/[-_]/, 1)[0]?.toLowerCase();
-        if (request.language !== "auto" && selected !== detection.language.toLowerCase()) {
-          throw new Error(
-            `The audio sounds like ${detection.language}, but Kivo is set to ${selected}. Change the dictation language or choose another engine.`,
-          );
-        }
-        const raw = await loaded.transcribe(samples);
-        const transcript: VozTranscript = {
-          text: raw.text,
-          words: raw.words,
-          durationSeconds: raw.duration,
-          processingSeconds: raw.processingTime,
-          detectedLanguage: detection.language,
-          languageReliable: detection.isReliable,
-          languageConfidence: detection.confidence,
-        };
-        send({ requestId: request.requestId, complete: true, transcript });
+      case "transcribe":
+        await transcribe(request);
         return;
-      }
       default:
         throw new Error("Unsupported Voz worker operation.");
     }
@@ -184,5 +98,103 @@ async function handle(request: VozWorkerRequest) {
     const message =
       cause instanceof Error ? cause.message : "Voz could not complete this operation.";
     send({ requestId: request.requestId, complete: true, phase: "failed", error: message });
+  }
+}
+
+async function reportStatus(requestId: string) {
+  const cacheNames = await caches.keys();
+  const readyCache = await caches.open(stateCache);
+  const languageCheckInstalled = await readyCache.match(
+    new Request(new URL("/voz-language-check-ready", self.location.origin)),
+  );
+  const downloaded =
+    cacheNames.some((name) => name.startsWith("desert-ant-voz-")) &&
+    languageCheckInstalled !== undefined;
+  send({
+    requestId,
+    complete: true,
+    phase: downloaded ? "ready" : "notDownloaded",
+    progress: null,
+    downloaded,
+  });
+}
+
+async function install(request: VozWorkerRequest) {
+  await loadEar(request.requestId);
+  const cachedNames = await caches.keys();
+  const alreadyCached = cachedNames.some((name) => name.startsWith("desert-ant-voz-"));
+  const loaded = await load(request.requestId, request.operation === "download" || !alreadyCached);
+  if (!loaded) throw new Error("Voz could not be loaded.");
+  send({
+    requestId: request.requestId,
+    complete: true,
+    phase: "ready",
+    progress: null,
+    downloaded: true,
+  });
+}
+
+async function remove(requestId: string) {
+  recognizer = null;
+  identifier?.dispose();
+  identifier = null;
+  await setLanguageCheckReady(false);
+  const names = await caches.keys();
+  await Promise.all(
+    names.filter((name) => name.startsWith("desert-ant-voz-")).map((name) => caches.delete(name)),
+  );
+  send({
+    requestId,
+    complete: true,
+    phase: "notDownloaded",
+    progress: null,
+    downloaded: false,
+  });
+}
+
+async function transcribe(request: VozWorkerRequest) {
+  if (!request.samples || !request.language) {
+    throw new Error("Voz needs captured audio and a selected language.");
+  }
+  const ear = await loadEar(request.requestId);
+  const loaded = await load(request.requestId, false);
+  if (!loaded) throw new Error("Voz is not prepared. Download it in Dictation settings first.");
+  const samples = Float32Array.from(request.samples);
+  const detection = await ear.identify(samples, 16000);
+  assertSupportedLanguage(request.language, detection);
+  const raw = await loaded.transcribe(samples);
+  const transcript: VozTranscript = {
+    text: raw.text,
+    words: raw.words,
+    durationSeconds: raw.duration,
+    processingSeconds: raw.processingTime,
+    detectedLanguage: detection.language,
+    languageReliable: detection.isReliable,
+    languageConfidence: detection.confidence,
+  };
+  send({ requestId: request.requestId, complete: true, transcript });
+}
+
+function assertSupportedLanguage(
+  selectedLanguage: string,
+  detection: Awaited<ReturnType<EarModel["identify"]>>,
+) {
+  const supported =
+    "bg cs da de el en es et fi fr hr hu it lt lv mt nl pl pt ro ru sk sl sv uk".split(" ");
+  if (!detection.isReliable || !detection.language) {
+    throw new Error(
+      "Kivo could not reliably identify the spoken language. Choose another engine or set a clearer language selection.",
+    );
+  }
+  if (!supported.includes(detection.language)) {
+    throw new Error(
+      `Voz does not support the detected language (${detection.language}). Choose System or Kivo On-device.`,
+    );
+  }
+  const selected = selectedLanguage.split(/[-_]/, 1)[0]?.toLowerCase();
+  if (selectedLanguage !== "auto" && selected !== detection.language.toLowerCase()) {
+    throw new Error(
+      `The audio sounds like ${detection.language}, but Kivo is set to ${selected}. Change the dictation language or choose another engine.`,
+    );
   }
 }
