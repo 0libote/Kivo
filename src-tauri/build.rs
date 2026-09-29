@@ -130,10 +130,7 @@ fn build_speech_bridge() {
     println!("cargo:rustc-link-search=native={}", output.display());
     println!(
         "cargo:rustc-link-search=native={}",
-        package_build
-            .join(&swift_triple)
-            .join("release")
-            .display()
+        package_build.join(&swift_triple).join("release").display()
     );
     println!(
         "cargo:rustc-link-search=native={}",
