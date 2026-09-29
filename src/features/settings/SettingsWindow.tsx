@@ -1293,6 +1293,37 @@ function AboutSection({
   // Older builds without an updater key cannot install signed updates.
   const [installUnsupported, setInstallUnsupported] = useState(false);
   const updateAvailable = updateResult?.available === true;
+
+  async function installUpdate() {
+    setBusy("install");
+    setNotice(null);
+    try {
+      await nativeBridge.installUpdate();
+      setInstalled(true);
+      setNotice("Update installed. Restarting…");
+      setBusy("restart");
+      try {
+        await nativeBridge.restartApp();
+        setNotice("Update installed. Restart Kivo to finish.");
+      } catch {
+        setNotice("Kivo couldn’t restart. Quit and reopen it manually.");
+      } finally {
+        setBusy(null);
+      }
+    } catch (error: unknown) {
+      const code = error instanceof NativeError ? error.code : "";
+      if (code === "update_install_unavailable" || code === "update_not_available") {
+        setInstallUnsupported(true);
+      }
+      setNotice(
+        error instanceof NativeError
+          ? error.message
+          : "The update couldn’t be installed. Use the download link instead.",
+      );
+      setBusy(null);
+    }
+  }
+
   return (
     <SettingsContent
       title="About"
@@ -1357,40 +1388,7 @@ function AboutSection({
             <Button
               isDisabled={busy !== null}
               label={installButtonLabel(busy)}
-              onClick={() => {
-                setBusy("install");
-                setNotice(null);
-                void nativeBridge
-                  .installUpdate()
-                  .then(() => {
-                    // Install succeeded: restart automatically so a single
-                    // click finishes the update. The Windows installer exits
-                    // the app itself; on macOS this relaunch applies it. If
-                    // the app is still alive afterwards (browser harness or
-                    // a failed relaunch), fall back to the manual Restart now
-                    // button below.
-                    setInstalled(true);
-                    setNotice("Update installed. Restarting…");
-                    setBusy("restart");
-                    void nativeBridge
-                      .restartApp()
-                      .then(() => setNotice("Update installed. Restart Kivo to finish."))
-                      .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
-                      .finally(() => setBusy(null));
-                  })
-                  .catch((error: unknown) => {
-                    const code = error instanceof NativeError ? error.code : "";
-                    // Older builds may lack the updater key.
-                    if (code === "update_install_unavailable" || code === "update_not_available")
-                      setInstallUnsupported(true);
-                    setNotice(
-                      error instanceof NativeError
-                        ? error.message
-                        : "The update couldn’t be installed. Use the download link instead.",
-                    );
-                    setBusy(null);
-                  });
-              }}
+              onClick={() => void installUpdate()}
               size="sm"
               variant="primary"
             />

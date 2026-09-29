@@ -48,6 +48,10 @@ fn build_speech_bridge() {
     );
     println!(
         "cargo:rerun-if-changed={}",
+        package.join("Package.resolved").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
         package
             .join("Sources/KivoVozBridge/VozBridge.swift")
             .display()

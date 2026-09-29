@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(windows)]
 use tauri::{AppHandle, Emitter};
 
+#[cfg(target_os = "macos")]
+use super::VozWord;
 use super::{
     MicrophoneDevice, SpeechBackend, SpeechEngine, SpeechError, SpeechEventSink, SpeechFuture,
     SpeechSessionId, SpeechStartOptions, SpeechTranscript, VozTranscript, capture::AudioCapture,
@@ -236,7 +238,7 @@ mod macos {
         );
     }
 
-    #[derive(serde::Serialize)]
+    #[derive(Clone, serde::Serialize)]
     #[serde(rename_all = "camelCase")]
     struct VozModelProgressPayload {
         phase: &'static str,
