@@ -1,18 +1,21 @@
 use std::{fmt, future::Future, pin::Pin, sync::Arc};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+pub mod capture;
 pub mod local;
 pub mod model_store;
 pub mod router;
+pub mod voz;
 
 pub type SpeechFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type SpeechEventSink = Arc<dyn Fn(SpeechEvent) + Send + Sync>;
 
 /// Which recognizer a dictation should use. `System` is the operating-system
 /// engine (SAPI / SpeechAnalyzer / the Linux test bench); `Local` runs a
-/// downloaded GGML model on-device. The engine behind the trait is chosen per
-/// session so switching never restarts the app.
+/// downloaded GGML model on-device; `Voz` runs Desert Ant's batch recognizer.
+/// The engine behind the trait is chosen per session so switching never
+/// restarts the app.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum SpeechBackend {
     #[default]
@@ -20,6 +23,29 @@ pub enum SpeechBackend {
     Local {
         model_id: String,
     },
+    Voz,
+}
+
+/// A Voz result keeps its word alignment alongside the text. It is deliberately
+/// not serializable: only the final text crosses the existing trusted bridge.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VozWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VozTranscript {
+    pub text: String,
+    pub words: Vec<VozWord>,
+    pub duration_seconds: f64,
+    pub processing_seconds: f64,
+    pub detected_language: Option<String>,
+    pub language_reliable: bool,
+    pub language_confidence: f64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -46,7 +72,12 @@ pub enum SpeechEvent {
 }
 
 /// Transcript text is intentionally neither `Debug` nor `Serialize`.
-pub struct SpeechTranscript(String);
+pub struct SpeechTranscript {
+    text: String,
+    /// Retained through Kivo's internal delivery path for future alignment
+    /// features; never serialized into frontend state.
+    pub(crate) voz: Option<VozTranscript>,
+}
 
 impl SpeechTranscript {
     pub fn new(text: String) -> Result<Self, SpeechError> {
@@ -54,11 +85,25 @@ impl SpeechTranscript {
         if text.is_empty() {
             return Err(SpeechError::NoSpeechDetected);
         }
-        Ok(Self(text.to_owned()))
+        Ok(Self {
+            text: text.to_owned(),
+            voz: None,
+        })
     }
 
-    pub fn into_text(self) -> String {
-        self.0
+    pub fn from_voz(result: VozTranscript) -> Result<Self, SpeechError> {
+        let text = result.text.trim();
+        if text.is_empty() {
+            return Err(SpeechError::NoSpeechDetected);
+        }
+        Ok(Self {
+            text: text.to_owned(),
+            voz: Some(result),
+        })
+    }
+
+    pub fn into_parts(self) -> (String, Option<VozTranscript>) {
+        (self.text, self.voz)
     }
 }
 
@@ -86,11 +131,31 @@ pub enum SpeechError {
     NotRunning,
     NoSpeechDetected,
     LocalModelUnavailable,
+    VozUnavailable,
+    #[cfg(any(windows, target_os = "macos"))]
+    VozRuntime(String),
+    VozLanguageUncertain,
+    VozDetectedUnsupported(String),
+    VozLanguageMismatch {
+        selected: String,
+        detected: String,
+    },
+    UnsupportedVozLanguage,
     Backend,
 }
 
 impl fmt::Display for SpeechError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[cfg(any(windows, target_os = "macos"))]
+        if let Self::VozRuntime(message) = self {
+            return formatter.write_str(message);
+        }
+        match self {
+            Self::VozLanguageUncertain => return formatter.write_str("Kivo could not reliably identify the spoken language. Choose a language in Settings → Dictation or select another engine."),
+            Self::VozDetectedUnsupported(language) => return write!(formatter, "Voz does not support the detected language ({language}). Choose System or Kivo On-device."),
+            Self::VozLanguageMismatch { selected, detected } => return write!(formatter, "The audio sounds like {detected}, but Kivo is set to {selected}. Change the dictation language or choose another engine."),
+            _ => {}
+        }
         formatter.write_str(match self {
             Self::MicrophonePermissionRequired => "Microphone access is required for dictation.",
             Self::SpeechPermissionRequired => {
@@ -104,6 +169,13 @@ impl fmt::Display for SpeechError {
             Self::LocalModelUnavailable => {
                 "Download a local speech model in Settings → Dictation, then try again."
             }
+            Self::VozUnavailable => "Voz is unavailable on this platform. Choose System or another on-device engine.",
+            #[cfg(any(windows, target_os = "macos"))]
+            Self::VozRuntime(_) => "Voz could not complete the local speech operation. Retry or choose another engine.",
+            Self::UnsupportedVozLanguage => "Voz does not support the selected language. Choose one of its supported languages in Settings → Dictation.",
+            Self::VozLanguageUncertain => "Kivo could not reliably identify the spoken language.",
+            Self::VozDetectedUnsupported(_) => "Voz does not support the detected language.",
+            Self::VozLanguageMismatch { .. } => "The detected language does not match the selected language.",
             Self::Backend => "Dictation stopped. Check your default microphone and microphone access.",
         })
     }

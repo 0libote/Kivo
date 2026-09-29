@@ -112,6 +112,21 @@ check(
   `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`,
 );
 
+// --- Voz runtimes are packaged only for their native desktop target ----------
+const viteSource = readFileSync(join(root, "vite.config.ts"), "utf8");
+check(
+  "Windows-only Voz worker assets stay out of macOS/Linux bundles",
+  viteSource.includes('process.env.TAURI_ENV_PLATFORM === "windows"') &&
+    viteSource.includes("voz.worker.stub.ts"),
+  "the browser Voz/ONNX WASM runtime belongs only in the Windows WebView2 build",
+);
+const vozBuildSource = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
+check(
+  "native Swift Voz bridge follows the Cargo target architecture",
+  vozBuildSource.includes("CARGO_CFG_TARGET_ARCH") && vozBuildSource.includes("--triple"),
+  "SwiftPM must compile the bridge for the app architecture before Tauri bundles and signs it",
+);
+
 // --- Capability windows match the windows the shell creates -------------------
 // The bundler allows any label, so a renamed window label merges fine and
 // then fails at runtime when show_surface cannot find the window.

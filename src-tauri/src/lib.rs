@@ -21,7 +21,12 @@ use crate::{
         adapters::{PlatformCredentialStore, PlatformSpeechEngine, PlatformTextService},
     },
     shell::{ShellSettingsRuntime, ShellState},
-    speech::{local::LocalSpeechEngine, model_store::ModelStore, router::SelectableSpeechEngine},
+    speech::{
+        local::LocalSpeechEngine,
+        model_store::ModelStore,
+        router::SelectableSpeechEngine,
+        voz::{VozRuntime, VozSpeechEngine},
+    },
 };
 
 pub fn run() {
@@ -42,12 +47,29 @@ pub fn run() {
             let model_store = Arc::new(ModelStore::new(app.path().app_data_dir()?.join("models")));
             let system_speech = Arc::new(PlatformSpeechEngine::new(Arc::clone(&platform)));
             let local_speech = Arc::new(LocalSpeechEngine::new(Arc::clone(&model_store)));
+            #[cfg(windows)]
+            let voz_runtime: Arc<dyn VozRuntime> =
+                Arc::new(crate::speech::voz::WindowsVozRuntime::new(handle.clone()));
+            #[cfg(target_os = "macos")]
+            let voz_runtime: Arc<dyn VozRuntime> =
+                Arc::new(crate::speech::voz::MacVozRuntime::new(
+                    handle.clone(),
+                    app.path().app_data_dir()?.join("voz-model-cache"),
+                ));
+            #[cfg(not(any(windows, target_os = "macos")))]
+            let voz_runtime: Arc<dyn VozRuntime> =
+                Arc::new(crate::speech::voz::UnavailableVozRuntime);
+            let voz_speech = Arc::new(VozSpeechEngine::new(Arc::clone(&voz_runtime)));
             let core = AppCore::new(
                 SettingsRepository::new(settings_path),
                 Arc::new(ShellSettingsRuntime(handle.clone())),
                 Arc::new(PlatformCredentialStore::new(Arc::clone(&platform))),
                 GeminiClient::new()?,
-                Arc::new(SelectableSpeechEngine::new(system_speech, local_speech)),
+                Arc::new(SelectableSpeechEngine::new(
+                    system_speech,
+                    local_speech,
+                    voz_speech,
+                )),
                 Arc::new(PlatformTextService::new(Arc::clone(&platform))),
             )?;
             let settings = commands::FrontendSettings::from(core.settings()?);
@@ -62,6 +84,7 @@ pub fn run() {
             }
             core.attach_stats(stats.clone());
             app.manage(stats);
+            app.manage(Arc::clone(&voz_runtime));
             app.manage(platform);
             app.manage(core);
 
@@ -114,6 +137,10 @@ pub fn run() {
             commands::list_microphones,
             commands::list_speech_languages,
             commands::list_local_speech_models,
+            commands::get_voz_model_status,
+            commands::download_voz_model,
+            commands::delete_voz_model,
+            commands::complete_voz_worker_request,
             commands::download_local_speech_model,
             commands::cancel_local_speech_model_download,
             commands::delete_local_speech_model,

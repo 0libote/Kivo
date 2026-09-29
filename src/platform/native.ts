@@ -32,6 +32,10 @@ import {
   type SpeechLanguage,
   type StatsDocument,
   type Surface,
+  type VozModelProgress,
+  type VozModelStatus,
+  type VozWorkerReply,
+  type VozWorkerRequest,
   type WritingRequest,
   type WritingResponse,
 } from "../types";
@@ -48,6 +52,8 @@ type NativeEventMap = {
   "settings-changed": AppSettings;
   "local-models-changed": LocalSpeechModelInfo[];
   "local-model-progress": LocalModelProgress;
+  "voz-model-status": VozModelProgress;
+  "voz-worker-request": VozWorkerRequest;
   "local-ai-install-progress": LocalAiInstallProgress;
   "stats-changed": null;
 };
@@ -83,6 +89,10 @@ export interface NativeBridge {
   downloadLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
   cancelLocalSpeechModelDownload(modelId: string): Promise<void>;
   deleteLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
+  getVozModelStatus(): Promise<VozModelStatus>;
+  downloadVozModel(): Promise<void>;
+  deleteVozModel(): Promise<void>;
+  completeVozWorkerRequest(reply: VozWorkerReply): Promise<void>;
   listAiProviders(): Promise<AiProviderInfo[]>;
   listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]>;
   detectLocalAiServers(): Promise<LocalAiServerInfo[]>;
@@ -196,6 +206,11 @@ class TauriBridge implements NativeBridge {
     call<void>("cancel_local_speech_model_download", { modelId });
   deleteLocalSpeechModel = (modelId: string) =>
     call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
+  getVozModelStatus = () => call<VozModelStatus>("get_voz_model_status");
+  downloadVozModel = () => call<void>("download_voz_model");
+  deleteVozModel = () => call<void>("delete_voz_model");
+  completeVozWorkerRequest = (reply: VozWorkerReply) =>
+    call<void>("complete_voz_worker_request", { reply });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = (provider?: AiProviderId) =>
     call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
@@ -243,6 +258,14 @@ class MockBridge implements NativeBridge {
   readonly isNative = false;
   private readonly platform = detectedPlatform();
   private settings: AppSettings;
+  private vozStatus: VozModelStatus = {
+    supported: true,
+    downloaded: false,
+    phase: "notDownloaded",
+    progress: null,
+    runtime: "Simulated test engine",
+    error: null,
+  };
   private stats: StatsDocument = { schemaVersion: 1, rows: [] };
   private permissions: PermissionStatus[];
   private paused = false;
@@ -581,6 +604,46 @@ class MockBridge implements NativeBridge {
     if (model) model.downloaded = false;
     this.emit("local-models-changed", structuredClone(this.localModels));
     return structuredClone(this.localModels);
+  }
+
+  async getVozModelStatus() {
+    return structuredClone(this.vozStatus);
+  }
+
+  async downloadVozModel() {
+    if (!this.vozStatus.supported || this.vozStatus.downloaded) return;
+    this.vozStatus = { ...this.vozStatus, phase: "downloading", progress: 0 };
+    for (const progress of [0.2, 0.45, 0.7, 1]) {
+      this.vozStatus = { ...this.vozStatus, progress };
+      this.emit("voz-model-status", {
+        phase: "downloading",
+        progress,
+        error: null,
+      });
+      // The harness renders lifecycle states without fetching the real model.
+      // oxlint-disable-next-line no-await-in-loop
+      await delay(120);
+    }
+    this.vozStatus = { ...this.vozStatus, phase: "preparing", progress: null };
+    this.emit("voz-model-status", { phase: "preparing", progress: null, error: null });
+    await delay(240);
+    this.vozStatus = { ...this.vozStatus, downloaded: true, phase: "ready", progress: null };
+    this.emit("voz-model-status", { phase: "ready", progress: null, error: null });
+  }
+
+  async deleteVozModel() {
+    this.vozStatus = {
+      ...this.vozStatus,
+      downloaded: false,
+      phase: "notDownloaded",
+      progress: null,
+    };
+    this.emit("voz-model-status", { phase: "notDownloaded", progress: null, error: null });
+  }
+
+  async completeVozWorkerRequest(_reply: VozWorkerReply) {
+    // The browser harness simulates the runtime directly; it never starts a
+    // model worker or downloads Voz assets.
   }
 
   async listAiProviders(): Promise<AiProviderInfo[]> {

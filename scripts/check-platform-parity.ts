@@ -52,6 +52,13 @@ const nativeTs = read("src/platform/native.ts");
 const aiRs = read("src-tauri/src/ai/mod.rs");
 const aiProvidersRs = read("src-tauri/src/ai/providers.rs");
 const aiModelsTs = read("src/ai/models.ts");
+const vozRs = read("src-tauri/src/speech/voz.rs");
+const vozWorker = read("src/features/dictation/voz.worker.ts");
+const vozBridgeSwift = read(
+  "src-tauri/native/macos/VozBridge/Sources/KivoVozBridge/VozBridge.swift",
+);
+const vozPackage = read("src-tauri/native/macos/VozBridge/Package.swift");
+const appTs = read("src/App.tsx");
 
 /** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
 function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): string | null {
@@ -351,6 +358,41 @@ check(
     aiModelsTs.includes("per 1M") &&
     nativeTs.includes("AiModelInfo"),
   "pricing (cost_label_for / per-1M fallbacks) missing from the model pipeline",
+);
+
+// --- 7. Voz runtime parity and language safety --------------------------------
+check(
+  "Voz remains a third shared speech engine",
+  configRs.includes("Voz,") && typesTs.includes('"voz"') && vozRs.includes("SpeechBackend::Voz"),
+  "the persisted, frontend, and shared Rust speech-engine identifiers must all include Voz",
+);
+check(
+  "macOS uses the pinned native Voz and Ear SDK products",
+  vozPackage.includes('exact: "3.5.0"') &&
+    vozPackage.includes('.product(name: "Voz"') &&
+    vozPackage.includes('.product(name: "Ear"') &&
+    vozBridgeSwift.includes("DesertAnt.usageDisabled = true"),
+  "the Apple bridge must pin and disable SDK usage reporting for Voz/Ear",
+);
+check(
+  "Windows hosts the browser SDK in a lazy flow-bar worker",
+  vozWorker.includes('import("@desert-ant-labs/voz")') &&
+    vozWorker.includes('import("@desert-ant-labs/ear")') &&
+    appTs.includes('context.surface !== "flow-bar"'),
+  "Voz/Ear imports should remain lazy and confined to the Windows flow-bar worker",
+);
+check(
+  "both native adapters verify language before Voz inference",
+  vozRs.includes("validate_detected_language") &&
+    vozWorker.includes("ear.identify(samples, 16000)") &&
+    vozBridgeSwift.includes(".identify(samples: input, sampleRate: 16_000)"),
+  "Voz must only transcribe after a reliable supported-language match",
+);
+check(
+  "Linux keeps Voz unavailable in the native harness",
+  vozRs.includes("UnavailableVozRuntime") &&
+    read("src-tauri/src/lib.rs").includes('not(any(windows, target_os = "macos"))'),
+  "Linux must retain the simulated speech engine without claiming Voz support",
 );
 
 if (failures > 0) {

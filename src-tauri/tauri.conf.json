@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
     }
   },
   "bundle": {
@@ -25,7 +25,8 @@
     "macOS": {
       "minimumSystemVersion": "26.0",
       "entitlements": "Entitlements.plist",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "frameworks": ["native/macos/VozBridge/libKivoVozBridge.dylib"]
     },
     "windows": {
       "digestAlgorithm": "sha256",
