@@ -46,6 +46,13 @@ private Rust-to-worker bridge only for local inference; they are never persisted
 or sent to a service. Model files use the SDK's Cache API. Browser UI tests mock
 the worker.
 
+The Windows adapter waits for the flow-bar WebView to register its request
+listener and for the worker module to report that it loaded before dispatching
+status, download, or transcription requests. This avoids losing the first
+request while the hidden flow-bar window starts. A worker startup failure is
+reported as a runtime error; Settings does not mislabel it as an unsupported
+platform.
+
 The SDK browser runtime cannot currently be initialized from the Rust side, and
 the tagged Swift package does not provide a Windows native product. The dedicated
 worker is therefore the supported Windows route in 3.5.0, despite its higher

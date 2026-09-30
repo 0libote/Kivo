@@ -22,7 +22,14 @@ const initialStatus: VozModelStatus = {
 };
 
 export function VozSetup({ context, onStatus }: VozSetupProps) {
-  const [status, setStatus] = useState(initialStatus);
+  const [status, setStatus] = useState(() => {
+    const supported = !nativeBridge.isNative || context.platform !== "linux";
+    return {
+      ...initialStatus,
+      supported,
+      phase: supported ? ("notDownloaded" as const) : initialStatus.phase,
+    };
+  });
   const [busy, setBusy] = useState(false);
 
   useNativeEvent<VozModelProgress>("voz-model-status", (update) => {
@@ -50,14 +57,30 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
           onStatus?.(next);
         }
       })
-      .catch(() => {
-        if (active)
-          setStatus({ ...initialStatus, phase: "failed", error: "Voz status is unavailable." });
+      .catch((cause) => {
+        if (!active) return;
+        const supported =
+          !nativeBridge.isNative || context.platform === "macos" || context.platform === "windows";
+        setStatus({
+          ...initialStatus,
+          supported,
+          phase: supported ? "failed" : "unsupported",
+          runtime:
+            context.platform === "windows"
+              ? "WebView2 · ONNX Runtime Web"
+              : context.platform === "macos"
+                ? "Core ML · Apple Neural Engine"
+                : initialStatus.runtime,
+          error:
+            cause instanceof Error
+              ? cause.message
+              : "Kivo could not read Voz status. Retry or reopen Kivo.",
+        });
       });
     return () => {
       active = false;
     };
-  }, [onStatus]);
+  }, [context.platform, onStatus]);
 
   async function install() {
     setBusy(true);
@@ -144,7 +167,7 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
         </p>
         <p>{platformInfo.note}</p>
       </div>
-      {!status.supported ? (
+      {status.phase === "unsupported" ? (
         <Banner status="warning" title="Voz is unavailable on this platform." />
       ) : null}
       {status.error ? <Banner status="error" title={status.error} /> : null}
