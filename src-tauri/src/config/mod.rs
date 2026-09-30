@@ -330,6 +330,7 @@ pub enum SpeechEnginePreference {
     #[default]
     System,
     Local,
+    Voz,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -712,8 +713,9 @@ mod tests {
     use std::{env, fs, time::SystemTime};
 
     use super::{
-        AppSettings, HostPlatform, SettingsRepository, ShortcutBinding, ThemePreference,
-        dictation_default_for, foreign_default_replacement, writing_tools_default_for,
+        AppSettings, HostPlatform, SettingsRepository, ShortcutBinding, SpeechEnginePreference,
+        ThemePreference, dictation_default_for, foreign_default_replacement,
+        writing_tools_default_for,
     };
 
     fn temporary_settings_path() -> std::path::PathBuf {
@@ -748,6 +750,20 @@ mod tests {
         let persisted = fs::read_to_string(&path).unwrap();
         assert!(!persisted.to_ascii_lowercase().contains("api_key"));
         assert!(!persisted.to_ascii_lowercase().contains("apikey"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn voz_engine_preference_round_trips_as_an_independent_choice() {
+        let path = temporary_settings_path();
+        let repository = SettingsRepository::new(&path);
+        let mut settings = AppSettings::default();
+        settings.dictation.speech_engine = SpeechEnginePreference::Voz;
+        repository.save(&settings).unwrap();
+        assert_eq!(
+            repository.load().unwrap().dictation.speech_engine,
+            SpeechEnginePreference::Voz
+        );
         let _ = fs::remove_file(path);
     }
 

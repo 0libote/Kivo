@@ -34,15 +34,17 @@ function byName(a: string, b: string): number {
   return a.localeCompare(b);
 }
 
-const [nativeTs, typesTs, commandsRs, shellRs, modelStoreRs, localAiRs, libRs] = await Promise.all([
-  read("src/platform/native.ts"),
-  read("src/types.ts"),
-  read("src-tauri/src/commands/mod.rs"),
-  read("src-tauri/src/shell.rs"),
-  read("src-tauri/src/speech/model_store.rs"),
-  read("src-tauri/src/ai/local.rs"),
-  read("src-tauri/src/lib.rs"),
-]);
+const [nativeTs, typesTs, commandsRs, shellRs, modelStoreRs, vozRs, localAiRs, libRs] =
+  await Promise.all([
+    read("src/platform/native.ts"),
+    read("src/types.ts"),
+    read("src-tauri/src/commands/mod.rs"),
+    read("src-tauri/src/shell.rs"),
+    read("src-tauri/src/speech/model_store.rs"),
+    read("src-tauri/src/speech/voz.rs"),
+    read("src-tauri/src/ai/local.rs"),
+    read("src-tauri/src/lib.rs"),
+  ]);
 
 // --- 1. Every invoked command exists in Rust --------------------------------
 // `call<T>("name")`, including generics with `>` inside like
@@ -57,7 +59,7 @@ if (invoked.size > 0) {
 
 // The on-device model store and local-AI installer own their own events even
 // though their commands live in commands/mod.rs, so their emit()s count too.
-const rustSources = `${commandsRs}\n${shellRs}\n${modelStoreRs}\n${localAiRs}`;
+const rustSources = `${commandsRs}\n${shellRs}\n${modelStoreRs}\n${localAiRs}\n${vozRs}`;
 // Read the fn name off the lines right after each attribute instead of
 // matching across newlines (`\s*\n\s*` backtracks super-linearly).
 const defined = new Set<string>();

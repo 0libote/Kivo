@@ -30,11 +30,84 @@ fn link_vulkan_sdk() {
 #[cfg(target_os = "macos")]
 fn build_speech_bridge() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-    let source = PathBuf::from("native/macos/SpeechBridge.swift");
-    let library = output.join("libKivoSpeech.a");
-    println!("cargo:rerun-if-changed={}", source.display());
+    let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let package = manifest.join("native/macos/VozBridge");
+    let package_build = output.join("voz-swift-build");
+    let swift_arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
+        Ok("aarch64") => "arm64",
+        Ok("x86_64") => "x86_64",
+        arch => panic!("unsupported macOS Voz target architecture: {arch:?}"),
+    };
+    // The bridge uses no post-15 API. Keep its deployment target at the
+    // upstream SDK's macOS floor; the containing Kivo app still declares 26+.
+    let swift_triple = format!("{swift_arch}-apple-macosx15.0");
+    let packaged_library = package.join("libKivoVozBridge.dylib");
+    println!(
+        "cargo:rerun-if-changed={}",
+        package.join("Package.swift").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        package.join("Package.resolved").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        package
+            .join("Sources/KivoVozBridge/VozBridge.swift")
+            .display()
+    );
 
-    let status = Command::new("xcrun")
+    let status = Command::new("swift")
+        .args(["build", "--package-path"])
+        .arg(&package)
+        .args(["--build-path"])
+        .arg(&package_build)
+        .args(["--triple"])
+        .arg(&swift_triple)
+        .args(["--configuration", "release", "--product", "KivoVozBridge"])
+        .status()
+        .expect("Swift 6.2 must be available to build the official Voz package");
+    assert!(status.success(), "the native Voz bridge failed to compile");
+
+    // SwiftPM has changed the shape of its build output directory across
+    // toolchain releases. Ask Swift for the actual product directory instead
+    // of reconstructing it from the target triple.
+    let bin_path = Command::new("swift")
+        .args(["build", "--package-path"])
+        .arg(&package)
+        .args(["--build-path"])
+        .arg(&package_build)
+        .args(["--triple"])
+        .arg(&swift_triple)
+        .args(["--configuration", "release", "--show-bin-path"])
+        .output()
+        .expect("SwiftPM must report the Voz product directory");
+    assert!(
+        bin_path.status.success(),
+        "could not locate the Voz product"
+    );
+    let bin_path = PathBuf::from(
+        String::from_utf8(bin_path.stdout)
+            .expect("SwiftPM product directory is UTF-8")
+            .trim(),
+    );
+    let library = bin_path.join("libKivoVozBridge.dylib");
+    let install_name_status = Command::new("install_name_tool")
+        .args(["-id", "@rpath/libKivoVozBridge.dylib"])
+        .arg(&library)
+        .status()
+        .expect("install_name_tool must be available in the macOS SDK");
+    assert!(
+        install_name_status.success(),
+        "could not set the packaged Voz bridge runtime path"
+    );
+    std::fs::copy(&library, &packaged_library)
+        .expect("copy the Voz bridge where Tauri can bundle and sign it");
+
+    let speech_source = manifest.join("native/macos/SpeechBridge.swift");
+    let speech_library = output.join("libKivoSpeech.a");
+    println!("cargo:rerun-if-changed={}", speech_source.display());
+    let speech_status = Command::new("xcrun")
         .args([
             "swiftc",
             "-parse-as-library",
@@ -44,13 +117,13 @@ fn build_speech_bridge() {
             "-module-name",
             "KivoSpeech",
         ])
-        .arg(&source)
+        .arg(&speech_source)
         .arg("-o")
-        .arg(&library)
+        .arg(&speech_library)
         .status()
-        .expect("xcrun must be available to build Kivo on macOS");
+        .expect("xcrun must be available to build Kivo's system speech bridge");
     assert!(
-        status.success(),
+        speech_status.success(),
         "the native Speech bridge failed to compile"
     );
 
@@ -80,15 +153,18 @@ fn build_speech_bridge() {
     .join("usr/lib/swift");
 
     println!("cargo:rustc-link-search=native={}", output.display());
+    println!("cargo:rustc-link-search=native={}", bin_path.display());
     println!(
         "cargo:rustc-link-search=native={}",
         toolchain_swift.display()
     );
     println!("cargo:rustc-link-search=native={}", sdk_swift.display());
+    println!("cargo:rustc-link-lib=dylib=KivoVozBridge");
     println!("cargo:rustc-link-lib=static=KivoSpeech");
     println!("cargo:rustc-link-lib=framework=Speech");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=CoreMedia");
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
 }

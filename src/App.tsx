@@ -11,7 +11,7 @@ import { useNativeEvent } from "./hooks/useNativeEvent";
 import { useSystemPreferences } from "./hooks/useSystemPreferences";
 import { initialAppContext, nativeBridge } from "./platform/native";
 import { kivoTheme } from "./theme/built/kivo";
-import type { AppContext } from "./types";
+import type { AppContext, VozWorkerReply } from "./types";
 
 // Settings and onboarding load on demand. The event-driven overlays stay
 // eager so their native events cannot arrive before their listeners mount.
@@ -62,6 +62,34 @@ export function App() {
       active = false;
     };
   }, []);
+
+  // Windows Voz owns a dedicated worker inside the persistent flow-bar
+  // WebView2. The SDK and ONNX runtime remain lazy until a Voz operation asks
+  // the worker to download, prepare, or transcribe.
+  useEffect(() => {
+    if (!nativeBridge.isNative || context.platform !== "windows" || context.surface !== "flow-bar")
+      return;
+    const worker = new Worker(new URL("./features/dictation/voz.worker.ts", import.meta.url), {
+      type: "module",
+    });
+    worker.addEventListener("message", (event: MessageEvent<VozWorkerReply>) => {
+      void nativeBridge.completeVozWorkerRequest(event.data);
+    });
+    let unlisten: (() => void) | undefined;
+    void nativeBridge
+      .on("voz-worker-request", (request) => {
+        // Web Worker postMessage has no targetOrigin argument.
+        // oxlint-disable-next-line unicorn/require-post-message-target-origin
+        worker.postMessage(request);
+      })
+      .then((stop) => {
+        unlisten = stop;
+      });
+    return () => {
+      unlisten?.();
+      worker.terminate();
+    };
+  }, [context.platform, context.surface]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = context.platform;

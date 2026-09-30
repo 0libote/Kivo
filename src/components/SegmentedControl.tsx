@@ -6,6 +6,7 @@ import {
 interface Segment<T extends string> {
   readonly label: string;
   readonly value: T;
+  readonly disabled?: boolean;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -33,7 +34,12 @@ export function SegmentedControl<T extends string>({
       value={value}
     >
       {options.map((option) => (
-        <SegmentedControlItem key={option.value} label={option.label} value={option.value} />
+        <SegmentedControlItem
+          isDisabled={option.disabled}
+          key={option.value}
+          label={option.label}
+          value={option.value}
+        />
       ))}
     </AstryxSegmentedControl>
   );

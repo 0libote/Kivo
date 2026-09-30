@@ -21,6 +21,7 @@ import {
   type PermissionKind,
   type PermissionStatus,
   type SpeechLanguage,
+  type VozModelStatus,
 } from "../../types";
 import { testFailureConnection } from "./connection";
 import { DictationCleanupModel } from "./DictationCleanupModel";
@@ -29,6 +30,7 @@ import { LocalAiSetup } from "./LocalAiSetup";
 import { LocalSpeechModels } from "./LocalSpeechModels";
 import { ModelQueueEditor } from "./ModelQueueEditor";
 import { StatsSection } from "./StatsSection";
+import { VozSetup } from "./VozSetup";
 import { WritingPresetList } from "./WritingPresetEditor";
 
 type SettingsSection =
@@ -40,6 +42,47 @@ type SettingsSection =
   | "ai"
   | "permissions"
   | "about";
+
+const VOZ_LANGUAGES: SpeechLanguage[] = [
+  "bg",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "et",
+  "fi",
+  "fr",
+  "hr",
+  "hu",
+  "it",
+  "lt",
+  "lv",
+  "mt",
+  "nl",
+  "pl",
+  "pt",
+  "ro",
+  "ru",
+  "sk",
+  "sl",
+  "sv",
+  "uk",
+].map((code) => ({
+  code,
+  name: new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code,
+  installed: true,
+  downloadable: false,
+}));
+VOZ_LANGUAGES.unshift({
+  code: "auto",
+  name: "Automatic (on-device detection)",
+  installed: true,
+  downloadable: false,
+});
+
+const VOZ_LANGUAGE_CODES = new Set(VOZ_LANGUAGES.map(({ code }) => code));
 
 interface SettingsWindowProps {
   readonly context: AppContext;
@@ -604,33 +647,34 @@ function DictationSection({
   readonly settings: AppSettings;
   readonly save: SaveSettings;
 }) {
+  const [vozStatus, setVozStatus] = useState<VozModelStatus>({
+    supported: false,
+    downloaded: false,
+    phase: "unsupported",
+    progress: null,
+    runtime: "Checking availability",
+    error: null,
+  });
+  const selectedLanguage = settings.dictationLanguage.split(/[-_]/)[0].toLowerCase();
+  const vozLanguageSupported =
+    settings.dictationLanguage === "auto" || VOZ_LANGUAGE_CODES.has(selectedLanguage);
+  const languageOptions = settings.speechEngine === "voz" ? VOZ_LANGUAGES : languages;
   const shortcutNote =
     context.platform === "macos" && settings.dictationShortcut === "Fn"
       ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
       : undefined;
-  let languageDescription = "Automatic follows the current input language when supported.";
-  if (settings.speechEngine === "local") {
-    languageDescription =
-      "On-device models detect the spoken language automatically; set this only to force one.";
-  } else if (context.platform === "windows") {
-    languageDescription =
-      "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
-  }
+  const languageDescription = dictationLanguageDescription(settings.speechEngine, context.platform);
+  const engineDescription =
+    settings.speechEngine === "local" || settings.speechEngine === "voz"
+      ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
+      : "System: uses the operating-system speech engine, which may use the network on some systems.";
   return (
     <SettingsContent
       title="Dictation"
       subtitle="Hold your shortcut, speak, then release — or tap to start and tap again to stop."
     >
       <SettingsGroup header="Recognition">
-        <SettingRow
-          label="Transcription engine"
-          description={
-            settings.speechEngine === "local"
-              ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
-              : "System: uses the operating-system speech engine, which may use the network on some systems."
-          }
-          stacked
-        >
+        <SettingRow label="Transcription engine" description={engineDescription} stacked>
           <SegmentedControl
             ariaLabel="Transcription engine"
             onChange={(engine) =>
@@ -639,6 +683,11 @@ function DictationSection({
             options={[
               { label: "System", value: "system" },
               { label: "On-device", value: "local" },
+              {
+                label: "Voz · Recommended",
+                value: "voz",
+                disabled: !vozStatus.supported || !vozStatus.downloaded || !vozLanguageSupported,
+              },
             ]}
             value={settings.speechEngine}
           />
@@ -648,8 +697,16 @@ function DictationSection({
             <LocalSpeechModels save={save} settings={settings} />
           </SettingRow>
         ) : null}
+        <SettingRow label="Voz on-device model" stacked>
+          <VozSetup context={context} onStatus={setVozStatus} />
+          {!vozLanguageSupported && vozStatus.supported ? (
+            <span {...stylex.props(styles.empty)}>
+              Select one of Voz’s supported languages to enable Voz as the transcription engine.
+            </span>
+          ) : null}
+        </SettingRow>
         <SettingRow label="Language" description={languageDescription}>
-          {languages.length === 0 ? (
+          {languageOptions.length === 0 ? (
             <span {...stylex.props(styles.empty)}>
               No languages found. Reopen Settings to try again.
             </span>
@@ -658,13 +715,13 @@ function DictationSection({
               aria-label="Dictation language"
               onChange={(event) => void save({ dictationLanguage: event.target.value })}
               value={
-                languages.some((language) => language.code === settings.dictationLanguage)
+                languageOptions.some((language) => language.code === settings.dictationLanguage)
                   ? settings.dictationLanguage
-                  : languages[0].code
+                  : languageOptions[0].code
               }
               {...stylex.props(styles.field)}
             >
-              {languages.map((language) => (
+              {languageOptions.map((language) => (
                 <option key={language.code} value={language.code}>
                   {languageName(language)}
                 </option>
@@ -777,6 +834,22 @@ function DictationSection({
 function languageName(language: SpeechLanguage): string {
   if (language.downloadable && !language.installed) return `${language.name} — download required`;
   return language.name;
+}
+
+function dictationLanguageDescription(
+  engine: AppSettings["speechEngine"],
+  platform: AppContext["platform"],
+): string {
+  if (engine === "local") {
+    return "On-device models detect the spoken language automatically; set this only to force one.";
+  }
+  if (engine === "voz") {
+    return "Voz checks the spoken language on-device before transcription. Automatic needs a reliable match; otherwise Kivo asks you to choose another engine.";
+  }
+  if (platform === "windows") {
+    return "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";
+  }
+  return "Automatic follows the current input language when supported.";
 }
 
 function NumberPreference({
@@ -1220,6 +1293,37 @@ function AboutSection({
   // Older builds without an updater key cannot install signed updates.
   const [installUnsupported, setInstallUnsupported] = useState(false);
   const updateAvailable = updateResult?.available === true;
+
+  async function installUpdate() {
+    setBusy("install");
+    setNotice(null);
+    try {
+      await nativeBridge.installUpdate();
+      setInstalled(true);
+      setNotice("Update installed. Restarting…");
+      setBusy("restart");
+      try {
+        await nativeBridge.restartApp();
+        setNotice("Update installed. Restart Kivo to finish.");
+      } catch {
+        setNotice("Kivo couldn’t restart. Quit and reopen it manually.");
+      } finally {
+        setBusy(null);
+      }
+    } catch (error: unknown) {
+      const code = error instanceof NativeError ? error.code : "";
+      if (code === "update_install_unavailable" || code === "update_not_available") {
+        setInstallUnsupported(true);
+      }
+      setNotice(
+        error instanceof NativeError
+          ? error.message
+          : "The update couldn’t be installed. Use the download link instead.",
+      );
+      setBusy(null);
+    }
+  }
+
   return (
     <SettingsContent
       title="About"
@@ -1284,40 +1388,7 @@ function AboutSection({
             <Button
               isDisabled={busy !== null}
               label={installButtonLabel(busy)}
-              onClick={() => {
-                setBusy("install");
-                setNotice(null);
-                void nativeBridge
-                  .installUpdate()
-                  .then(() => {
-                    // Install succeeded: restart automatically so a single
-                    // click finishes the update. The Windows installer exits
-                    // the app itself; on macOS this relaunch applies it. If
-                    // the app is still alive afterwards (browser harness or
-                    // a failed relaunch), fall back to the manual Restart now
-                    // button below.
-                    setInstalled(true);
-                    setNotice("Update installed. Restarting…");
-                    setBusy("restart");
-                    void nativeBridge
-                      .restartApp()
-                      .then(() => setNotice("Update installed. Restart Kivo to finish."))
-                      .catch(() => setNotice("Kivo couldn’t restart. Quit and reopen it manually."))
-                      .finally(() => setBusy(null));
-                  })
-                  .catch((error: unknown) => {
-                    const code = error instanceof NativeError ? error.code : "";
-                    // Older builds may lack the updater key.
-                    if (code === "update_install_unavailable" || code === "update_not_available")
-                      setInstallUnsupported(true);
-                    setNotice(
-                      error instanceof NativeError
-                        ? error.message
-                        : "The update couldn’t be installed. Use the download link instead.",
-                    );
-                    setBusy(null);
-                  });
-              }}
+              onClick={() => void installUpdate()}
               size="sm"
               variant="primary"
             />

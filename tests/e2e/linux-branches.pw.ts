@@ -21,7 +21,12 @@ test("bench surface probes every bit over the harness bridge", async ({ page }) 
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 900, height: 700 });
   await page.goto("/?surface=gallery&harness=1");
-  await expect(page.getByRole("heading", { name: "Test bench" })).toBeVisible();
+  // The first cold Vite request compiles the lazy Gallery surface and its
+  // StyleX/Astryx dependencies; allow that one initial development render to
+  // finish before exercising the harness bridge.
+  await expect(page.getByRole("heading", { name: "Test bench" })).toBeVisible({
+    timeout: 15_000,
+  });
   // Contract matrix renders with the Linux portable defaults.
   await expect(page.getByText("Control+Alt+Space").first()).toBeVisible();
   await expect(page.getByText(/accessibility=not-determined/).first()).toBeVisible();

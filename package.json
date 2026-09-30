@@ -36,6 +36,9 @@
   "dependencies": {
     "@astryxdesign/core": "^0.6.3",
     "@astryxdesign/theme-neutral": "^0.6.3",
+    "@desert-ant-labs/ear": "3.5.0",
+    "@desert-ant-labs/voz": "3.5.0",
+    "@litertjs/core": "^2.5.3",
     "@stylexjs/stylex": "^0.19.1",
     "@tanstack/charts": "0.18.0",
     "@tauri-apps/api": "^2.11.1",
@@ -44,6 +47,7 @@
     "lucide-react": "^1.48.0",
     "marked": "^18.0.14",
     "motion": "^13.4.3",
+    "onnxruntime-web": "^1.23.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
