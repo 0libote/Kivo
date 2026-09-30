@@ -61,16 +61,17 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
         if (!active) return;
         const supported =
           !nativeBridge.isNative || context.platform === "macos" || context.platform === "windows";
+        let runtime = initialStatus.runtime;
+        if (context.platform === "windows") {
+          runtime = "WebView2 · ONNX Runtime Web";
+        } else if (context.platform === "macos") {
+          runtime = "Core ML · Apple Neural Engine";
+        }
         setStatus({
           ...initialStatus,
           supported,
           phase: supported ? "failed" : "unsupported",
-          runtime:
-            context.platform === "windows"
-              ? "WebView2 · ONNX Runtime Web"
-              : context.platform === "macos"
-                ? "Core ML · Apple Neural Engine"
-                : initialStatus.runtime,
+          runtime,
           error:
             cause instanceof Error
               ? cause.message
