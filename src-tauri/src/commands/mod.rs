@@ -1921,6 +1921,16 @@ pub fn complete_voz_worker_request(
 }
 
 #[tauri::command]
+pub fn set_voz_worker_ready(
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+    ready: bool,
+) -> Result<(), String> {
+    runtime
+        .set_worker_ready(ready)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub async fn download_local_speech_model(
     app: AppHandle,
     store: State<'_, Arc<ModelStore>>,

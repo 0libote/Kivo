@@ -141,6 +141,7 @@ pub fn run() {
             commands::download_voz_model,
             commands::delete_voz_model,
             commands::complete_voz_worker_request,
+            commands::set_voz_worker_ready,
             commands::download_local_speech_model,
             commands::cancel_local_speech_model_download,
             commands::delete_local_speech_model,

@@ -13,6 +13,12 @@ import { initialAppContext, nativeBridge } from "./platform/native";
 import { kivoTheme } from "./theme/built/kivo";
 import type { AppContext, VozWorkerReply } from "./types";
 
+function isVozWorkerReadyMessage(
+  message: VozWorkerReply | { type: "ready" },
+): message is { type: "ready" } {
+  return "type" in message && message.type === "ready";
+}
+
 // Settings and onboarding load on demand. The event-driven overlays stay
 // eager so their native events cannot arrive before their listeners mount.
 const GalleryWindow = lazy(() =>
@@ -72,21 +78,57 @@ export function App() {
     const worker = new Worker(new URL("./features/dictation/voz.worker.ts", import.meta.url), {
       type: "module",
     });
-    worker.addEventListener("message", (event: MessageEvent<VozWorkerReply>) => {
-      void nativeBridge.completeVozWorkerRequest(event.data);
-    });
+    let disposed = false;
+    let subscribed = false;
+    let workerLoaded = false;
     let unlisten: (() => void) | undefined;
+    const markReadyIfInitialized = () => {
+      if (subscribed && workerLoaded)
+        void nativeBridge.setVozWorkerReady(true).catch(() => undefined);
+    };
+    worker.addEventListener(
+      "message",
+      (event: MessageEvent<VozWorkerReply | { type: "ready" }>) => {
+        if (isVozWorkerReadyMessage(event.data)) {
+          workerLoaded = true;
+          markReadyIfInitialized();
+          return;
+        }
+        void nativeBridge.completeVozWorkerRequest(event.data);
+      },
+    );
+    const markNotReady = () => {
+      workerLoaded = false;
+      void nativeBridge.setVozWorkerReady(false).catch(() => undefined);
+    };
+    worker.addEventListener("error", markNotReady);
+    worker.addEventListener("messageerror", markNotReady);
     void nativeBridge
-      .on("voz-worker-request", (request) => {
-        // Web Worker postMessage has no targetOrigin argument.
-        // oxlint-disable-next-line unicorn/require-post-message-target-origin
-        worker.postMessage(request);
-      })
+      .setVozWorkerReady(false)
+      .then(() =>
+        nativeBridge.on("voz-worker-request", (request) => {
+          // Web Worker postMessage has no targetOrigin argument.
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin
+          worker.postMessage(request);
+        }),
+      )
       .then((stop) => {
+        if (disposed) {
+          stop();
+          return;
+        }
         unlisten = stop;
+        subscribed = true;
+        markReadyIfInitialized();
+      })
+      .catch(() => {
+        // Keep the backend unready. Voz operations then fail with an
+        // actionable startup error rather than timing out on a lost event.
       });
     return () => {
+      disposed = true;
       unlisten?.();
+      void nativeBridge.setVozWorkerReady(false).catch(() => undefined);
       worker.terminate();
     };
   }, [context.platform, context.surface]);

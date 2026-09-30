@@ -116,6 +116,9 @@ pub trait VozRuntime: Send + Sync {
     fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>>;
     fn download(&self) -> SpeechFuture<'_, Result<(), SpeechError>>;
     fn remove_model(&self) -> SpeechFuture<'_, Result<(), SpeechError>>;
+    fn set_worker_ready(&self, _ready: bool) -> Result<(), SpeechError> {
+        Ok(())
+    }
     fn complete_worker_request(&self, _reply: VozWorkerReply) -> Result<(), SpeechError> {
         Err(SpeechError::VozUnavailable)
     }
@@ -125,6 +128,55 @@ pub trait VozRuntime: Send + Sync {
         samples: Vec<f32>,
         locale: String,
     ) -> SpeechFuture<'_, Result<VozTranscript, SpeechError>>;
+}
+
+#[cfg(any(test, windows))]
+#[derive(Clone)]
+struct WorkerReadiness(tokio::sync::watch::Sender<bool>);
+
+#[cfg(any(test, windows))]
+impl WorkerReadiness {
+    fn new() -> Self {
+        Self(tokio::sync::watch::channel(false).0)
+    }
+
+    fn set(&self, ready: bool) {
+        self.0.send_replace(ready);
+    }
+
+    async fn wait(&self, timeout: std::time::Duration) -> Result<(), SpeechError> {
+        let mut ready = self.0.subscribe();
+        if *ready.borrow_and_update() {
+            return Ok(());
+        }
+        tokio::time::timeout(timeout, async {
+            loop {
+                ready
+                    .changed()
+                    .await
+                    .map_err(|_| SpeechError::VozUnavailable)?;
+                if *ready.borrow_and_update() {
+                    return Ok(());
+                }
+            }
+        })
+        .await
+        .map_err(|_| worker_not_ready_error())?
+    }
+}
+
+#[cfg(any(test, windows))]
+fn worker_not_ready_error() -> SpeechError {
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        SpeechError::VozRuntime(
+            "The Voz worker in the flow bar did not start. Reopen Kivo and try again.".into(),
+        )
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        SpeechError::VozUnavailable
+    }
 }
 
 /// Safe fallback used by platforms without an installed Voz adapter (including
@@ -389,6 +441,7 @@ pub use macos::Runtime as MacVozRuntime;
 pub struct WindowsVozRuntime {
     app: AppHandle,
     next_id: AtomicU64,
+    worker_ready: WorkerReadiness,
     pending:
         Mutex<HashMap<String, tokio::sync::oneshot::Sender<Result<VozWorkerReply, SpeechError>>>>,
 }
@@ -399,6 +452,7 @@ impl WindowsVozRuntime {
         Self {
             app,
             next_id: AtomicU64::new(1),
+            worker_ready: WorkerReadiness::new(),
             pending: Mutex::new(HashMap::new()),
         }
     }
@@ -409,6 +463,9 @@ impl WindowsVozRuntime {
         samples: Option<Vec<f32>>,
         language: Option<String>,
     ) -> Result<VozWorkerReply, SpeechError> {
+        self.worker_ready
+            .wait(std::time::Duration::from_secs(10))
+            .await?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed).to_string();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.pending
@@ -470,6 +527,11 @@ impl WindowsVozRuntime {
 
 #[cfg(windows)]
 impl VozRuntime for WindowsVozRuntime {
+    fn set_worker_ready(&self, ready: bool) -> Result<(), SpeechError> {
+        self.worker_ready.set(ready);
+        Ok(())
+    }
+
     fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>> {
         Box::pin(async { Self::status_from(self.request("status", None, None).await?) })
     }
@@ -630,6 +692,7 @@ impl SpeechEngine for VozSpeechEngine {
 mod tests {
     use std::sync::Arc;
 
+    use super::WorkerReadiness;
     use super::{
         SUPPORTED_LANGUAGES, UnavailableVozRuntime, VozModelPhase, VozSpeechEngine,
         supports_language, validate_detected_language,
@@ -740,5 +803,28 @@ mod tests {
             serde_json::to_string(&VozModelPhase::Preparing).unwrap(),
             "\"preparing\""
         );
+    }
+
+    #[tokio::test]
+    async fn worker_requests_wait_until_the_webview_worker_is_registered() {
+        let readiness = WorkerReadiness::new();
+        let waiting = readiness.clone();
+        let request =
+            tokio::spawn(async move { waiting.wait(std::time::Duration::from_secs(1)).await });
+        readiness.set(true);
+        assert!(request.await.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn missing_worker_returns_a_retryable_runtime_error() {
+        let readiness = WorkerReadiness::new();
+        let error = readiness
+            .wait(std::time::Duration::from_millis(1))
+            .await
+            .unwrap_err();
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(matches!(error, SpeechError::VozRuntime(_)));
+        #[cfg(not(any(windows, target_os = "macos")))]
+        assert_eq!(error, SpeechError::VozUnavailable);
     }
 }

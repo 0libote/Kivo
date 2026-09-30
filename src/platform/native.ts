@@ -93,6 +93,7 @@ export interface NativeBridge {
   downloadVozModel(): Promise<void>;
   deleteVozModel(): Promise<void>;
   completeVozWorkerRequest(reply: VozWorkerReply): Promise<void>;
+  setVozWorkerReady(ready: boolean): Promise<void>;
   listAiProviders(): Promise<AiProviderInfo[]>;
   listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]>;
   detectLocalAiServers(): Promise<LocalAiServerInfo[]>;
@@ -211,6 +212,7 @@ class TauriBridge implements NativeBridge {
   deleteVozModel = () => call<void>("delete_voz_model");
   completeVozWorkerRequest = (reply: VozWorkerReply) =>
     call<void>("complete_voz_worker_request", { reply });
+  setVozWorkerReady = (ready: boolean) => call<void>("set_voz_worker_ready", { ready });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = (provider?: AiProviderId) =>
     call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
@@ -652,6 +654,10 @@ class MockBridge implements NativeBridge {
   completeVozWorkerRequest(_reply: VozWorkerReply): Promise<void> {
     // The browser harness simulates the runtime directly; it never starts a
     // model worker or downloads Voz assets.
+    return Promise.resolve();
+  }
+
+  setVozWorkerReady(_ready: boolean): Promise<void> {
     return Promise.resolve();
   }
 

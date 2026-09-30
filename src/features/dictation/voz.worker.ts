@@ -66,6 +66,10 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
   void handle(event.data);
 });
 
+// Workers do not support a targetOrigin argument on postMessage.
+// oxlint-disable-next-line unicorn/require-post-message-target-origin
+self.postMessage({ type: "ready" });
+
 function isVozWorkerRequest(value: unknown): value is VozWorkerRequest {
   if (typeof value !== "object" || value === null) return false;
   const request = value as Partial<VozWorkerRequest>;
