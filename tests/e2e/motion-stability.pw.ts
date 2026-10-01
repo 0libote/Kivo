@@ -55,10 +55,19 @@ test("onboarding steps transition and settings sections fit at narrow widths", a
 
   await page.setViewportSize({ width: 620, height: 500 });
   await page.goto("/?surface=settings&harness=1");
-  for (const section of ["Home", "General", "Dictation", "Writing Tools", "AI", "About"]) {
+  // Sequential on purpose: each click mutates the page, so the sections
+  // cannot be checked in parallel. Listed explicitly (no loop) so the
+  // sequencing is obvious to readers and async linters alike.
+  async function expectSectionFits(section: string) {
     await page.getByRole("button", { name: section, exact: true }).click();
     await expectNoHorizontalOverflow(page);
   }
+  await expectSectionFits("Home");
+  await expectSectionFits("General");
+  await expectSectionFits("Dictation");
+  await expectSectionFits("Writing Tools");
+  await expectSectionFits("AI");
+  await expectSectionFits("About");
   assertNoErrors();
 });
 
