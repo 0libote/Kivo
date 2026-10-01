@@ -2,29 +2,12 @@ name: CI & Build
 
 # Unified pipeline: checks and unsigned beta builds -> gated publication.
 #
-# - pull_request (opened/synchronize/reopened): runs CI + review. Windows +
-#   macOS preview bundles build only when the PR has the `preview` label, and
-#   post/update one sticky PR comment linking the run's artifacts (14-day
-#   retention) for live testing. Deliberately no per-PR releases are created
-#   — just the comment with download links.
-# - pull_request (closed): retires the sticky preview comment (artifacts
-#   expire on their own). Only `cleanup-pr-preview` runs on `closed`; every
-#   other job skips, so merging never re-runs the suite a second time.
+# - pull_request: runs CI + review only.
 # - push to main / workflow_dispatch: runs CI and builds the unsigned beta
 #   in parallel, then publishes it only after every required check passes.
 #
 # The tag-based `Release` workflow remains the separate signed path for
 # stable `app-v*` releases.
-#
-# Fork safety: preview *builds* use no secrets and run on forks (Artifacts
-# tab only). The `publish-pr` / cleanup jobs need `pull-requests:write`
-# (`publish-pr` also needs `actions:read` to resolve artifact IDs), which
-# fork PRs do not get on the `pull_request` event, so they skip on forks
-# (same-repo check on `head.repo.full_name`). Same-repo PR authors already
-# have write access, so the comment token adds no privilege there.
-# The publish job checks out the *base* SHA (trusted) and only reads
-# artifact names/IDs via the API, never executing PR code with the token
-# that can comment.
 #
 # Speed shape (deliberate):
 # - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
@@ -48,9 +31,7 @@ name: CI & Build
 #   beta builds cannot starve (a workflow-level group starved them before).
 on:
   pull_request:
-    # `labeled` so adding the `preview` label starts the opt-in PR preview
-    # builds without needing another push.
-    types: [opened, synchronize, reopened, closed, labeled]
+    types: [opened, synchronize, reopened]
   push:
     branches: [main]
   workflow_dispatch:
@@ -60,9 +41,6 @@ permissions:
 
 jobs:
   frontend:
-    # `closed` PR events only run `cleanup-pr-preview` (below); without this
-    # guard every merge would re-run the whole suite a second time.
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -85,7 +63,6 @@ jobs:
 
   frontend-windows:
     name: Frontend checks (Windows)
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # JavaScript is portable, but paths, line endings, and toolchain behavior
     # still differ on Windows. Typecheck + unit tests only; lint and the web
     # build stay on the ubuntu `frontend` job so they are not paid for twice.
@@ -110,7 +87,6 @@ jobs:
 
   packaging:
     name: Packaging + platform parity gates
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Fast static checks (seconds, no compile): packaging metadata agreement
     # plus macOS/Windows branch parity (shortcut defaults, native-shortcut
     # strings, permission requirements, harness matrix). The real bundle
@@ -133,7 +109,6 @@ jobs:
 
   rust-static:
     name: Rust static (fmt, lockfile)
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Cheap ubuntu job for everything that needs no compilation: rustfmt
     # parses every file including the `#[cfg(target_os)]` sources that only
     # compile on the other desktop, and `cargo metadata --locked` fails fast
@@ -161,7 +136,6 @@ jobs:
       - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
 
   native:
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
     # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
     # lockfile checks live in `rust-static`, and no bun install is needed
@@ -221,7 +195,6 @@ jobs:
   # in the `audit` job, enforced for both desktop targets.
   e2e:
     name: UI tests (Playwright)
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     # Ubuntu + Chromium only (cheap). Both platform branches are still
     # covered: the browser harness derives its platform from
     # navigator.userAgent, and the suite spoofs Windows and macOS agents
@@ -257,7 +230,6 @@ jobs:
 
   codeql:
     name: Code review (CodeQL)
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -276,7 +248,6 @@ jobs:
 
   audit:
     name: Dependency audit (bun + cargo)
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -310,10 +281,8 @@ jobs:
 
   dep-review:
     name: Review PR dependency changes
-    if: github.event_name != 'pull_request' || github.event.action != 'closed'
-    # Deliberately almost no job-level `if`: this job must complete (never
-    # skip) on every event except `closed` (where only cleanup runs and
-    # nothing reads this job). When it skipped off-PR, downstream
+    # Deliberately almost no job-level `if`: this job must complete on
+    # every workflow event. When it skipped off-PR, downstream
     # `needs.security-gate.outputs.*` comparisons evaluated false at
     # schedule time even after the gate succeeded with correct outputs
     # (verified empirically), starving the beta jobs. The action itself
@@ -336,7 +305,7 @@ jobs:
   security-gate:
     name: Code review / security gate
     needs: [frontend, frontend-windows, rust-static, native, codeql, audit, e2e, dep-review, packaging]
-    if: always() && (github.event_name != 'pull_request' || github.event.action != 'closed')
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -570,281 +539,3 @@ jobs:
           # with the binary SHA after every asset has been published.
           gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \
             -X PATCH -f sha="$GITHUB_SHA" -F force=true > /dev/null
-
-  windows-pr:
-    name: Windows PR preview
-    # Opt-in via the `preview` label: full Tauri bundle builds are the most
-    # expensive jobs here (Windows minutes per push), so they no longer run
-    # on every PR push. Add the label to build, remove it to skip.
-    # Waits for the compile gates so broken code does not burn Windows
-    # minutes. Unsigned NSIS installer, same fast-release tuning as
-    # windows-beta. No secrets are used, so this is safe on forks (forks get
-    # the run artifacts page; the sticky comment with direct links is
-    # same-repo only, see `publish-pr`).
-    needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
-    outputs:
-      exe_name: ${{ steps.names.outputs.exe_name }}
-    runs-on: windows-latest
-    timeout-minutes: 45
-    concurrency:
-      group: ci-windows-bundle-pr-${{ github.ref }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-    env:
-      # Same beta-only fast release tuning as windows-beta: this is a smoke
-      # check, not a shippable artifact.
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-      CARGO_PROFILE_RELEASE_STRIP: "false"
-      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so testers
-      # can tell same-version previews apart by commit.
-      KIVO_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: src-tauri
-      - name: Install Vulkan SDK (Windows x64)
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run check:packaging
-      - run: bun run check:platform-parity
-      - run: bun run check:bridge
-      - name: Build unsigned NSIS installer (PR preview)
-        run: bun tauri build --bundles nsis
-      - name: Record installer filename
-        id: names
-        shell: bash
-        run: |
-          exe="$(find src-tauri/target/release/bundle/nsis -maxdepth 1 -name '*-setup.exe' | head -n 1)"
-          test -n "$exe"
-          echo "exe_name=$(basename "$exe")" >> "$GITHUB_OUTPUT"
-      - name: Upload installer for live testing
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kivo-pr-windows-nsis
-          # Human download path via the sticky PR comment links; GitHub
-          # deletes the files automatically when this expires.
-          retention-days: 14
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
-
-  macos-pr:
-    name: macOS PR preview
-    # Opt-in via the `preview` label, mirroring `windows-pr` above (see its
-    # cost note). Without this job, macOS-only bundle breakage (icons,
-    # entitlements, Swift bridge, dmg config) merges and fails the beta on
-    # main instead of the PR. No secrets are used, so this is also safe on
-    # forks.
-    needs: [frontend, frontend-windows, native, rust-static, packaging]
-    if: github.event_name == 'pull_request' && github.event.action != 'closed' && contains(github.event.pull_request.labels.*.name, 'preview')
-    outputs:
-      dmg_name: ${{ steps.names.outputs.dmg_name }}
-      app_name: ${{ steps.names.outputs.app_name }}
-    runs-on: macos-latest
-    timeout-minutes: 45
-    concurrency:
-      group: ci-macos-bundle-pr-${{ github.ref }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-    env:
-      # Same beta-only fast release tuning as macos-beta: this is a smoke
-      # check, not a shippable artifact.
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-      CARGO_PROFILE_RELEASE_STRIP: "false"
-      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so testers
-      # can tell same-version previews apart by commit.
-      KIVO_BUILD_SHA: ${{ github.event.pull_request.head.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: src-tauri
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun run check:packaging
-      - run: bun run check:platform-parity
-      - run: bun run check:bridge
-      - name: Build ad-hoc signed app bundle (PR preview)
-        run: bun tauri build --target aarch64-apple-darwin
-      - name: Record bundle filenames
-        id: names
-        shell: bash
-        run: |
-          dmg="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/dmg -maxdepth 1 -name '*.dmg' | head -n 1)"
-          app="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -n 1)"
-          test -n "$dmg" && test -n "$app"
-          {
-            echo "dmg_name=$(basename "$dmg")"
-            echo "app_name=$(basename "$app")"
-          } >> "$GITHUB_OUTPUT"
-      - name: Upload dmg for live testing
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kivo-pr-macos-dmg
-          # Human download path via the sticky PR comment links; GitHub
-          # deletes the files automatically when this expires.
-          retention-days: 14
-          # NOTE: explicit `--target` redirects cargo output to
-          # target/<triple>/release, not target/release.
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-      - name: Upload app bundle for live testing
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kivo-pr-macos-app
-          retention-days: 14
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
-
-  publish-pr:
-    name: Post PR preview download links
-    # Posts/updates one sticky PR comment with download links for the
-    # platform bundles built above. Links point at this run's artifacts —
-    # deliberately no per-PR release is created. Artifact downloads need a
-    # GitHub login with repo access and expire with the artifacts (14 days).
-    # `always()` plus the per-result guards mean one red platform does not
-    # block the other's links. Runs with a token that can comment but never
-    # executes PR code: the checkout is pinned to the trusted base SHA and
-    # only artifact names/IDs are read via the API, never their contents.
-    # Same-repo PRs only — fork PRs keep the run's Artifacts tab (their
-    # GITHUB_TOKEN is read-only on `pull_request`).
-    needs: [windows-pr, macos-pr]
-    if: always() && github.event_name == 'pull_request' && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository && (needs.windows-pr.result == 'success' || needs.macos-pr.result == 'success')
-    concurrency:
-      group: pr-preview-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      pull-requests: write
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          # Trusted base code, NOT the PR head: this job runs with a token
-          # that can write PR comments.
-          ref: ${{ github.event.pull_request.base.sha }}
-      - name: Post or update the sticky preview comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          RUN_ID: ${{ github.run_id }}
-          EXE_NAME: ${{ needs.windows-pr.outputs.exe_name }}
-          DMG_NAME: ${{ needs.macos-pr.outputs.dmg_name }}
-          APP_NAME: ${{ needs.macos-pr.outputs.app_name }}
-          WINDOWS_OK: ${{ needs.windows-pr.result == 'success' }}
-          MACOS_OK: ${{ needs.macos-pr.result == 'success' }}
-        run: |
-          set -euo pipefail
-          REPO="${GITHUB_REPOSITORY}"
-          SHORT="$(printf '%s' "$HEAD_SHA" | cut -c1-7)"
-          RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
-          VERSION="$(node -p "require('./package.json').version")"
-          BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          # Download links point at this run's artifacts (one zip per
-          # artifact). They need a GitHub login and die with the artifacts.
-          gh api "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --paginate > artifacts.json
-          REPO="$REPO" RUN_ID="$RUN_ID" PR_NUMBER="$PR_NUMBER" HEAD_SHA="$HEAD_SHA" SHORT_SHA="$SHORT" RUN_URL="$RUN_URL" VERSION="$VERSION" BUILT_AT="$BUILT_AT" EXE_NAME="$EXE_NAME" DMG_NAME="$DMG_NAME" APP_NAME="$APP_NAME" WINDOWS_OK="$WINDOWS_OK" MACOS_OK="$MACOS_OK" node <<'NODE_EOF'
-          const fs = require('node:fs');
-          const e = process.env;
-          const all = JSON.parse(fs.readFileSync('artifacts.json', 'utf8')).artifacts || [];
-          const live = new Map(all.filter((a) => !a.expired).map((a) => [a.name, a]));
-          const link = (artifact, file) => {
-            const a = live.get(artifact);
-            if (!a) return null;
-            const mb = (a.size_in_bytes / 1048576).toFixed(1);
-            return `[${file}](https://github.com/${e.REPO}/actions/runs/${e.RUN_ID}/artifacts/${a.id}) (${mb} MB)`;
-          };
-          const lines = [];
-          lines.push('<!-- kivo-pr-preview -->');
-          lines.push(`## PR preview builds (#${e.PR_NUMBER} @ \`${e.SHORT_SHA}\`)`);
-          lines.push('');
-          lines.push('Live-testing downloads from this PR. Rebuilt on every push; links need a GitHub login and expire with the artifacts (14 days).');
-          lines.push('');
-          if (e.WINDOWS_OK === 'true') {
-            const l = e.EXE_NAME ? link('kivo-pr-windows-nsis', e.EXE_NAME) : null;
-            lines.push(l ? `- Windows: ${l}` : '- Windows: no download for this push — see the workflow run.');
-          } else {
-            lines.push('- Windows: no build for this push — see the workflow run logs.');
-          }
-          if (e.MACOS_OK === 'true') {
-            const d = e.DMG_NAME ? link('kivo-pr-macos-dmg', e.DMG_NAME) : null;
-            const app = e.APP_NAME ? link('kivo-pr-macos-app', e.APP_NAME) : null;
-            lines.push(d ? `- macOS (Apple Silicon, dmg): ${d}` : '- macOS (dmg): no download for this push — see the workflow run.');
-            lines.push(app ? `- macOS (Apple Silicon, app): ${app}` : '- macOS (app): no download for this push — see the workflow run.');
-          } else {
-            lines.push('- macOS: no build for this push — see the workflow run logs.');
-          }
-          lines.push('');
-          lines.push(`Commit: \`${e.HEAD_SHA}\` · version ${e.VERSION} · built ${e.BUILT_AT} · [workflow run](${e.RUN_URL})`);
-          lines.push('');
-          lines.push('Unsigned test builds, not releases: Windows shows a SmartScreen warning (More info -> Run anyway). macOS is ad-hoc signed: unzip, then run `xattr -dr com.apple.quarantine Kivo.app` once (or move it to /Applications first and run against /Applications/Kivo.app) and approve in System Settings > Privacy & Security on first launch.');
-          fs.writeFileSync('comment.md', lines.join('\n') + '\n');
-          NODE_EOF
-          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
-          if [ -n "$EXISTING" ]; then
-            node -e "const fs=require('node:fs');fs.writeFileSync('payload.json',JSON.stringify({body:fs.readFileSync('comment.md','utf8')}));"
-            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input payload.json > /dev/null
-            echo "Updated preview comment ${EXISTING}."
-          else
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file comment.md
-            echo "Posted new preview comment."
-          fi
-
-  cleanup-pr-preview:
-    name: Retire PR preview comment
-    # Preview downloads are run artifacts: they expire on their own (14-day
-    # retention), so closing a PR only needs to retire the sticky comment
-    # whose links would otherwise 404. Same-repo only, mirroring
-    # `publish-pr` (forks never got a comment).
-    if: github.event_name == 'pull_request' && github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
-    concurrency:
-      group: pr-preview-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: write
-    steps:
-      - name: Retire the sticky preview comment
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          REPO="${GITHUB_REPOSITORY}"
-          EXISTING="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" --paginate -q '.[] | select(.body | contains("<!-- kivo-pr-preview -->")) | .id' | head -n 1 || true)"
-          if [ -n "$EXISTING" ]; then
-            printf '<!-- kivo-pr-preview -->\n## PR preview builds (retired)\n\nThis PR is closed, so these preview links are retired (artifacts expire automatically).\n' > /tmp/retired.md
-            node -e "const fs=require('node:fs');fs.writeFileSync('/tmp/payload.json',JSON.stringify({body:fs.readFileSync('/tmp/retired.md','utf8')}));"
-            gh api "repos/${REPO}/issues/comments/${EXISTING}" -X PATCH --input /tmp/payload.json > /dev/null
-            echo "Retired preview comment ${EXISTING}."
-          else
-            echo "No preview comment to retire."
-          fi
