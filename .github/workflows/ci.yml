@@ -136,7 +136,6 @@ jobs:
       - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
 
   native:
-    # Warm-cache probe: this comment changes no Rust/C/C++ build inputs.
     # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
     # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
     # lockfile checks live in `rust-static`, and no bun install is needed
@@ -154,13 +153,6 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-      # Cache compiler outputs individually instead of shipping the whole
-      # target directory between runners. This also gives CMake-based native
-      # dependencies (notably transcribe-cpp) a chance to reuse C/C++ objects.
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
-      CMAKE_C_COMPILER_LAUNCHER: "sccache"
-      CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
     concurrency:
       group: ci-native-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -188,26 +180,11 @@ jobs:
           if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
-      - name: Set up sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-        with:
-          version: "v0.18.0"
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-          # sccache owns compiler outputs for this experiment. Keeping
-          # target/ here would retain the large restore cost we are testing
-          # against; rust-cache still keeps the Cargo registry/git deps warm.
-          cache-targets: "false"
-      - name: Reset sccache statistics
-        shell: bash
-        run: sccache --zero-stats
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-      - name: Report sccache statistics
-        if: always()
-        shell: bash
-        run: sccache --show-stats
 
   # Automated code review / security gates. Each gate runs independently and
   # starts immediately (no `needs` on the CI jobs above) so one slow suite
