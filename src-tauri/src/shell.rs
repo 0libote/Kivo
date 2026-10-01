@@ -1715,10 +1715,10 @@ pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
         .endpoints(vec![
             endpoint.parse().expect("static updater endpoint is valid"),
         ])
-        .map_err(|_| {
+        .map_err(|error| {
             update_install_error(
                 "update_install_unavailable",
-                "The update source is unavailable.",
+                &format!("The update source is unavailable ({error})."),
             )
         })?;
     let updater = if offered.channel.as_deref() == Some("beta") {
@@ -1738,19 +1738,21 @@ pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
     } else {
         updater
     };
-    let updater = updater.build().map_err(|_| {
+    let updater = updater.build().map_err(|error| {
         update_install_error(
             "update_install_unavailable",
-            "This build can’t install updates itself.",
+            &format!("This build can’t install updates itself ({error})."),
         )
     })?;
     let update = updater
         .check()
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             update_install_error(
                 "update_install_unavailable",
-                "No installable update was found. Use the download link instead.",
+                &format!(
+                    "The update service couldn’t prepare this update ({error}). Use the download link instead.",
+                ),
             )
         })?
         .ok_or_else(|| {
@@ -1767,10 +1769,12 @@ pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
     update
         .download_and_install(|_, _| {}, || {})
         .await
-        .map_err(|_| {
+        .map_err(|error| {
             update_install_error(
                 "update_install_failed",
-                "The update couldn’t be installed. Use the download link instead.",
+                &format!(
+                    "The update couldn’t be installed ({error}). Use the download link instead.",
+                ),
             )
         })?;
     Ok(())
