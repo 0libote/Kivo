@@ -1,6 +1,5 @@
 import { Button } from "@astryxdesign/core/Button";
 import * as stylex from "@stylexjs/stylex";
-import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import { DictationPractice } from "../../components/DictationPractice";
 import { Icon, type IconName } from "../../components/Icon";
@@ -160,17 +159,14 @@ function ShortcutRow({
   readonly onClick: () => void;
   readonly title: string;
 }) {
-  // The old row transitioned transform; keep the lift tiny and honor the
-  // OS reduced-motion preference that CSS alone can no longer cover here.
-  const reduceMotion = useReducedMotion();
+  // Plain button: the row already lifts via its :hover background, and a
+  // transform hover shifted neighbouring rows by a subpixel on some GPUs.
   return (
-    <motion.button
+    <button
       aria-label={ariaLabel}
       data-testid="home-shortcut"
       onClick={onClick}
-      transition={{ duration: 0.12, ease: "easeOut" }}
       type="button"
-      whileHover={reduceMotion ? undefined : { y: -1 }}
       {...stylex.props(styles.shortcut)}
     >
       <Icon name={icon} size={19} {...stylex.props(styles.shortcutIcon)} />
@@ -188,7 +184,7 @@ function ShortcutRow({
         </div>
         <span {...stylex.props(styles.shortcutEdit)}>Edit</span>
       </div>
-    </motion.button>
+    </button>
   );
 }
 
@@ -371,7 +367,7 @@ const styles = stylex.create({
     justifyContent: "space-between",
     gap: "var(--spacing-3)",
     padding: "var(--spacing-4)",
-    borderRadius: "var(--radius-md)",
+    borderRadius: "var(--radius-element)",
     backgroundColor: "var(--color-background-card)",
   },
 });

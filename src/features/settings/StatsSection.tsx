@@ -500,7 +500,7 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: "var(--spacing-1)",
     padding: "var(--spacing-4)",
-    borderRadius: "var(--radius-md)",
+    borderRadius: "var(--radius-element)",
     backgroundColor: "var(--color-background-card)",
   },
   charts: {
@@ -512,7 +512,7 @@ const styles = stylex.create({
   panel: {
     minWidth: "0",
     padding: "var(--spacing-4)",
-    borderRadius: "var(--radius-md)",
+    borderRadius: "var(--radius-element)",
     backgroundColor: "var(--color-background-card)",
   },
   table: { width: "100%", borderCollapse: "collapse" },

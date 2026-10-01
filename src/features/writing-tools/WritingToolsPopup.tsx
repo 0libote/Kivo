@@ -308,19 +308,14 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         ref={popup}
         {...stylex.props(styles.popup)}
       >
+        {/* No `layout` animation here: the native shell resizes to the
+            reported content height, so a size spring would fight the
+            ResizeObserver loop and make every menu open visibly wobble.
+            Mode swaps crossfade in place instead. */}
         <motion.div
-          layout
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          initial={reduceMotion ? false : { opacity: 0, y: -3, scale: 0.985 }}
-          transition={
-            reduceMotion
-              ? { duration: 0 }
-              : {
-                  layout: { type: "spring", stiffness: 420, damping: 36 },
-                  duration: 0.15,
-                  ease: [0.2, 0.82, 0.24, 1],
-                }
-          }
+          animate={{ opacity: 1, y: 0 }}
+          initial={reduceMotion ? false : { opacity: 0, y: -3 }}
+          transition={reduceMotion ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
           {...stylex.props(styles.modeSurface)}
         >
           <PopupContent
