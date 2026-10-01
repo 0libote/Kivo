@@ -136,6 +136,7 @@ jobs:
       - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
 
   native:
+    # Warm-cache probe: this comment changes no Rust/C/C++ build inputs.
     # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
     # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
     # lockfile checks live in `rust-static`, and no bun install is needed
