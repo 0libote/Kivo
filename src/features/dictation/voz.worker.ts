@@ -11,12 +11,26 @@ let recognizer: VozModel | null = null;
 let loadPromise: Promise<VozModel> | null = null;
 let identifier: EarModel | null = null;
 const stateCache = "kivo-voz-state";
+const languageCheckReadyPath = "/voz-language-check-ready";
+const vozModelReadyPath = "/voz-model-ready";
 
-async function setLanguageCheckReady(ready: boolean) {
+function stateMarker(path: string) {
+  return new Request(new URL(path, self.location.origin));
+}
+
+async function setReadyMarker(path: string, ready: boolean) {
   const cache = await caches.open(stateCache);
-  const key = new Request(new URL("/voz-language-check-ready", self.location.origin));
+  const key = stateMarker(path);
   if (ready) await cache.put(key, new Response("ready"));
   else await cache.delete(key);
+}
+
+async function setLanguageCheckReady(ready: boolean) {
+  await setReadyMarker(languageCheckReadyPath, ready);
+}
+
+async function setVozModelReady(ready: boolean) {
+  await setReadyMarker(vozModelReadyPath, ready);
 }
 
 function send(reply: VozWorkerReply) {
@@ -48,6 +62,7 @@ async function load(requestId: string, needsDownload: boolean) {
       onProgress: (fraction: number) => progress(requestId, "downloading", fraction),
     });
     progress(requestId, "preparing");
+    await setVozModelReady(true);
     recognizer = loaded;
     return recognizer;
   })();
@@ -59,9 +74,10 @@ async function load(requestId: string, needsDownload: boolean) {
 }
 
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
-  // The worker is only intended to accept requests from Kivo's own WebView.
-  // Reject cross-origin messages before reading or acting on their payload.
-  if (event.origin !== self.location.origin) return;
+  // Dedicated-worker MessageEvents can expose either the app origin or an empty
+  // origin depending on the WebView2 messaging path. Reject any other populated
+  // origin, then validate the structured request before doing work.
+  if (event.origin !== "" && event.origin !== self.location.origin) return;
   if (!isVozWorkerRequest(event.data)) return;
   void handle(event.data);
 });
@@ -106,14 +122,12 @@ async function handle(request: VozWorkerRequest) {
 }
 
 async function reportStatus(requestId: string) {
-  const cacheNames = await caches.keys();
   const readyCache = await caches.open(stateCache);
-  const languageCheckInstalled = await readyCache.match(
-    new Request(new URL("/voz-language-check-ready", self.location.origin)),
-  );
-  const downloaded =
-    cacheNames.some((name) => name.startsWith("desert-ant-voz-")) &&
-    languageCheckInstalled !== undefined;
+  const [vozInstalled, languageCheckInstalled] = await Promise.all([
+    readyCache.match(stateMarker(vozModelReadyPath)),
+    readyCache.match(stateMarker(languageCheckReadyPath)),
+  ]);
+  const downloaded = vozInstalled !== undefined && languageCheckInstalled !== undefined;
   send({
     requestId,
     complete: true,
@@ -125,9 +139,7 @@ async function reportStatus(requestId: string) {
 
 async function install(request: VozWorkerRequest) {
   await loadEar(request.requestId);
-  const cachedNames = await caches.keys();
-  const alreadyCached = cachedNames.some((name) => name.startsWith("desert-ant-voz-"));
-  const loaded = await load(request.requestId, request.operation === "download" || !alreadyCached);
+  const loaded = await load(request.requestId, request.operation === "download");
   if (!loaded) throw new Error("Voz could not be loaded.");
   send({
     requestId: request.requestId,
@@ -142,7 +154,7 @@ async function remove(requestId: string) {
   recognizer = null;
   identifier?.dispose();
   identifier = null;
-  await setLanguageCheckReady(false);
+  await Promise.all([setLanguageCheckReady(false), setVozModelReady(false)]);
   const names = await caches.keys();
   await Promise.all(
     names.filter((name) => name.startsWith("desert-ant-voz-")).map((name) => caches.delete(name)),
