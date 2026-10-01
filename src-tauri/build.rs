@@ -32,12 +32,28 @@ fn build_speech_bridge() {
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
     let manifest = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("manifest dir"));
     let package = manifest.join("native/macos/VozBridge");
-    let package_build = output.join("voz-swift-build");
     let swift_arch = match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("aarch64") => "arm64",
         Ok("x86_64") => "x86_64",
         arch => panic!("unsupported macOS Voz target architecture: {arch:?}"),
     };
+    // Keep SwiftPM's expensive dependency build outside Cargo's hashed
+    // OUT_DIR. Rust graph changes can replace OUT_DIR even when the pinned
+    // Voz package is unchanged; a stable per-architecture cache lets SwiftPM
+    // reuse that work across ordinary Kivo rebuilds.
+    let cargo_target = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .map(|path| {
+            if path.is_absolute() {
+                path
+            } else {
+                manifest.join(path)
+            }
+        })
+        .unwrap_or_else(|| manifest.join("target"));
+    let package_build = cargo_target
+        .join("swift")
+        .join(format!("voz-{swift_arch}-release"));
     // The bridge uses no post-15 API. Keep its deployment target at the
     // upstream SDK's macOS floor; the containing Kivo app still declares 26+.
     let swift_triple = format!("{swift_arch}-apple-macosx15.0");
@@ -101,6 +117,11 @@ fn build_speech_bridge() {
         install_name_status.success(),
         "could not set the packaged Voz bridge runtime path"
     );
+    // Cargo adds OUT_DIR link-search paths to the test runtime environment.
+    // Stage the dylib there so tests still resolve @rpath even though the
+    // expensive SwiftPM build itself now lives in the persistent cache.
+    std::fs::copy(&library, output.join("libKivoVozBridge.dylib"))
+        .expect("stage the Voz bridge for Cargo linking and tests");
     std::fs::copy(&library, &packaged_library)
         .expect("copy the Voz bridge where Tauri can bundle and sign it");
 

@@ -24,6 +24,7 @@ function check(name: string, ok: boolean, detail: string) {
 
 const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
   version: string;
+  scripts: Record<string, string>;
 };
 const version: string = packageJson.version;
 check(
@@ -55,7 +56,7 @@ const tauriConf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.js
   productName: string;
   version: string;
   identifier: string;
-  build: { frontendDist: string };
+  build: { beforeBuildCommand: string; frontendDist: string };
   bundle: {
     targets: unknown;
     macOS?: { signingIdentity?: string | null };
@@ -72,6 +73,12 @@ check(
   "tauri.conf identifier is set",
   typeof tauriConf.identifier === "string" && tauriConf.identifier.length > 0,
   "identifier missing",
+);
+check(
+  "Tauri packaging uses the frontend-only build",
+  tauriConf.build.beforeBuildCommand === "bun run build:frontend" &&
+    packageJson.scripts["build:frontend"] === "bun --bun vite build",
+  "desktop packaging must not repeat the TypeScript gate that CI and bun run build already run",
 );
 check(
   "bundle targets cover both desktops",

@@ -43,6 +43,21 @@ bun install
 bun tauri dev
 ```
 
+For a local installer/package, prefer the fast release-like build:
+
+```sh
+bun run desktop:build
+```
+
+That keeps Cargo output in the normal release directory but uses thin LTO,
+16 codegen units, and normal speed-oriented optimisation instead of the stable
+release's fat-LTO/single-codegen link. If `sccache` is already on `PATH`, the
+script also uses it for Rust and C/C++ compilation. The tagged release workflow
+still uses the full `[profile.release]` settings. Use `bun tauri build`
+directly only when you specifically want to reproduce that slower stable
+release profile. Pass normal Tauri build arguments after `--`, for example
+`bun run desktop:build -- --bundles nsis`.
+
 The Vite-only preview includes a safe local harness for inspecting all four surfaces without invoking OS integration:
 
 ```sh
@@ -77,7 +92,8 @@ bun test:ui           # Playwright
 bun run build
 bun check:rust
 cargo test --manifest-path src-tauri/Cargo.toml
-bun tauri build
+bun run desktop:build  # fast local package
+bun tauri build        # full stable release profile
 ```
 
 Git hooks are managed by Lefthook: `bun install` installs them, pre-commit runs

@@ -34,7 +34,9 @@ export default defineConfig({
       },
   build: {
     target: "esnext",
-    sourcemap: true,
+    // Production source maps add several megabytes of generated output and
+    // are not shipped to a crash service. Opt in only when debugging a bundle.
+    sourcemap: process.env.KIVO_SOURCEMAP === "1",
   },
   worker: { format: "es" },
   optimizeDeps: {
