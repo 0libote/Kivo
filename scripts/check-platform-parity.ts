@@ -395,6 +395,20 @@ check(
   "Voz/Ear imports should remain lazy and confined to the Windows flow-bar worker",
 );
 check(
+  "Windows Voz worker validates message origin without rejecting WebView2 worker traffic",
+  vozWorker.includes('event.origin !== "" && event.origin !== self.location.origin') &&
+    vozWorker.includes("isVozWorkerRequest(event.data)"),
+  "dedicated-worker messages may expose an empty origin in WebView2; reject every other foreign origin before validating the payload",
+);
+check(
+  "Windows Voz readiness requires completed model loads",
+  vozWorker.includes('const vozModelReadyPath = "/voz-model-ready"') &&
+    vozWorker.includes('const languageCheckReadyPath = "/voz-language-check-ready"') &&
+    vozWorker.includes("await setVozModelReady(true)") &&
+    vozWorker.includes("vozInstalled !== undefined && languageCheckInstalled !== undefined"),
+  "status must use explicit completion markers instead of treating a partial Desert Ant cache as a finished install",
+);
+check(
   "both native adapters verify language before Voz inference",
   vozRs.includes("validate_detected_language") &&
     vozWorker.includes("ear.identify(samples, 16000)") &&
