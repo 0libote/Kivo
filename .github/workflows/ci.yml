@@ -155,6 +155,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       # Experiment: cache compiler outputs individually instead of restoring
       # a huge target/ tree. sccache also wraps C/C++ spawned by CMake.
+      # Warm-run marker: workflow-only changes leave compiler inputs unchanged.
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
       CMAKE_C_COMPILER_LAUNCHER: "sccache"
