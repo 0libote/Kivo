@@ -153,13 +153,6 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-      # Experiment: cache compiler outputs individually instead of restoring
-      # a huge target/ tree. sccache also wraps C/C++ spawned by CMake.
-      # Warm-run marker: workflow-only changes leave compiler inputs unchanged.
-      SCCACHE_GHA_ENABLED: "true"
-      RUSTC_WRAPPER: "sccache"
-      CMAKE_C_COMPILER_LAUNCHER: "sccache"
-      CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
     concurrency:
       group: ci-native-${{ matrix.os }}-${{ github.ref }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -190,15 +183,8 @@ jobs:
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
-          # Keep registry/git dependency caching, but let sccache own compiler
-          # outputs so this experiment measures its real warm-cache value.
-          cache-targets: "false"
-      - uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-      - name: Show sccache stats
-        if: always()
-        run: sccache --show-stats
 
   # Automated code review / security gates. Each gate runs independently and
   # starts immediately (no `needs` on the CI jobs above) so one slow suite
