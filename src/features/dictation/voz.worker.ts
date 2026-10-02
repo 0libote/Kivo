@@ -27,10 +27,7 @@ type EarConstructor = {
 };
 
 type VozConstructor = {
-  load(options?: {
-    ort?: unknown;
-    onProgress?: (fraction: number) => void;
-  }): Promise<VozModel>;
+  load(options?: { ort?: unknown; onProgress?: (fraction: number) => void }): Promise<VozModel>;
 };
 
 type EarModule = { Ear: EarConstructor };
