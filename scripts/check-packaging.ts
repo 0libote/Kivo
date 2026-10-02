@@ -119,13 +119,36 @@ check(
   `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`,
 );
 
-// --- Voz runtimes are packaged only for their native desktop target ----------
+// --- Voz runtime packaging ----------------------------------------------------
 const viteSource = readFileSync(join(root, "vite.config.ts"), "utf8");
 check(
-  "Windows-only Voz worker assets stay out of macOS/Linux bundles",
+  "Windows-only Voz worker stays out of macOS/Linux bundles",
   viteSource.includes('process.env.TAURI_ENV_PLATFORM === "windows"') &&
     viteSource.includes("voz.worker.stub.ts"),
-  "the browser Voz/ONNX WASM runtime belongs only in the Windows WebView2 build",
+  "the Windows worker should not enter macOS/Linux frontend output",
+);
+const vozWorkerSource = readFileSync(
+  join(root, "src/features/dictation/voz.worker.ts"),
+  "utf8",
+);
+check(
+  "Windows Voz ML runtime is downloaded instead of bundled",
+  vozWorkerSource.includes("/* @vite-ignore */") &&
+    vozWorkerSource.includes("@desert-ant-labs/voz@3.5.0/+esm") &&
+    vozWorkerSource.includes("@desert-ant-labs/ear@3.5.0/+esm") &&
+    vozWorkerSource.includes("onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs") &&
+    vozWorkerSource.includes("@litertjs/core@2.5.3/+esm") &&
+    !vozWorkerSource.includes('await import("@desert-ant-labs/voz")') &&
+    !vozWorkerSource.includes('await import("@desert-ant-labs/ear")'),
+  "Voz/Ear/ONNX/LiteRT must remain version-pinned remote imports so they do not inflate the NSIS installer",
+);
+const tauriConfigSource = readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8");
+check(
+  "Voz runtime CDN is allowed by the desktop CSP",
+  tauriConfigSource.includes("script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net") &&
+    tauriConfigSource.includes("connect-src ipc:") &&
+    tauriConfigSource.includes("https://cdn.jsdelivr.net"),
+  "the on-demand Windows runtime cannot load unless jsDelivr is allowed for scripts and fetches",
 );
 const vozBuildSource = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
 check(
