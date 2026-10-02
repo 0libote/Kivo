@@ -1610,8 +1610,8 @@ const styles = stylex.create({
     placeItems: "center",
     width: "27px",
     height: "27px",
-    color: "#fff",
-    backgroundColor: "#242426",
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
     borderRadius: "7px",
   },
   brandName: {
@@ -1895,8 +1895,8 @@ const styles = stylex.create({
     placeItems: "center",
     width: "54px",
     height: "54px",
-    color: "#f7f7f5",
-    backgroundColor: "#1c1c1e",
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
     borderRadius: "13px",
   },
   lockupTitle: {

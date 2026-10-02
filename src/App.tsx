@@ -3,6 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Theme } from "@astryxdesign/core/theme";
 import * as stylex from "@stylexjs/stylex";
+import { MotionConfig } from "motion/react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { DeveloperSurfaceMenu } from "./components/DeveloperSurfaceMenu";
 import { FlowBar } from "./features/dictation/FlowBar";
@@ -187,28 +188,33 @@ export function App() {
 
   return (
     <Theme theme={kivoTheme} mode={overlay ? "dark" : settings.theme}>
-      {showServiceNotice ? (
-        <Banner
-          status="warning"
-          title="Kivo could not reach its background service"
-          description={contextError}
-          onDismiss={() => setContextError(null)}
-        />
-      ) : null}
-      <Suspense
-        fallback={
-          <main {...stylex.props(styles.loading, overlay && styles.loadingOverlay)}>
-            <Spinner
-              size="md"
-              shade={overlay ? "onMedia" : "default"}
-              aria-label="Loading Kivo window"
-            />
-          </main>
-        }
-      >
-        {surface}
-      </Suspense>
-      <DeveloperSurfaceMenu current={context.surface} />
+      {/* Global reduced-motion gate: every motion/react animation below
+          degrades to an instant transition when the OS asks for it, so new
+          animations are safe by default without per-component checks. */}
+      <MotionConfig reducedMotion="user">
+        {showServiceNotice ? (
+          <Banner
+            status="warning"
+            title="Kivo could not reach its background service"
+            description={contextError}
+            onDismiss={() => setContextError(null)}
+          />
+        ) : null}
+        <Suspense
+          fallback={
+            <main {...stylex.props(styles.loading, overlay && styles.loadingOverlay)}>
+              <Spinner
+                size="md"
+                shade={overlay ? "onMedia" : "default"}
+                aria-label="Loading Kivo window"
+              />
+            </main>
+          }
+        >
+          {surface}
+        </Suspense>
+        <DeveloperSurfaceMenu current={context.surface} />
+      </MotionConfig>
     </Theme>
   );
 }

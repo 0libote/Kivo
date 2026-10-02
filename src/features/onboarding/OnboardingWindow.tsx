@@ -1,6 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import * as stylex from "@stylexjs/stylex";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { normalizeAiProvider, providerDefaultModel } from "../../ai/models";
 import { DictationPractice } from "../../components/DictationPractice";
@@ -109,41 +109,49 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
   return (
     <main data-platform={context.platform} {...stylex.props(styles.window)}>
       <section {...stylex.props(styles.panel)}>
-        {step === 0 ? <WelcomeStep onStart={() => setStep(1)} /> : null}
-        {step === 1 ? (
-          <PermissionsStep
-            busyPermission={busyPermission}
-            dictationShortcut={settings.dictationShortcut}
-            platform={context.platform}
-            request={(kind) => void request(kind)}
-            setMessage={setMessage}
-            statusByKind={statusByKind}
-          />
-        ) : null}
-        {step === 2 ? (
-          <DictationStep
-            dictationShortcut={settings.dictationShortcut}
-            busyPermission={busyPermission}
-            platform={context.platform}
-            request={(kind) => void request(kind)}
-            setMessage={setMessage}
-            statusByKind={statusByKind}
-          />
-        ) : null}
-        {step === 3 ? (
-          <ApiKeyStep
-            apiKey={apiKey}
-            apiStatus={apiStatus}
-            platform={context.platform}
-            savingKey={savingKey}
-            setApiKey={setApiKey}
-            setApiStatus={setApiStatus}
-            setMessage={setMessage}
-            setSavingKey={setSavingKey}
-            settings={settings}
-            updateSettings={updateSettings}
-          />
-        ) : null}
+        {/* mode="wait" lets the outgoing step fade before the incoming
+            one slides in; without it the old step is cut instantly while
+            the new one animates, which reads as a flicker. */}
+        <AnimatePresence initial={false} mode="wait">
+          {step === 0 ? <WelcomeStep key={step} onStart={() => setStep(1)} /> : null}
+          {step === 1 ? (
+            <PermissionsStep
+              busyPermission={busyPermission}
+              dictationShortcut={settings.dictationShortcut}
+              key={step}
+              platform={context.platform}
+              request={(kind) => void request(kind)}
+              setMessage={setMessage}
+              statusByKind={statusByKind}
+            />
+          ) : null}
+          {step === 2 ? (
+            <DictationStep
+              dictationShortcut={settings.dictationShortcut}
+              busyPermission={busyPermission}
+              key={step}
+              platform={context.platform}
+              request={(kind) => void request(kind)}
+              setMessage={setMessage}
+              statusByKind={statusByKind}
+            />
+          ) : null}
+          {step === 3 ? (
+            <ApiKeyStep
+              apiKey={apiKey}
+              apiStatus={apiStatus}
+              key={step}
+              platform={context.platform}
+              savingKey={savingKey}
+              setApiKey={setApiKey}
+              setApiStatus={setApiStatus}
+              setMessage={setMessage}
+              setSavingKey={setSavingKey}
+              settings={settings}
+              updateSettings={updateSettings}
+            />
+          ) : null}
+        </AnimatePresence>
 
         {message ? (
           <p aria-live="polite" {...stylex.props(styles.message)}>
@@ -177,6 +185,7 @@ function StepFrame({
   return (
     <motion.div
       animate={{ opacity: 1, x: 0 }}
+      exit={reduceMotion ? undefined : { opacity: 0, x: -6 }}
       initial={reduceMotion ? false : { opacity: 0, x: 6 }}
       transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: "easeOut" }}
       {...stylex.props(styles.step, welcome && styles.welcome)}
@@ -675,8 +684,8 @@ const styles = stylex.create({
     width: "70px",
     height: "70px",
     marginBottom: "19px",
-    color: "#ffffff",
-    backgroundColor: "#242426",
+    color: "var(--color-on-accent)",
+    backgroundColor: "var(--color-accent)",
     borderRadius: "var(--radius-element)",
   },
   stepIcon: {

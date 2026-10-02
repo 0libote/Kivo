@@ -139,7 +139,10 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
         }
         {...stylex.props(styles.bar, inert && styles.inert)}
       >
-        <AnimatePresence mode="popLayout" initial={false}>
+        {/* wait sequences exit-then-enter so the pill never shows a
+            half-removed row snapping against the size spring. popLayout
+            pulls the exiting row out of flow and visibly jumps. */}
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={state.status === "starting" ? "processing" : state.status}
             initial={reduceMotion ? false : { opacity: 0, scale: 0.92, y: 2 }}
@@ -410,7 +413,7 @@ const styles = stylex.create({
     position: "relative",
     display: "grid",
     placeItems: "center",
-    color: "#d4d4d4",
+    color: "var(--kivo-overlay-text-secondary)",
   },
   idleRing: {
     position: "absolute",
@@ -482,7 +485,7 @@ const styles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: "8px",
-    color: "#d4d4d4",
+    color: "var(--kivo-overlay-text-secondary)",
     fontSize: "12px",
   },
   success: {
