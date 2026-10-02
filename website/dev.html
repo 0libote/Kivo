@@ -101,7 +101,7 @@
         <thead><tr><th>Surface</th><th>Role</th></tr></thead>
         <tbody>
           <tr><td><code>flow-bar</code></td><td>Non-activating, always-on-top dictation pill. Tightly sized; never steals focus.</td></tr>
-          <tr><td><code>writing-tools</code></td><td>Compact selection-aware command + result popup. Anchors to cursor / selection / fixed point.</td></tr>
+          <tr><td><code>writing-tools</code></td><td>Compact selection-aware command and result popup with native placement.</td></tr>
           <tr><td><code>settings</code></td><td>Native-window preferences. Closing hides the window — it never quits the app.</td></tr>
           <tr><td><code>onboarding</code></td><td>Short first-run permission and setup flow.</td></tr>
         </tbody>
@@ -126,7 +126,7 @@
       <p>On release, the transcript goes through optional AI cleanup, then <code>text/</code> inserts it at the saved cursor. <kbd>esc</kbd> cancels; closing paths bump a generation counter so late engine callbacks are ignored.</p>
 
       <h2 id="text-pipeline">Selection &amp; replace pipeline</h2>
-      <p>Invoking Writing Tools captures a <code>SelectionContext</code> (app name, bounds, initial text, <code>canReplace</code>) and emits <code>writing-context</code>. The popup runs its reducer (<code>OPEN → RUN → RESULT / REPLACED / FAIL</code>), calls <code>runWritingAction</code>, and on <strong>Replace</strong> asks Rust to write back through the platform text service. Summarize / Key Points are <code>resultOnly</code> — the core refuses to treat them as replacements, including through the native command path.</p>
+      <p>Invoking Writing Tools captures a <code>SelectionContext</code> (app name, bounds, initial text, <code>canReplace</code>) and emits <code>writing-context</code>. The popup runs its reducer (<code>OPEN → RUN → RESULT / REPLACED / FAIL</code>), calls <code>runWritingAction</code>, and on <strong>Replace</strong> asks Rust to write back through the platform text service. Summarize and Key Points preview results by default. Text summaries can offer explicit replacement when the captured selection is replaceable; link summaries cannot replace a selection.</p>
 
       <h2 id="ai-client">AI client</h2>
       <p>Curated in <code>src-tauri/src/ai/mod.rs</code> (<code>SUPPORTED_GEMINI_MODELS</code>, mirrored in <code>src/ai/models.ts</code>):</p>
@@ -134,13 +134,13 @@
 endpoint   = .../v1beta/interactions
 store      = false                  // always — retention off</code></pre>
       <p>Prompts are built in <code>writing_prompt()</code> behind a guard: source text is treated as <strong>untrusted content, never instructions</strong> (system prefix in <code>mod.rs</code>), text summaries over 200,000 chars are rejected, and link summaries go through <code>link_summary.rs</code> (URL-context retrieval for pages, video input for YouTube) with a 90-second deadline vs. 20 seconds for ordinary writing calls. Successful URL-retrieval evidence is required before a webpage summary is shown.</p>
-      <div class="callout"><strong>Changing the model suggestions, blocklist, or endpoint?</strong> Edit <code>SUPPORTED_GEMINI_MODELS</code> and <code>BLOCKED_MODEL_SUBSTRINGS</code> in <code>src-tauri/src/ai/mod.rs</code>, mirror them in <code>src/ai/models.ts</code>, and update fixtures at the same time. Validation is allow-all: any well-formed model id works and only blocked non-text families are rejected. The optional backup model retries once on HTTP 429 before the error surfaces. That file is the single source of truth — there is intentionally no provider abstraction.</div>
+      <div class="callout"><strong>Changing the model suggestions, blocklist, or endpoint?</strong> Edit <code>SUPPORTED_GEMINI_MODELS</code> and <code>BLOCKED_MODEL_SUBSTRINGS</code> in <code>src-tauri/src/ai/mod.rs</code>, run <code>bun run generate:models</code> to update <code>src/ai/models.ts</code>, and update fixtures at the same time. Validation is allow-all: any well-formed model id works and only blocked non-text families are rejected. Requests try the ordered model queue until one succeeds; key or balance problems stop failover. Provider routing and pricing live in <code>src-tauri/src/ai/providers.rs</code>.</div>
 
       <h2 id="credentials">Credentials &amp; settings</h2>
       <p>Keys are saved via <code>PlatformCredentialStore</code>, tested against the Interactions API, and their status surfaced as <code>configured / untested / testing / connected / invalid / rate-limited / offline</code>. The key value itself is a <code>SecretString</code> that never serializes to the frontend. Plain preferences live in <code>settings.json</code> via <code>config/SettingsRepository</code>; <code>FrontendSettings</code> is the sanitized projection the UI may see.</p>
 
       <h2 id="why">Why it’s built this way</h2>
-      <p><strong>No provider abstraction.</strong> One model, one endpoint, one call site. Abstractions would widen the blast radius of a prompt/privacy mistake for zero current benefit.</p>
+      <p><strong>Native AI routing.</strong> Gemini, OpenCode, and custom endpoints share an ordered model queue in the Rust process. Provider keys remain in the operating-system credential store.</p>
       <p><strong>No App Sandbox on macOS.</strong> System-wide Accessibility integration is incompatible with it, so Kivo ships direct (signed + notarized) instead of via the Mac App Store.</p>
       <p><strong>A direct Windows download.</strong> Kivo uses desktop SAPI speech with installed language packs and ships as a per-user .exe. Downloads need no account; unsigned builds may show a SmartScreen warning.</p>
       <p><strong>Audio never touches Gemini.</strong> The OS engine is good and already privileged; routing voice to a cloud model would add latency, cost, and a privacy liability for no quality win.</p>
@@ -155,7 +155,7 @@ store      = false                  // always — retention off</code></pre>
           <tr><td>Frontend</td><td>Reducers + <code>nativeBridge</code>; generation counters to drop stale async results.</td></tr>
           <tr><td>Rust</td><td>OS calls stay in <code>platform/</code>; everything else goes through adapters.</td></tr>
           <tr><td>Markdown</td><td>Render AI output only through <code>SafeMarkdown</code>.</td></tr>
-          <tr><td>UI</td><td>Astryx components + StyleX (<code>src/ui</code>); theme source in <code>src/theme/kivo.ts</code>, built artefacts committed.</td></tr>
+          <tr><td>UI</td><td>Astryx components + StyleX in <code>src/features</code> and <code>src/components</code>; theme source in <code>src/theme/kivo.ts</code>, built artefacts committed.</td></tr>
           <tr><td>Theming</td><td>Astryx tokens via <code>&lt;Theme&gt;</code>; <code>data-theme</code> / <code>data-platform</code> on root.</td></tr>
         </tbody>
       </table>

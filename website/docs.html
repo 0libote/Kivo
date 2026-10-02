@@ -62,7 +62,7 @@
       <p class="lede">Everything you need to dictate, polish, and summarize — and a plain-English explanation of what happens under the hood. Developers: the <a href="dev.html">developer guide</a> covers the codebase.</p>
 
       <h2 id="getting-started">Getting started</h2>
-      <p><strong>1. Install.</strong> macOS 26 or later (signed DMG), or Windows 11 24H2+ (.exe installer). Kivo runs in the background — look for it in the menu bar / system tray.</p>
+      <p><strong>1. Install.</strong> Apple Silicon macOS 26 or later (.dmg; beta builds are ad-hoc signed), or Windows 11 24H2+ (.exe installer). Kivo runs in the background — look for it in the menu bar / system tray.</p>
       <p><strong>2. Walk through onboarding.</strong> First launch shows a short setup flow: permissions, shortcut overview, and the optional AI key. Closing Settings never quits Kivo — it keeps running quietly.</p>
       <p><strong>3. Grant permissions only when asked.</strong> Kivo never asks up front for everything. It prompts in context:</p>
       <table>
@@ -76,8 +76,8 @@
       </table>
 
       <h2 id="gemini-key">Adding your AI key</h2>
-      <p>Dictation works with no key at all — you get the raw OS transcript. Writing actions (proofread, rewrite, summarize…) need a Google AI Studio key.</p>
-      <p><strong>To add it:</strong> create a key in <strong>Google AI Studio</strong>, open Kivo → <strong>Settings → AI</strong>, paste it, and press <strong>Save key</strong>. Pick a <strong>Model</strong> from the same screen — newest text models work automatically, and you can type any model ID via Custom — then use <strong>Test connection</strong> to confirm your key can use it. Optionally set a <strong>Backup model</strong>: if the primary hits its rate limit, Kivo retries once on the backup.</p>
+      <p>Dictation works with no key at all — you get the raw OS transcript. Writing actions need a configured AI provider or a running local endpoint. Link summaries require Gemini.</p>
+      <p><strong>To configure AI:</strong> open <strong>Settings → AI</strong>, choose Gemini, OpenCode Zen, OpenCode Go, or a custom OpenAI-compatible endpoint, and save a key if required. Arrange up to five models in order, then use <strong>Test connection</strong>. Requests try your model queue in order; key or balance problems stop failover. Local endpoints can work without a key.</p>
       <div class="callout"><strong>Where’s my key stored?</strong> In macOS Keychain or Windows Credential Manager — managed entirely by the Rust process. It is never returned to the webview, never logged, and only leaves your machine inside the HTTPS request for the action you invoke.</div>
 
       <h2 id="dictation">Dictation</h2>
@@ -107,42 +107,41 @@
         <tbody>
           <tr><td>Proofread</td><td>Fixes grammar and spelling</td><td>Can replace</td></tr>
           <tr><td>Rewrite</td><td>Improves clarity and wording</td><td>Can replace</td></tr>
-          <tr><td>Concise</td><td>Shortens, keeps meaning</td><td>Can replace</td></tr>
+          <tr><td>Shorten</td><td>Shortens, keeps meaning</td><td>Can replace</td></tr>
           <tr><td>Friendly</td><td>Warms the tone</td><td>Can replace</td></tr>
           <tr><td>Professional</td><td>Polishes the tone</td><td>Can replace</td></tr>
-          <tr><td>Summarize</td><td>Short overview</td><td>Copy only</td></tr>
-          <tr><td>Key Points</td><td>Extracts essentials</td><td>Copy only</td></tr>
+          <tr><td>Summarize</td><td>Short overview</td><td>Preview first</td></tr>
+          <tr><td>Key Points</td><td>Extracts essentials</td><td>Preview first</td></tr>
           <tr><td>Custom</td><td>“Describe your change…” in your own words</td><td>Can replace</td></tr>
         </tbody>
       </table>
-      <p><strong>Replace vs. Copy:</strong> summaries and key points never overwrite your selection — the result stays in the popup until you copy it. Everything else offers <strong>Replace</strong> (writes back into your app) and <strong>Copy</strong>.</p>
+      <p><strong>Replace vs. Copy:</strong> summaries and key points preview a result first. Text results offer <strong>Copy</strong> and can offer explicit <strong>Replace</strong> when the captured selection allows it. Link summaries can only be copied.</p>
       <h3>Nothing selected?</h3>
-      <p>With nothing selected, the shortcut opens the summarize entry instead: paste an article or transcript, or switch to <strong>Link</strong> for a public webpage or YouTube URL. There’s nothing to replace, so results can only be copied.</p>
+      <p>With nothing selected, Kivo asks you to select text first. Highlight the text or a public webpage or YouTube URL, then invoke Writing Tools.</p>
       <h3>Keyboard-first</h3>
-      <p>Arrow keys move through actions, <kbd>Enter</kbd> runs, typing jumps straight to a custom instruction, <kbd>esc</kbd> goes back or closes. Toggle <strong>Editable selected text</strong> in Settings if you want to tweak the captured highlight before running an action.</p>
+      <p>Arrow keys move through actions, <kbd>Enter</kbd> runs, typing jumps straight to a custom instruction, <kbd>esc</kbd> goes back or closes.</p>
 
       <h2 id="summarize">Summaries: articles, text &amp; video</h2>
-      <p>Three ways in, one tidy result with its source URL attached:</p>
+      <p>Select text to summarize it, or select a public link to preview a summary with its source URL:</p>
       <table>
         <thead><tr><th>Entry point</th><th>Use when</th></tr></thead>
         <tbody>
           <tr><td>Summarize (with text selected)</td><td>You already highlighted an article or transcript.</td></tr>
-          <tr><td>Summarize link…</td><td>You have a public webpage or YouTube URL. A selected URL is prefilled.</td></tr>
-          <tr><td>Summarize text…</td><td>You want to paste an article or transcript manually (no selection needed).</td></tr>
+          <tr><td>Writing Tools (with a URL selected)</td><td>The selected public webpage or YouTube URL opens the link summary choice when Summarize is enabled.</td></tr>
         </tbody>
       </table>
-      <div class="callout"><strong>Good to know.</strong> Webpages are retrieved via Gemini’s URL context; YouTube links use its video input. Only the link you submit is sent — Kivo never reads your tabs, cookies, or history. Private/unlisted videos and paywalled or sign-in pages aren’t supported; if retrieval fails, choose <strong>Paste text instead</strong>.</div>
+      <div class="callout"><strong>Good to know.</strong> Webpages are retrieved via Gemini’s URL context; YouTube links use its video input. Only the link you submit is sent — Kivo never reads your tabs, cookies, or history. Private/unlisted videos and paywalled or sign-in pages aren’t supported; if retrieval fails, close the popup, select the article text or transcript, and invoke Summarize again.</div>
 
       <h2 id="settings">Settings tour</h2>
       <p><strong>General</strong> — launch at login, appearance (System/Light/Dark), idle Flow Bar, start in background.</p>
       <p><strong>Dictation</strong> — shortcut recorder, microphone, language, AI cleanup, sound feedback.</p>
-      <p><strong>Writing Tools</strong> — shortcut, popup placement (Cursor / Selection / Fixed + size), editable text box, per-action toggles with reset.</p>
-      <p><strong>AI</strong> — key management, connection status, link to Google AI Studio.</p>
-      <p><strong>About</strong> — version and update check: stable releases offer in-app <strong>Download and Install</strong> plus <strong>Restart now</strong>, with a GitHub download fallback; beta builds download manually.</p>
+      <p><strong>Writing Tools</strong> — shortcut and configurable writing actions with reset.</p>
+      <p><strong>AI</strong> — provider selection, key management, connection testing, and an ordered model queue. Local AI endpoints are supported.</p>
+      <p><strong>About</strong> — version and update check: stable releases offer in-app <strong>Download and Install</strong> plus <strong>Restart now</strong>, with a GitHub download fallback; beta installations can also follow the rolling beta through in-app updates when updater signing is configured.</p>
 
       <h2 id="how-it-works">How it works (the short version)</h2>
       <p>Kivo is one app with four small windows: the <strong>Flow Bar</strong> (dictation pill), <strong>Writing Tools</strong> (selection popup), <strong>Settings</strong>, and <strong>Onboarding</strong>. The visible interface is just presentation — all privileged work (shortcuts, window placement, speech, text replacement, credentials, Gemini calls) happens in the trusted Rust process.</p>
-      <p>Voice audio goes to your OS speech engine and comes back as text. That text is inserted locally. Only when <em>you</em> run a writing action or summary does text travel — directly, over HTTPS, to Gemini with retention off (<code>store: false</code>). Closing a popup cancels the pending request and discards late results.</p>
+      <p>Voice audio goes to your OS speech engine and comes back as text. That text is inserted locally. Writing actions, summaries, and optional AI dictation cleanup send text to the provider chosen in Settings. Local endpoints keep these requests on your computer. Link summaries require Gemini. Closing a popup cancels the pending request and discards late results.</p>
 
       <h2 id="shortcuts">Shortcuts</h2>
       <table>
@@ -176,7 +175,7 @@
       <h3>Replace doesn’t work in an app</h3>
       <p>Replacement needs native Accessibility (Mac) / UI Automation (Windows) access to the target app. If the OS can’t preserve the selection there, Kivo fails safely instead of mangling your text — use <strong>Copy</strong> and paste manually.</p>
       <h3>Link summary failed</h3>
-      <p>Confirm the page or video is public, then try <strong>Paste text instead</strong> with the article text or transcript.</p>
+      <p>Confirm the page or video is public. If retrieval fails, select its text or transcript and invoke Summarize again.</p>
 
       <div class="pager">
         <a href="index.html"><small>← Back to</small><strong>Landing page</strong></a>

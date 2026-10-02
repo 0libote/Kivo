@@ -76,7 +76,11 @@ jobs:
         with:
           tagName: app-v__VERSION__
           releaseName: Kivo __VERSION__
-          releaseBody: See the attached installers and update manifest.
+          releaseBody: |
+            Install Kivo using the macOS .dmg (Apple Silicon, macOS 26+) or Windows -setup.exe (Windows 11 24H2+).
+
+            The .app.tar.gz, .sig, and latest.json assets are used by the in-app updater.
+            See https://github.com/0libote/Kivo/blob/main/docs/releasing.md for installation and signing details.
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
@@ -140,7 +144,11 @@ jobs:
         with:
           tagName: app-v__VERSION__
           releaseName: Kivo __VERSION__
-          releaseBody: See the attached installers and update manifest.
+          releaseBody: |
+            Install Kivo using the macOS .dmg (Apple Silicon, macOS 26+) or Windows -setup.exe (Windows 11 24H2+).
+
+            The .app.tar.gz, .sig, and latest.json assets are used by the in-app updater.
+            See https://github.com/0libote/Kivo/blob/main/docs/releasing.md for installation and signing details.
           releaseDraft: true
           prerelease: false
           args: --bundles nsis --config src-tauri/target/release-tauri.conf.json

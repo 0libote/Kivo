@@ -200,6 +200,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     const mode = state.mode;
     if (mode === "closed" || !element) return;
     let frame = 0;
+    let reportedHeight: number | undefined;
     const reportHeight = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -207,19 +208,18 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         // user's maximum, while the harness can still observe menu changes.
         const content =
           element.querySelector<HTMLElement>("[data-writing-menu]") ?? element.firstElementChild;
-        void nativeBridge
-          .setSurfaceMode(
-            "writing-tools",
-            mode,
-            (content instanceof HTMLElement ? content.scrollHeight : element.scrollHeight) + 4,
-          )
-          .catch(() => {});
+        const height =
+          (content instanceof HTMLElement ? content.scrollHeight : element.scrollHeight) + 4;
+        if (height === reportedHeight) return;
+        reportedHeight = height;
+        void nativeBridge.setSurfaceMode("writing-tools", mode, height).catch(() => {});
       });
     };
     const observer = new ResizeObserver(reportHeight);
     const mutationObserver = new MutationObserver(reportHeight);
     observer.observe(element);
-    mutationObserver.observe(element, { attributes: true, childList: true, subtree: true });
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    mutationObserver.observe(element, { characterData: true, childList: true, subtree: true });
     reportHeight();
     return () => {
       observer.disconnect();
@@ -423,6 +423,11 @@ interface MenuViewProps {
 
 function MenuView(props: MenuViewProps) {
   const { presets, applicationName, close, dispatch, runAction, selectedIndex } = props;
+  const menu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const actions = menu.current?.querySelectorAll<HTMLButtonElement>("[data-writing-action]");
+    actions?.[selectedIndex]?.focus();
+  }, [selectedIndex]);
   const renderAction = (action: WritingPreset, index: number) => (
     <button
       aria-label={action.label}
@@ -432,6 +437,7 @@ function MenuView(props: MenuViewProps) {
       onClick={() => void runAction(action.id)}
       onFocus={() => dispatch({ type: "SELECT", index })}
       role="menuitem"
+      tabIndex={index === selectedIndex ? 0 : -1}
       type="button"
       {...stylex.props(styles.action, index === selectedIndex && styles.actionSelected)}
     >
@@ -460,7 +466,7 @@ function MenuView(props: MenuViewProps) {
           xstyle={styles.overlayIconButton}
         />
       </div>
-      <div aria-label="Writing actions" role="menu" {...stylex.props(styles.actions)}>
+      <div aria-label="Writing actions" ref={menu} role="menu" {...stylex.props(styles.actions)}>
         {presets.map((preset, index) => renderAction(preset, index))}
       </div>
     </div>
@@ -589,6 +595,8 @@ function ResultView({
   sourceText,
 }: ResultViewProps) {
   const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [costEstimate, setCostEstimate] = useState<number | null>(null);
   const tokenEstimate = Math.ceil((sourceText.length + resultText.length) / 4);
@@ -666,7 +674,8 @@ function ResultView({
               .copyText(resultText)
               .then(() => {
                 setCopied(true);
-                window.setTimeout(() => setCopied(false), 1000);
+                window.clearTimeout(copyTimer.current);
+                copyTimer.current = window.setTimeout(() => setCopied(false), 1000);
               })
               .catch(() =>
                 setCopyError(

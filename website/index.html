@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on macOS and Windows. No accounts, no telemetry — OS-native speech, optional Gemini polish." />
+  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on macOS and Windows. No accounts, no telemetry — System or on-device speech, optional AI polish." />
   <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)" />
   <title>Kivo — Talk instead of type</title>
@@ -144,12 +144,12 @@
         <article class="card">
           <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div>
           <h3>Summarize links &amp; video</h3>
-          <p>Drop in a public webpage or YouTube URL. Kivo retrieves it through Gemini’s URL context and returns a tight summary — with its source attached.</p>
+          <p>Select a public webpage or YouTube URL and open Writing Tools. Gemini retrieves the content and previews a summary with its source attached.</p>
         </article>
         <article class="card">
           <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
           <h3>Private by construction</h3>
-          <p>Microphone audio never leaves the OS speech engine. Text reaches Gemini only for the action you invoke, with retention off. API keys live in Keychain / Credential Manager.</p>
+          <p>Choose system speech or on-device transcription. Writing actions and optional AI cleanup use your chosen provider; local AI stays on your computer. Keys live in Keychain / Credential Manager.</p>
         </article>
       </div>
     </section>
@@ -160,10 +160,10 @@
       <div class="privacy">
         <div>
           <h2>Your words take the shortest possible trip.</h2>
-          <p class="section__sub" style="margin-bottom:0">No hosted backend, no provider abstraction, no analytics. The table shows exactly where each kind of data goes.</p>
+          <p class="section__sub" style="margin-bottom:0">No Kivo account, hosted backend, or telemetry. The table shows exactly where each kind of data goes.</p>
           <ul class="checklist">
-            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Microphone audio → OS speech engine only. Never sent to Gemini.</li>
-            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Selected text → Gemini only when you run an action, with <code>store: false</code>.</li>
+            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Microphone audio → system speech or an on-device model. Never sent to the writing AI provider.</li>
+            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Selected text → your chosen provider when you run a writing action.</li>
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>API keys are stored by the OS and never returned to the webview.</li>
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No logs of transcripts, selections, clipboard, or credentials.</li>
           </ul>
@@ -172,9 +172,9 @@
           <table class="flow-table" aria-label="Where your data goes">
             <thead><tr><th>Data</th><th>Destination</th></tr></thead>
             <tbody>
-              <tr><td>Voice audio</td><td><span class="pill pill--local">OS only</span><br />macOS SpeechAnalyzer · Desktop SAPI speech</td></tr>
-              <tr><td>Dictated transcript</td><td><span class="pill pill--local">Local insert</span><br />Optional Gemini cleanup if you enable it</td></tr>
-              <tr><td>Writing action text</td><td><span class="pill pill--ok">Gemini, on invoke</span><br />Direct HTTPS, retention off</td></tr>
+              <tr><td>Voice audio</td><td><span class="pill pill--local">Chosen speech engine</span><br />System speech or on-device transcription</td></tr>
+              <tr><td>Dictated transcript</td><td><span class="pill pill--local">Local insert</span><br />Optional AI cleanup through your chosen provider</td></tr>
+              <tr><td>Writing action text</td><td><span class="pill pill--ok">Chosen AI provider</span><br />Hosted API or local endpoint</td></tr>
               <tr><td>API key</td><td><span class="pill pill--local">OS vault</span><br />Keychain · Credential Manager</td></tr>
             </tbody>
           </table>
@@ -190,7 +190,7 @@
       <div class="platforms">
         <div class="platform">
           <h3>macOS 26+</h3>
-          <p>Signed &amp; notarized app + DMG. Direct distribution — the App Sandbox is intentionally off so system-wide Accessibility can work.</p>
+          <p>Apple Silicon app + DMG. Stable builds use Developer ID signing and notarization when configured; beta builds are ad-hoc signed. Direct distribution — the App Sandbox is intentionally off so system-wide Accessibility can work.</p>
           <code>SpeechAnalyzer · DictationTranscriber · Keychain</code>
         </div>
         <div class="platform">
@@ -228,7 +228,7 @@
         <a class="btn btn--primary" href="https://github.com/0libote/Kivo" target="_blank" rel="noopener">Get Kivo on GitHub</a>
         <a class="btn btn--ghost-light" href="docs.html#getting-started">Setup guide</a>
       </div>
-      <p class="cta__note">macOS 26+ · Windows 11 24H2+ &nbsp;·&nbsp; Bring your own Gemini API key for writing actions</p>
+      <p class="cta__note">macOS 26+ · Windows 11 24H2+ &nbsp;·&nbsp; Choose a hosted AI provider or local endpoint</p>
     </section>
   </main>
 
