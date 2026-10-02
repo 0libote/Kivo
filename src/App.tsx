@@ -70,9 +70,9 @@ export function App() {
     };
   }, []);
 
-  // Windows Voz owns a dedicated worker inside the persistent flow-bar
-  // WebView2. The SDK and ONNX runtime remain lazy until a Voz operation asks
-  // the worker to download, prepare, or transcribe.
+  // Windows Voz owns a tiny dedicated worker inside the persistent flow-bar
+  // WebView2. The SDK plus ONNX/LiteRT runtimes are not shipped in Kivo; the
+  // worker downloads the pinned runtime only when a Voz operation needs it.
   useEffect(() => {
     if (!nativeBridge.isNative || context.platform !== "windows" || context.surface !== "flow-bar")
       return;
