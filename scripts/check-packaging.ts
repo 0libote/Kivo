@@ -147,7 +147,7 @@ const csp = (
 const cspDirectives = new Map(
   csp
     .split(";")
-    .map((directive) => directive.trim().split(/\\s+/))
+    .map((directive) => directive.trim().split(/\s+/))
     .filter(([name]) => name)
     .map(([name, ...sources]) => [name, new Set(sources)] as const),
 );
