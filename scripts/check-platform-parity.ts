@@ -388,11 +388,12 @@ check(
   "the Apple bridge must pin and disable SDK usage reporting for Voz/Ear",
 );
 check(
-  "Windows hosts the browser SDK in a lazy flow-bar worker",
-  vozWorker.includes('import("@desert-ant-labs/voz")') &&
-    vozWorker.includes('import("@desert-ant-labs/ear")') &&
+  "Windows loads the pinned browser SDK on demand in the flow-bar worker",
+  vozWorker.includes("/* @vite-ignore */") &&
+    vozWorker.includes("@desert-ant-labs/voz@3.5.0/+esm") &&
+    vozWorker.includes("@desert-ant-labs/ear@3.5.0/+esm") &&
     appTs.includes('context.surface !== "flow-bar"'),
-  "Voz/Ear imports should remain lazy and confined to the Windows flow-bar worker",
+  "Voz/Ear runtime URLs should remain version-pinned, runtime-only imports confined to the Windows flow-bar worker",
 );
 check(
   "Windows Voz worker validates message origin without rejecting WebView2 worker traffic",
