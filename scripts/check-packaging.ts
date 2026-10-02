@@ -127,10 +127,7 @@ check(
     viteSource.includes("voz.worker.stub.ts"),
   "the Windows worker should not enter macOS/Linux frontend output",
 );
-const vozWorkerSource = readFileSync(
-  join(root, "src/features/dictation/voz.worker.ts"),
-  "utf8",
-);
+const vozWorkerSource = readFileSync(join(root, "src/features/dictation/voz.worker.ts"), "utf8");
 check(
   "Windows Voz ML runtime is downloaded instead of bundled",
   vozWorkerSource.includes("/* @vite-ignore */") &&
@@ -142,12 +139,22 @@ check(
     !vozWorkerSource.includes('await import("@desert-ant-labs/ear")'),
   "Voz/Ear/ONNX/LiteRT must remain version-pinned remote imports so they do not inflate the NSIS installer",
 );
-const tauriConfigSource = readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8");
+const csp = (
+  JSON.parse(readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8")) as {
+    app: { security: { csp: string } };
+  }
+).app.security.csp;
+const cspDirectives = new Map(
+  csp
+    .split(";")
+    .map((directive) => directive.trim().split(/\\s+/))
+    .filter(([name]) => name)
+    .map(([name, ...sources]) => [name, new Set(sources)] as const),
+);
 check(
   "Voz runtime CDN is allowed by the desktop CSP",
-  tauriConfigSource.includes("script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net") &&
-    tauriConfigSource.includes("connect-src ipc:") &&
-    tauriConfigSource.includes("https://cdn.jsdelivr.net"),
+  cspDirectives.get("script-src")?.has("https://cdn.jsdelivr.net") === true &&
+    cspDirectives.get("connect-src")?.has("https://cdn.jsdelivr.net") === true,
   "the on-demand Windows runtime cannot load unless jsDelivr is allowed for scripts and fetches",
 );
 const vozBuildSource = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
