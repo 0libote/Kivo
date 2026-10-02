@@ -18,17 +18,29 @@ test("writing menu moves keyboard focus and ignores animation-only resize mutati
     const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
     const original = nativeBridge.setSurfaceMode;
     let calls = 0;
-    nativeBridge.setSurfaceMode = async () => {
+    nativeBridge.setSurfaceMode = () => {
       calls += 1;
+      return Promise.resolve();
     };
     try {
       const surface = document.querySelector<HTMLDialogElement>("dialog")?.firstElementChild;
       if (!(surface instanceof HTMLElement)) throw new Error("Missing writing surface");
-      for (let index = 0; index < 12; index += 1) {
-        surface.style.opacity = String(index % 2 ? 1 : 0.95);
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      }
-      surface.style.opacity = "1";
+      // Change styles on successive frames to exercise animation mutations
+      // without introducing concurrent work or awaiting inside a loop.
+      await new Promise<void>((resolve) => {
+        let index = 0;
+        const animateFrame = () => {
+          if (index === 12) {
+            surface.style.opacity = "1";
+            resolve();
+            return;
+          }
+          surface.style.opacity = String(index % 2 ? 1 : 0.95);
+          index += 1;
+          requestAnimationFrame(animateFrame);
+        };
+        requestAnimationFrame(animateFrame);
+      });
       return calls;
     } finally {
       nativeBridge.setSurfaceMode = original;
