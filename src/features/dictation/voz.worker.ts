@@ -7,9 +7,38 @@ import type {
   VozWorkerRequest,
 } from "./voz-worker-types";
 
+// Keep the Windows installer free of the browser ML stack. These exact,
+// version-pinned modules are fetched only when the user installs/prepares Voz.
+// jsDelivr serves immutable npm versions, and the model weights themselves
+// remain pinned/verified by Desert Ant's SDK.
+const EAR_SDK_URL = "https://cdn.jsdelivr.net/npm/@desert-ant-labs/ear@3.5.0/+esm";
+const VOZ_SDK_URL = "https://cdn.jsdelivr.net/npm/@desert-ant-labs/voz@3.5.0/+esm";
+const LITERT_URL = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/+esm";
+const LITERT_WASM_DIR = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/";
+const ORT_WEBGPU_URL =
+  "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs";
+
+type EarConstructor = {
+  load(options?: {
+    litert?: unknown;
+    litertWasmDir?: string;
+    onProgress?: (fraction: number) => void;
+  }): Promise<EarModel>;
+};
+
+type VozConstructor = {
+  load(options?: { ort?: unknown; onProgress?: (fraction: number) => void }): Promise<VozModel>;
+};
+
+type EarModule = { Ear: EarConstructor };
+type VozModule = { Voz: VozConstructor };
+
 let recognizer: VozModel | null = null;
 let loadPromise: Promise<VozModel> | null = null;
 let identifier: EarModel | null = null;
+let earRuntimePromise: Promise<{ Ear: EarConstructor; litert: unknown }> | null = null;
+let vozRuntimePromise: Promise<{ Voz: VozConstructor; ort: unknown }> | null = null;
+
 const stateCache = "kivo-voz-state";
 const languageCheckReadyPath = "/voz-language-check-ready";
 const vozModelReadyPath = "/voz-model-ready";
@@ -43,11 +72,59 @@ function progress(requestId: string, phase: VozModelPhase, amount: number | null
   send({ requestId, complete: false, phase, progress: amount });
 }
 
+async function importRemote<T>(url: string): Promise<T> {
+  try {
+    // The URL is deliberately opaque to Vite: following it at build time would
+    // put the Voz/Ear/ONNX/LiteRT chunks straight back into the installer.
+    return (await import(/* @vite-ignore */ url)) as T;
+  } catch (cause) {
+    throw new Error(
+      "Kivo could not download the Windows Voz runtime. Check your internet connection and retry.",
+      { cause },
+    );
+  }
+}
+
+async function loadEarRuntime(requestId: string) {
+  if (!earRuntimePromise) {
+    progress(requestId, "downloading");
+    earRuntimePromise = Promise.all([
+      importRemote<EarModule>(EAR_SDK_URL),
+      importRemote<Record<string, unknown>>(LITERT_URL),
+    ])
+      .then(([ear, litert]) => ({ Ear: ear.Ear, litert }))
+      .catch((error) => {
+        earRuntimePromise = null;
+        throw error;
+      });
+  }
+  return earRuntimePromise;
+}
+
+async function loadVozRuntime(requestId: string) {
+  if (!vozRuntimePromise) {
+    progress(requestId, "downloading");
+    vozRuntimePromise = Promise.all([
+      importRemote<VozModule>(VOZ_SDK_URL),
+      importRemote<unknown>(ORT_WEBGPU_URL),
+    ])
+      .then(([voz, ort]) => ({ Voz: voz.Voz, ort }))
+      .catch((error) => {
+        vozRuntimePromise = null;
+        throw error;
+      });
+  }
+  return vozRuntimePromise;
+}
+
 async function loadEar(requestId: string) {
   if (identifier) return identifier;
-  const { Ear } = await import("@desert-ant-labs/ear");
-  progress(requestId, "downloading");
-  identifier = await Ear.load();
+  const { Ear, litert } = await loadEarRuntime(requestId);
+  identifier = await Ear.load({
+    litert,
+    litertWasmDir: LITERT_WASM_DIR,
+    onProgress: (fraction: number) => progress(requestId, "downloading", fraction),
+  });
   await setLanguageCheckReady(true);
   return identifier;
 }
@@ -56,9 +133,10 @@ async function load(requestId: string, needsDownload: boolean) {
   if (recognizer) return recognizer;
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    const { Voz } = await import("@desert-ant-labs/voz");
+    const { Voz, ort } = await loadVozRuntime(requestId);
     if (needsDownload) progress(requestId, "downloading");
     const loaded = await Voz.load({
+      ort,
       onProgress: (fraction: number) => progress(requestId, "downloading", fraction),
     });
     progress(requestId, "preparing");

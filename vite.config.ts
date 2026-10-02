@@ -20,9 +20,9 @@ export default defineConfig({
   resolve: windowsVozWorker
     ? undefined
     : {
-        // The Web SDK and ONNX WASM are only needed by Windows WebView2.
-        // Keep macOS/Linux app bundles and the browser test harness free of
-        // those large worker runtime assets.
+        // The Windows WebView2 owns the Voz loader worker. macOS/Linux use a
+        // stub so they do not ship even that loader; the heavy SDK/ML runtime
+        // is fetched by the Windows worker on demand and is never in dist.
         alias: [
           {
             find: fileURLToPath(new URL("./src/features/dictation/voz.worker.ts", import.meta.url)),
@@ -40,9 +40,9 @@ export default defineConfig({
   },
   worker: { format: "es" },
   optimizeDeps: {
-    // These SDKs contain large WASM bundles and are reachable only from the
-    // lazily started Voz worker. Don't scan/prebundle them for the Linux UI
-    // harness or normal window startup.
+    // The production Voz worker imports version-pinned CDN modules at runtime.
+    // These packages remain installed for typechecking, but Vite must not
+    // prebundle them into dev or production frontend output.
     exclude: ["@desert-ant-labs/voz", "@desert-ant-labs/ear", "onnxruntime-web", "@litertjs/core"],
   },
 });
