@@ -18,17 +18,29 @@ const LITERT_WASM_DIR = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/
 const ORT_WEBGPU_URL =
   "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs";
 
+type EarConstructor = {
+  load(options?: {
+    litert?: unknown;
+    litertWasmDir?: string;
+    onProgress?: (fraction: number) => void;
+  }): Promise<EarModel>;
+};
+
+type VozConstructor = {
+  load(options?: {
+    ort?: unknown;
+    onProgress?: (fraction: number) => void;
+  }): Promise<VozModel>;
+};
+
+type EarModule = { Ear: EarConstructor };
+type VozModule = { Voz: VozConstructor };
+
 let recognizer: VozModel | null = null;
 let loadPromise: Promise<VozModel> | null = null;
 let identifier: EarModel | null = null;
-let earRuntimePromise: Promise<{
-  Ear: typeof import("@desert-ant-labs/ear").Ear;
-  litert: unknown;
-}> | null = null;
-let vozRuntimePromise: Promise<{
-  Voz: typeof import("@desert-ant-labs/voz").Voz;
-  ort: unknown;
-}> | null = null;
+let earRuntimePromise: Promise<{ Ear: EarConstructor; litert: unknown }> | null = null;
+let vozRuntimePromise: Promise<{ Voz: VozConstructor; ort: unknown }> | null = null;
 
 const stateCache = "kivo-voz-state";
 const languageCheckReadyPath = "/voz-language-check-ready";
@@ -80,8 +92,8 @@ async function loadEarRuntime(requestId: string) {
   if (!earRuntimePromise) {
     progress(requestId, "downloading");
     earRuntimePromise = Promise.all([
-      importRemote<typeof import("@desert-ant-labs/ear")>(EAR_SDK_URL),
-      importRemote<typeof import("@litertjs/core")>(LITERT_URL),
+      importRemote<EarModule>(EAR_SDK_URL),
+      importRemote<Record<string, unknown>>(LITERT_URL),
     ])
       .then(([ear, litert]) => ({ Ear: ear.Ear, litert }))
       .catch((error) => {
@@ -96,7 +108,7 @@ async function loadVozRuntime(requestId: string) {
   if (!vozRuntimePromise) {
     progress(requestId, "downloading");
     vozRuntimePromise = Promise.all([
-      importRemote<typeof import("@desert-ant-labs/voz")>(VOZ_SDK_URL),
+      importRemote<VozModule>(VOZ_SDK_URL),
       importRemote<unknown>(ORT_WEBGPU_URL),
     ])
       .then(([voz, ort]) => ({ Voz: voz.Voz, ort }))
