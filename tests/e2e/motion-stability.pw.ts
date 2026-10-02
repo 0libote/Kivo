@@ -1,4 +1,41 @@
 import { expect, type Page, test } from "@playwright/test";
+import type { NativeBridge } from "../../src/platform/native";
+
+test("writing menu moves keyboard focus and ignores animation-only resize mutations", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 344, height: 420 });
+  await page.goto("/?surface=writing-tools&harness=1");
+  const first = page.getByRole("menuitem", { name: "Proofread", exact: true });
+  await expect(first).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  const selected = page.locator('[data-writing-action][data-selected="true"]');
+  await expect(selected).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await expect(first).toBeFocused();
+  const calls = await page.evaluate(async () => {
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
+    const original = nativeBridge.setSurfaceMode;
+    let calls = 0;
+    nativeBridge.setSurfaceMode = async () => {
+      calls += 1;
+    };
+    try {
+      const surface = document.querySelector<HTMLDialogElement>("dialog")?.firstElementChild;
+      if (!(surface instanceof HTMLElement)) throw new Error("Missing writing surface");
+      for (let index = 0; index < 12; index += 1) {
+        surface.style.opacity = String(index % 2 ? 1 : 0.95);
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      surface.style.opacity = "1";
+      return calls;
+    } finally {
+      nativeBridge.setSurfaceMode = original;
+    }
+  });
+  expect(calls).toBeLessThanOrEqual(1);
+});
 
 function failOnConsoleErrors(page: Page) {
   const errors: string[] = [];

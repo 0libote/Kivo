@@ -520,21 +520,24 @@ jobs:
             fi
           fi
           KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$mac_archive" "$win_installer"
+          notes_file="${RUNNER_TEMP}/kivo-beta-notes.md"
+          cp packaging/beta-release-notes.md "$notes_file"
+          printf '\nBuild: `%s` · Version: `%s` · Built: %s\n' "$GITHUB_SHA" "$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$notes_file"
           # Keep the old release available if an upload fails. Publish the
           # manifest last, after its corresponding assets have arrived.
           if ! gh release view continuous > /dev/null 2>&1; then
             gh release create continuous \
               --target "$GITHUB_SHA" \
               --prerelease \
-              --title "Kivo continuous (beta)" \
-              --notes "Rolling unsigned beta pre-release rebuilt from every commit to main."
+              --title "Kivo — latest beta" \
+              --notes-file "$notes_file"
           fi
           gh release upload continuous "$dmg" "$mac_archive" "$mac_archive.sig" "$win_installer" "$win_installer.sig" --clobber
           gh release upload continuous beta/continuous.json --clobber
           gh release edit continuous \
             --prerelease \
-            --title "Kivo continuous (beta)" \
-            --notes "Rolling ad-hoc-signed beta from main ${GITHUB_SHA}. Built $(date -u +%Y-%m-%dT%H:%M:%SZ). macOS (Apple Silicon, macOS 26+): easiest is curl -fsSL --proto '=https' --tlsv1.2 https://raw.githubusercontent.com/0libote/Kivo/main/scripts/install-macos.sh | bash. Manual DMG install: drag Kivo.app to /Applications, then run xattr -dr com.apple.quarantine /Applications/Kivo.app once and approve in System Settings > Privacy & Security on first launch (right-click > Open no longer bypasses Gatekeeper on recent macOS; do NOT trash the app, it is not damaged). Windows: run the *-setup.exe installer (SmartScreen: More info -> Run anyway). Prefer stable app-v* releases when available."
+            --title "Kivo — latest beta" \
+            --notes-file "$notes_file"
           # Keep the tag behind the release page's Source code links aligned
           # with the binary SHA after every asset has been published.
           gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \

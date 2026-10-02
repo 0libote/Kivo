@@ -46,11 +46,11 @@ bunx --bun wrangler pages deploy website --project-name kivo
 
 ## Design
 
-Tokens mirror `src/styles/globals.css` (`--bg #f5f5f3`, `--accent #0869d7/#4c9cff`, radius 12/7, system font) with automatic light/dark via `prefers-color-scheme` plus a manual toggle persisted to `localStorage`. Layout takes cues from Whispr Flow: centered hero, quiet borders, generous whitespace, bento-ish feature grid.
+The standalone site defines its own tokens in `website/styles.css`. It follows the system appearance and provides a manual theme toggle persisted to `localStorage`. The desktop app uses the Astryx theme in `src/theme/kivo.ts`.
 
 ## Keeping docs accurate
 
 - Writing actions table ↔ `src/features/writing-tools/actions.ts`
 - Model/endpoint/deadlines ↔ `src-tauri/src/ai/mod.rs` (`GEMINI_MODEL`, `store: false`, 200k-char summary cap)
 - Surfaces/shortcuts/defaults ↔ `src/types.ts` (`defaultSettings`), `src-tauri/src/lib.rs`, `src-tauri/src/shell.rs`
-- Permissions/platforms/packaging ↔ root `README.md`
+- Permissions/platforms/packaging ↔ `docs/user-guide.md`, `docs/releasing.md`, and root `README.md`

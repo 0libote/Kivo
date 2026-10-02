@@ -69,7 +69,9 @@ Run the whole gate before finishing a change:
 bun run check       # typecheck, Biome, Oxlint, Knip, theme:check, bun test, bridge/packaging/parity gates
 bun test:ui         # Playwright browser harness
 bun run build
-bun check:rust && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+bun run check:rust
+bun run lint:rust
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
 
 Lefthook runs Biome + Oxlint on staged files at commit time and typecheck +

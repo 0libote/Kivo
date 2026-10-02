@@ -2,6 +2,37 @@ import { describe, expect, it } from "bun:test";
 import { dictationReducer, initialDictationState } from "./state";
 
 describe("dictationReducer", () => {
+  it("accepts native snapshots even when earlier events were missed", () => {
+    const processing = dictationReducer(initialDictationState, {
+      type: "SNAPSHOT",
+      snapshot: { status: "processing", sessionId: "session-3" },
+    });
+    expect(processing).toMatchObject({ status: "processing", sessionId: "session-3" });
+    expect(
+      dictationReducer(initialDictationState, {
+        type: "SNAPSHOT",
+        snapshot: { status: "success" },
+      }).status,
+    ).toBe("success");
+    const failed = dictationReducer(processing, {
+      type: "FAIL",
+      message: "No microphone",
+      canRetry: true,
+    });
+    expect(dictationReducer(failed, { type: "SNAPSHOT", snapshot: { status: "idle" } })).toEqual({
+      ...initialDictationState,
+      status: "idle",
+    });
+  });
+
+  it("keeps malformed audio levels out of animations", () => {
+    const listening = dictationReducer(initialDictationState, { type: "LISTEN" });
+    expect(dictationReducer(listening, { type: "LEVEL", level: Number.NaN }).level).toBe(0);
+    expect(
+      dictationReducer(listening, { type: "LEVEL", level: Number.POSITIVE_INFINITY }).level,
+    ).toBe(0);
+  });
+
   it("moves through a successful hold-to-dictate session", () => {
     const listening = dictationReducer(initialDictationState, {
       type: "LISTEN",
