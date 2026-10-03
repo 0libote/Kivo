@@ -38,6 +38,16 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ShellState::new())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                // LSUIElement=true hides the Dock icon in the bundled .app,
+                // but dev runs (`bun run dev` / `cargo run`) never read the
+                // bundle Info.plist and Tauri starts as Regular. Force the
+                // accessory policy so Kivo lives in the menu bar, not the
+                // Dock, in both cases. Settings/onboarding windows still
+                // show and focus; they just don't gain a Dock tile.
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
