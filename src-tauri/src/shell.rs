@@ -1880,8 +1880,9 @@ mod tests {
         let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
             .expect("menu bar icon must decode");
         assert_eq!((icon.width(), icon.height()), (44, 44));
-        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 0));
-        assert!(icon.rgba().chunks_exact(4).any(|pixel| pixel[3] == 255));
+        let (pixels, _) = icon.rgba().as_chunks::<4>();
+        assert!(pixels.iter().any(|pixel| pixel[3] == 0));
+        assert!(pixels.iter().any(|pixel| pixel[3] == 255));
         assert_eq!(icon.rgba()[3], 0, "template must not have an opaque tile");
     }
 
