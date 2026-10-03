@@ -1628,9 +1628,11 @@ pub fn reset_permission_grants(
 /// `tccutil reset All <bundle-id>` drops every TCC grant for Kivo's bundle
 /// id (Accessibility, Input Monitoring, Microphone, Speech Recognition)
 /// without touching other apps. Per-user database, so no sudo needed.
+/// Absolute path: GUI-launched apps inherit a sparse PATH where a bare
+/// lookup can fail (same reason copy_text uses /usr/bin/pbcopy).
 #[cfg(target_os = "macos")]
 fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
-    let output = std::process::Command::new("tccutil")
+    let output = std::process::Command::new("/usr/bin/tccutil")
         .args(["reset", "All", "com.kivo.desktop"])
         .output()
         .map_err(|_| {
