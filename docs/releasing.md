@@ -6,17 +6,28 @@
 
 ### macOS
 
-`bun tauri build` produces the macOS app and DMG. The bundle is ad-hoc signed by default (`signingIdentity: "-"` in `src-tauri/tauri.conf.json`, free, no certificate needed) so Gatekeeper shows a recoverable unverified-developer approval instead of the dead-end "damaged" dialog. The stable release workflow overrides this with a real Developer ID via `APPLE_SIGNING_IDENTITY` when the Apple signing/notarization secrets are configured. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
+`bun tauri build` produces the macOS app and DMG. The bundle is ad-hoc signed by default (`signingIdentity: "-"` in `src-tauri/tauri.conf.json`, free, no certificate needed) to give the app and bundled native code complete signatures. This does not make the app Apple-verified; downloaded builds can still be blocked by Gatekeeper. The stable release workflow overrides this with a real Developer ID via `APPLE_SIGNING_IDENTITY` when the Apple signing/notarization secrets are configured. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
 
-Beta builds are available from the [continuous releases](https://github.com/0libote/Kivo/releases/tag/continuous). Download the DMG and install it manually.
+Beta builds are available from the [continuous releases](https://github.com/0libote/Kivo/releases/tag/continuous). Both release workflows use Developer ID signing and notarization when the Apple secrets are configured; otherwise they keep free ad-hoc signing. Updater signatures authenticate downloads but do not replace Apple's code signing.
 
-Manual DMG install: drag `Kivo.app` to `/Applications`, then run once:
+Install from the DMG:
+
+1. Drag Kivo onto the Applications folder in the installer window. Quit any older running copy before replacing it.
+2. Eject the Kivo disk and open Kivo from **Applications**, rather than from the mounted installer or Downloads.
+3. For an unnotarized build, try opening the installed copy, then use **System Settings → Privacy & Security → Open Anyway** and confirm **Open**. This is Apple's [per-app approval procedure](https://support.apple.com/en-gb/102445).
+4. Grant the permissions Kivo requests during onboarding. These are separate from Gatekeeper's approval.
+
+Approval should persist when reopening the same installed build, including after restarting the Mac. A replacement ad-hoc signed build can require approval and renewed Accessibility/Input Monitoring grants. If prompts recur without an update, confirm you are opening the same `/Applications/Kivo.app`, remove duplicate Dock/login-item references, and see the [permission troubleshooting guide](user-guide.md#macos-beta-repeated-prompts-and-settings-shows-on-app-shows-off).
+
+If a trusted download is blocked with a “damaged” message and Open Anyway is unavailable, the targeted fallback below removes quarantine from **Kivo only**. It is not a required install step and does not grant Accessibility or other permissions:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/Kivo.app
 ```
 
-Then open Kivo and approve it in System Settings → Privacy & Security if asked. Right-click → Open no longer bypasses Gatekeeper on recent macOS, and the "damaged" wording does not mean the download is corrupt — do not trash the app.
+There is no free certificate configuration that makes an individual developer's app Apple-verified. Developer ID distribution requires [Apple Developer Program membership](https://developer.apple.com/programs/whats-included/) (currently US$99/year or local equivalent); [fee waivers](https://developer.apple.com/help/account/membership/fee-waivers/) are limited to eligible organizations. Do not disable Gatekeeper globally or reset permissions on every launch.
+
+The branded Finder window uses committed artwork and explicit icon positions. CI sets `TAURI_BUNDLER_DMG_IGNORE_CI=true` because Tauri otherwise skips Finder customization on CI runners. Both macOS release workflows invoke `scripts/build-macos.sh`, which removes empty Apple credential variables before launching Tauri so absent secrets do not trigger certificate import or notarization. `scripts/verify-macos-bundle.sh` checks the original and DMG-contained app signatures, Finder metadata, background directory, and Applications link on the macOS runner. PR checks also build debug DMG and NSIS installers without release secrets and verify the DMG. Installer artwork sources and exports are documented in [packaging/README.md](../packaging/README.md).
 
 ### Windows .exe
 
@@ -41,4 +52,4 @@ Optional Windows signing: `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_
 
 The updater checks `https://github.com/0libote/Kivo/releases/latest/download/latest.json`. Never commit updater private keys or signing certificates.
 
-`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: a newer stable release takes precedence; beta installations also follow the rolling `continuous` release when stable is already current. The beta manifest identifies same-version rebuilds by commit SHA and carries signed updater archives for both platforms. An up-to-date stable installation is not offered a rolling beta. Settings → About offers **Download and Install** for available stable or beta updates, then restarts automatically to finish, with a **Restart now** fallback if the app remains open. Existing beta installations without an embedded updater public key require one manual upgrade to a signed beta build before in-app updates can work. Beta builds remain ad-hoc signed on macOS (free, not notarized), so first installation may require the one-time macOS approval above.
+`bun run prepare:release` creates the ignored release-only Tauri config and injects the updater public key from the environment. Normal local builds intentionally have no trusted updater key and can check availability but cannot install a signed update. Both desktops check GitHub Releases: a newer stable release takes precedence; beta installations also follow the rolling `continuous` release when stable is already current. The beta manifest identifies same-version rebuilds by commit SHA and carries signed updater archives for both platforms. An up-to-date stable installation is not offered a rolling beta. Settings → About offers **Download and Install** for available stable or beta updates, then restarts automatically to finish, with a **Restart now** fallback if the app remains open. Existing beta installations without an embedded updater public key require one manual upgrade to a signed beta build before in-app updates can work. Without Apple credentials, beta builds remain ad-hoc signed on macOS (free, not notarized), so first installation may require macOS approval and updates may require renewed permissions. Configured Apple credentials are also used for betas.
