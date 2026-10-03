@@ -194,7 +194,7 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Build macOS installer for review
         if: github.event_name == 'pull_request' && runner.os == 'macOS'
-        run: bash scripts/build-macos.sh build --debug --bundles dmg
+        run: bash scripts/build-macos.sh build --debug --bundles app,dmg
         env:
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
       - name: Verify macOS installer for review
