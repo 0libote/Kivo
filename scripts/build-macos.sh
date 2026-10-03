@@ -10,8 +10,4 @@ for key in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD 
 done
 
 export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
-if [[ "$APPLE_SIGNING_IDENTITY" != "-" ]]; then
-  # Paid builds have matching Team IDs and retain library validation.
-  exec bun tauri "$@" --config '{"bundle":{"macOS":{"entitlements":"Entitlements.developer-id.plist"}}}'
-fi
 exec bun tauri "$@"

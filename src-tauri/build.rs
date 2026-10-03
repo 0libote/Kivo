@@ -57,7 +57,6 @@ fn build_speech_bridge() {
     // The bridge uses no post-15 API. Keep its deployment target at the
     // upstream SDK's macOS floor; the containing Kivo app still declares 26+.
     let swift_triple = format!("{swift_arch}-apple-macosx15.0");
-    let packaged_library = package.join("libKivoVozBridge.dylib");
     println!(
         "cargo:rerun-if-changed={}",
         package.join("Package.swift").display()
@@ -107,23 +106,12 @@ fn build_speech_bridge() {
             .expect("SwiftPM product directory is UTF-8")
             .trim(),
     );
-    let library = bin_path.join("libKivoVozBridge.dylib");
-    let install_name_status = Command::new("install_name_tool")
-        .args(["-id", "@rpath/libKivoVozBridge.dylib"])
-        .arg(&library)
-        .status()
-        .expect("install_name_tool must be available in the macOS SDK");
-    assert!(
-        install_name_status.success(),
-        "could not set the packaged Voz bridge runtime path"
-    );
-    // Cargo adds OUT_DIR link-search paths to the test runtime environment.
-    // Stage the dylib there so tests still resolve @rpath even though the
-    // expensive SwiftPM build itself now lives in the persistent cache.
-    std::fs::copy(&library, output.join("libKivoVozBridge.dylib"))
-        .expect("stage the Voz bridge for Cargo linking and tests");
-    std::fs::copy(&library, &packaged_library)
-        .expect("copy the Voz bridge where Tauri can bundle and sign it");
+    // Embed the bridge and its SwiftPM dependencies into the executable.
+    // Ad-hoc signatures have no Team ID, so a separate dylib cannot satisfy
+    // hardened-runtime library validation even when both signatures verify.
+    let library = bin_path.join("libKivoVozBridge.a");
+    std::fs::copy(&library, output.join("libKivoVozBridge.a"))
+        .expect("stage the static Voz bridge for Cargo linking and tests");
 
     let speech_source = manifest.join("native/macos/SpeechBridge.swift");
     let speech_library = output.join("libKivoSpeech.a");
@@ -180,12 +168,22 @@ fn build_speech_bridge() {
         toolchain_swift.display()
     );
     println!("cargo:rustc-link-search=native={}", sdk_swift.display());
-    println!("cargo:rustc-link-lib=dylib=KivoVozBridge");
+    println!("cargo:rustc-link-lib=static=KivoVozBridge");
     println!("cargo:rustc-link-lib=static=KivoSpeech");
     println!("cargo:rustc-link-lib=framework=Speech");
     println!("cargo:rustc-link-lib=framework=AVFoundation");
     println!("cargo:rustc-link-lib=framework=AppKit");
     println!("cargo:rustc-link-lib=framework=CoreMedia");
+    for framework in [
+        "AVFAudio",
+        "Accelerate",
+        "CFNetwork",
+        "CoreML",
+        "CryptoKit",
+        "Foundation",
+        "Metal",
+    ] {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
-    println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path/../Frameworks");
 }

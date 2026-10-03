@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "KivoVozBridge",
     platforms: [.macOS(.v15)],
-    products: [.library(name: "KivoVozBridge", type: .dynamic, targets: ["KivoVozBridge"])],
+    products: [.library(name: "KivoVozBridge", type: .static, targets: ["KivoVozBridge"])],
     dependencies: [
         .package(url: "https://github.com/Desert-Ant-Labs/desert-ant-core.git", exact: "3.5.0"),
     ],

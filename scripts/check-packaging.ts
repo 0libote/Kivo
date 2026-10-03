@@ -116,24 +116,21 @@ check(
   "existing icon files are not bundled unless bundle.icon lists them",
 );
 const freeEntitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
-const developerEntitlements = readFileSync(
-  join(root, "src-tauri/Entitlements.developer-id.plist"),
+check(
+  "macOS retains hardened-runtime library validation",
+  !freeEntitlements.includes("com.apple.security.cs.disable-library-validation"),
+  "the statically linked bridge must not require a library-validation exception",
+);
+const vozPackage = readFileSync(
+  join(root, "src-tauri/native/macos/VozBridge/Package.swift"),
   "utf8",
 );
+const nativeBuild = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
 check(
-  "ad-hoc app can load its bundled native library",
-  /<key>com\.apple\.security\.cs\.disable-library-validation<\/key>\s*<true\s*\/>/.test(
-    freeEntitlements,
-  ),
-  "ad-hoc signatures have no Team ID; library validation rejects the bundled Voz dylib",
-);
-check(
-  "Developer ID builds retain library validation and microphone access",
-  !developerEntitlements.includes("com.apple.security.cs.disable-library-validation") &&
-    /<key>com\.apple\.security\.device\.audio-input<\/key>\s*<true\s*\/>/.test(
-      developerEntitlements,
-    ),
-  "paid signing uses matching Team IDs and needs no library-validation exception",
+  "macOS speech bridge is statically linked",
+  vozPackage.includes("type: .static") &&
+    nativeBuild.includes("cargo:rustc-link-lib=static=KivoVozBridge"),
+  "a separate ad-hoc dylib has no Team ID and cannot pass library validation",
 );
 for (const icon of [
   "src-tauri/icons/icon.ico", // NSIS/Windows

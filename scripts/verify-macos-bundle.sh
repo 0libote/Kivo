@@ -21,12 +21,15 @@ icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents
 [[ -f "$app/Contents/Resources/$icon_name" ]]
 codesign --verify --deep --strict --verbose=2 "$app"
 signature="$(codesign -dv --verbose=4 "$app" 2>&1)"
+codesign --display --entitlements - --xml "$app" >"$work_dir/entitlements.plist" 2>/dev/null
+library_exception="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$work_dir/entitlements.plist" 2>/dev/null || true)"
+[[ "$library_exception" != true ]]
+executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")"
+if otool -L "$app/Contents/MacOS/$executable" | grep -q 'libKivoVozBridge'; then
+  echo "The speech bridge must be embedded, not loaded from a separate dylib." >&2
+  exit 1
+fi
 case "$signature" in
-  *"Signature=adhoc"*)
-    codesign --display --entitlements - --xml "$app" >"$work_dir/entitlements.plist" 2>/dev/null
-    library_exception="$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.cs.disable-library-validation' "$work_dir/entitlements.plist")"
-    [[ "$library_exception" = true ]]
-    ;;
   *"Authority=Developer ID Application"*)
     # A configured paid identity must actually pass Gatekeeper, rather than
     # shipping a signed but unnotarized build with the same approval friction.
