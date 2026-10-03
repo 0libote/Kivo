@@ -30,7 +30,6 @@ import {
   type Platform,
   type SelectionContext,
   type SpeechLanguage,
-  type StatsDocument,
   type Surface,
   type VozModelProgress,
   type VozModelStatus,
@@ -55,7 +54,6 @@ type NativeEventMap = {
   "voz-model-status": VozModelProgress;
   "voz-worker-request": VozWorkerRequest;
   "local-ai-install-progress": LocalAiInstallProgress;
-  "stats-changed": null;
 };
 
 export interface UpdateResult {
@@ -72,10 +70,6 @@ export interface NativeBridge {
   readonly isNative: boolean;
   getContext(): Promise<AppContext>;
   getSettings(): Promise<AppSettings>;
-  getStatsSummary(): Promise<StatsDocument>;
-  getStatsSeries(): Promise<StatsDocument>;
-  clearStats(): Promise<void>;
-  exportStats(): Promise<StatsDocument>;
   getDictationRecovery(): Promise<string | null>;
   clearDictationRecovery(): Promise<void>;
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
@@ -185,10 +179,6 @@ class TauriBridge implements NativeBridge {
   }
 
   getSettings = () => call<AppSettings>("get_settings");
-  getStatsSummary = () => call<StatsDocument>("get_stats_summary");
-  getStatsSeries = () => call<StatsDocument>("get_stats_series");
-  clearStats = () => call<void>("clear_stats");
-  exportStats = () => call<StatsDocument>("export_stats");
   getDictationRecovery = () => call<string | null>("get_dictation_recovery");
   clearDictationRecovery = () => call<void>("clear_dictation_recovery");
   updateSettings = (patch: Partial<AppSettings>) => call<AppSettings>("update_settings", { patch });
@@ -268,7 +258,6 @@ class MockBridge implements NativeBridge {
     runtime: "Simulated test engine",
     error: null,
   };
-  private stats: StatsDocument = { schemaVersion: 1, rows: [] };
   private permissions: PermissionStatus[];
   private paused = false;
   private apiKeyStatuses: Record<AiProviderId, ApiKeyStatus> = {
@@ -334,21 +323,6 @@ class MockBridge implements NativeBridge {
 
   getSettings(): Promise<AppSettings> {
     return Promise.resolve(structuredClone(this.settings));
-  }
-
-  getStatsSummary(): Promise<StatsDocument> {
-    return Promise.resolve(structuredClone(this.stats));
-  }
-  getStatsSeries(): Promise<StatsDocument> {
-    return Promise.resolve(structuredClone(this.stats));
-  }
-  clearStats(): Promise<void> {
-    this.stats = { schemaVersion: 1, rows: [] };
-    this.emit("stats-changed", null);
-    return Promise.resolve();
-  }
-  exportStats(): Promise<StatsDocument> {
-    return Promise.resolve(structuredClone(this.stats));
   }
 
   updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
