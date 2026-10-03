@@ -39,6 +39,9 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
+    env:
+      # Do not let CI strip Finder's custom installer presentation.
+      TAURI_BUNDLER_DMG_IGNORE_CI: "true"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -69,7 +72,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -84,6 +87,8 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
+      - name: Verify macOS installer
+        run: bash scripts/verify-macos-bundle.sh src-tauri/target/aarch64-apple-darwin/release/bundle
 
   windows:
     needs: macos

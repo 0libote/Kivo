@@ -2,7 +2,7 @@ This is the latest development beta of Kivo, rebuilt from `main` after the requi
 
 ## Download and install
 
-- **macOS:** Apple Silicon, macOS 26 or later. Download the `.dmg`, open it, and drag Kivo to Applications. This beta is ad-hoc signed and not notarized. Follow the [macOS installation guide](https://github.com/0libote/Kivo/blob/main/docs/releasing.md#macos) if macOS blocks it. Accessibility and Input Monitoring permissions may need to be granted again after updates.
+- **macOS:** Apple Silicon, macOS 26 or later. Download the `.dmg`, open it, and drag Kivo to Applications. Without Apple signing credentials, this beta is ad-hoc signed and not notarized. Eject the installer and open the installed copy from Applications. Follow the [macOS installation guide](https://github.com/0libote/Kivo/blob/main/docs/releasing.md#macos) if macOS blocks it. Accessibility and Input Monitoring permissions may need to be granted again after updates.
 - **Windows:** Windows 11 24H2 or later. Download and run the `-setup.exe` installer. Windows may show a SmartScreen warning for an unsigned build.
 
 The `.app.tar.gz`, `.sig`, and `continuous.json` files support in-app updates; use the installers above for a first installation.

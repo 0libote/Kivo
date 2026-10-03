@@ -26,6 +26,12 @@
       "minimumSystemVersion": "26.0",
       "entitlements": "Entitlements.plist",
       "signingIdentity": "-",
+      "dmg": {
+        "background": "../packaging/macos/background.png",
+        "windowSize": { "width": 660, "height": 440 },
+        "appPosition": { "x": 180, "y": 230 },
+        "applicationFolderPosition": { "x": 480, "y": 230 }
+      },
       "frameworks": ["native/macos/VozBridge/libKivoVozBridge.dylib"]
     },
     "windows": {

@@ -59,7 +59,15 @@ const tauriConf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.js
   build: { beforeBuildCommand: string; frontendDist: string };
   bundle: {
     targets: unknown;
-    macOS?: { signingIdentity?: string | null };
+    macOS?: {
+      signingIdentity?: string | null;
+      dmg?: {
+        background: string;
+        windowSize: { width: number; height: number };
+        appPosition: { x: number; y: number };
+        applicationFolderPosition: { x: number; y: number };
+      };
+    };
     windows?: { digestAlgorithm?: string };
   };
   plugins: { updater: { endpoints: string[]; pubkey: string } };
@@ -218,6 +226,73 @@ check(
   tauriConf.bundle.macOS?.signingIdentity === "-",
   `got ${JSON.stringify(tauriConf.bundle.macOS?.signingIdentity)}; null skips bundle signing and ships a half-signed .app that Gatekeeper reports as "damaged" with no bypass. "-" ad-hoc signs for free; release.yml still overrides with a real Developer ID via APPLE_SIGNING_IDENTITY`,
 );
+const dmg = tauriConf.bundle.macOS?.dmg;
+const background = dmg && join(root, "src-tauri", dmg.background);
+check(
+  "macOS installer includes branded artwork",
+  Boolean(background && existsSync(background)),
+  "DMG background missing; shipped installers lose their installation guidance",
+);
+if (background && existsSync(background) && dmg) {
+  const png = readFileSync(background);
+  check(
+    "macOS background matches the Finder window",
+    png.subarray(1, 4).toString() === "PNG" &&
+      png.readUInt32BE(16) === dmg.windowSize.width &&
+      png.readUInt32BE(20) === dmg.windowSize.height,
+    "background dimensions must match dmg.windowSize",
+  );
+  check(
+    "macOS drag targets fit the installer window",
+    [dmg.appPosition, dmg.applicationFolderPosition].every(
+      ({ x, y }) => x > 0 && x < dmg.windowSize.width && y > 0 && y < dmg.windowSize.height,
+    ) && dmg.appPosition.x < dmg.applicationFolderPosition.x,
+    "app and Applications positions must fit the window in drag order",
+  );
+}
+const nsis = windowsConf.bundle.windows.nsis as typeof windowsConf.bundle.windows.nsis & {
+  installerIcon?: string;
+  headerImage?: string;
+  sidebarImage?: string;
+};
+check(
+  "Windows installer uses the Kivo icon",
+  nsis.installerIcon === "icons/icon.ico",
+  "installer must use the app icon",
+);
+for (const [key, width, height] of [
+  ["headerImage", 150, 57],
+  ["sidebarImage", 164, 314],
+] as const) {
+  const path = nsis[key];
+  const file = path && join(root, "src-tauri", path);
+  const bmp = file && existsSync(file) ? readFileSync(file) : undefined;
+  check(
+    `Windows ${key} has the NSIS bitmap dimensions`,
+    Boolean(
+      bmp &&
+        bmp.subarray(0, 2).toString() === "BM" &&
+        bmp.readInt32LE(18) === width &&
+        bmp.readInt32LE(22) === height &&
+        bmp.readUInt16LE(28) === 24,
+    ),
+    `expected a ${width} × ${height} 24-bit BMP`,
+  );
+}
+for (const workflow of ["ci.yml", "release.yml"]) {
+  const source = readFileSync(join(root, ".github/workflows", workflow), "utf8");
+  check(
+    `${workflow} preserves and verifies the macOS installer layout`,
+    source.includes('TAURI_BUNDLER_DMG_IGNORE_CI: "true"') &&
+      source.includes("bash scripts/verify-macos-bundle.sh"),
+    "Tauri skips Finder customization in CI unless explicitly enabled; verify before shipping",
+  );
+  check(
+    `${workflow} keeps free signing when Apple secrets are absent`,
+    source.includes("APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}"),
+    "an empty environment variable overrides Tauri's configured ad-hoc identity; use '-' explicitly",
+  );
+}
 // --- Windows floor consistency --------------------------------------------------
 const hooksSource = readFileSync(join(root, "packaging/windows/hooks.nsh"), "utf8");
 const hookBuild = /\$\{AtLeastBuild\}\s*(\d+)/.exec(hooksSource)?.[1];

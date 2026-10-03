@@ -72,15 +72,21 @@ to install one instead of an Allow button that could never resolve.
 
 ### macOS beta: repeated prompts and "Settings shows on, app shows off"
 
-The rolling `continuous` beta is ad-hoc signed (`signingIdentity: "-"`,
-free). macOS TCC keys Accessibility and Input Monitoring grants to the
-code signature, not just the bundle id, so every rebuilt/updated beta
-looks like a brand-new app: System Settings may still list Kivo as
-enabled while `AXIsProcessTrusted()` returns false, unlocking Privacy &
-Security asks for a password each time, and Keychain may re-prompt for
-the API-key item after an update. This is expected for ad-hoc builds —
-stable `app-v*` releases are Developer-ID signed and notarized when the
-Apple secrets are configured, and their grants persist across updates.
+Without Apple signing credentials, the rolling `continuous` beta is ad-hoc
+signed (`signingIdentity: "-"`, free). macOS TCC checks the code signature,
+not just the bundle id, so rebuilt/updated betas can require renewed
+Accessibility and Input Monitoring grants. System Settings may still list
+an old build as enabled while the new copy is not trusted. Keychain may
+also ask again after an update. Both beta and stable workflows use the
+same Developer ID credentials when configured, providing a consistent
+signing identity across updates.
+
+A restart alone does not change the app signature and should not invalidate
+approval. If the same build needs approval on every launch, quit Kivo,
+eject its installer disk, and open the installed copy from Applications.
+Check for duplicate copies in Downloads, Dock shortcuts and Login Items.
+Gatekeeper's **Open Anyway** approval is separate from Accessibility,
+Input Monitoring, microphone and Speech Recognition permissions.
 
 What to check on the Mac:
 
