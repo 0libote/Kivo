@@ -33,15 +33,7 @@ import { StatsSection } from "./StatsSection";
 import { VozSetup } from "./VozSetup";
 import { WritingPresetList } from "./WritingPresetEditor";
 
-type SettingsSection =
-  | "home"
-  | "stats"
-  | "general"
-  | "dictation"
-  | "writing"
-  | "ai"
-  | "permissions"
-  | "about";
+type SettingsSection = "home" | "stats" | "dictation" | "writing" | "ai" | "settings";
 
 const VOZ_LANGUAGES: SpeechLanguage[] = [
   "bg",
@@ -97,15 +89,13 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = 
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
   { id: "ai", label: "AI", icon: "connection" },
-  { id: "general", label: "General", icon: "settings" },
-  { id: "permissions", label: "Permissions", icon: "check" },
-  { id: "about", label: "About", icon: "info" },
+  { id: "settings", label: "Settings", icon: "settings" },
 ];
 
 const NAV_GROUP_LABELS: Partial<Record<SettingsSection, string>> = {
   home: "Workspace",
   dictation: "Tools",
-  general: "System",
+  settings: "System",
 };
 
 type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
@@ -128,7 +118,7 @@ export function SettingsWindow({
   const [notice, setNotice] = useState<string | null>(null);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
 
-  useNativeEvent("show-about", () => setSection("about"));
+  useNativeEvent("show-about", () => setSection("settings"));
 
   useEffect(() => {
     let active = true;
@@ -286,16 +276,19 @@ function SectionContent(props: SectionContentProps) {
       return null;
     case "stats":
       return <StatsSection settings={props.settings} save={props.save} />;
-    case "permissions":
+    case "settings":
       return (
-        <PermissionsSection
+        <SystemSettingsSection
+          busy={props.busy}
           context={props.context}
-          settings={props.settings}
+          setBusy={props.setBusy}
           setNotice={props.setNotice}
+          setUpdateResult={props.setUpdateResult}
+          settings={props.settings}
+          save={props.save}
+          updateResult={props.updateResult}
         />
       );
-    case "general":
-      return <GeneralSection settings={props.settings} save={props.save} />;
     case "dictation":
       return (
         <DictationSection
@@ -322,21 +315,45 @@ function SectionContent(props: SectionContentProps) {
           save={props.save}
         />
       );
-    case "about":
-      return (
-        <AboutSection
-          busy={props.busy}
-          context={props.context}
-          setBusy={props.setBusy}
-          setNotice={props.setNotice}
-          setUpdateResult={props.setUpdateResult}
-          updateResult={props.updateResult}
-        />
-      );
   }
 }
 
-function PermissionsSection({
+function SystemSettingsSection({
+  busy,
+  context,
+  setBusy,
+  setNotice,
+  setUpdateResult,
+  settings,
+  save,
+  updateResult,
+}: {
+  readonly busy: string | null;
+  readonly context: AppContext;
+  readonly setBusy: (value: string | null) => void;
+  readonly setNotice: (value: string | null) => void;
+  readonly setUpdateResult: (value: UpdateResult) => void;
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+  readonly updateResult: UpdateResult | null;
+}) {
+  return (
+    <SettingsContent title="Settings" subtitle="Appearance, startup, permissions, and updates.">
+      <GeneralPreferences settings={settings} save={save} />
+      <PermissionsPreferences context={context} settings={settings} setNotice={setNotice} />
+      <AboutPreferences
+        busy={busy}
+        context={context}
+        setBusy={setBusy}
+        setNotice={setNotice}
+        setUpdateResult={setUpdateResult}
+        updateResult={updateResult}
+      />
+    </SettingsContent>
+  );
+}
+
+function PermissionsPreferences({
   context,
   settings,
   setNotice,
@@ -460,8 +477,9 @@ function PermissionsSection({
   const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
 
   return (
-    <SettingsContent title="Permissions" subtitle={subtitle}>
-      <SettingsGroup>
+    <>
+      <p {...stylex.props(styles.note)}>{subtitle}</p>
+      <SettingsGroup header="Permissions">
         {order.map((kind) => {
           const status = byKind.get(kind);
           const state = status?.state ?? "not-determined";
@@ -507,25 +525,25 @@ function PermissionsSection({
             </SettingRow>
           );
         })}
-      </SettingsGroup>
-      <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
-        <Button
-          isDisabled={busy !== null || resetting}
-          label="Refresh status"
-          onClick={refresh}
-          size="sm"
-          variant="secondary"
-        />
-        {context.platform === "macos" ? (
+        <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
           <Button
-            isDisabled={busy !== null || resetting || !loaded}
-            label={resetting ? "Clearing…" : "Clear stale entries"}
-            onClick={() => void resetGrants()}
+            isDisabled={busy !== null || resetting}
+            label="Refresh status"
+            onClick={refresh}
             size="sm"
             variant="secondary"
           />
-        ) : null}
-      </div>
+          {context.platform === "macos" ? (
+            <Button
+              isDisabled={busy !== null || resetting || !loaded}
+              label={resetting ? "Clearing…" : "Clear stale entries"}
+              onClick={() => void resetGrants()}
+              size="sm"
+              variant="secondary"
+            />
+          ) : null}
+        </div>
+      </SettingsGroup>
       {context.platform === "macos" ? (
         <p {...stylex.props(styles.note)}>
           Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets
@@ -536,7 +554,7 @@ function PermissionsSection({
           ask for a password by design.
         </p>
       ) : null}
-    </SettingsContent>
+    </>
   );
 }
 
@@ -574,7 +592,7 @@ function permissionBlurb(kind: PermissionKind, platform: AppContext["platform"])
   }
 }
 
-function GeneralSection({
+function GeneralPreferences({
   settings,
   save,
 }: {
@@ -582,55 +600,47 @@ function GeneralSection({
   readonly save: SaveSettings;
 }) {
   return (
-    <SettingsContent
-      title="General"
-      subtitle="Choose how Kivo behaves when you sign in and while it is idle."
-    >
-      <SettingsGroup>
-        <SettingRow
+    <SettingsGroup header="General">
+      <SettingRow label="Launch at login" description="Start Kivo automatically after you sign in.">
+        <Switch
+          checked={settings.launchAtLogin}
           label="Launch at login"
-          description="Start Kivo automatically after you sign in."
-        >
-          <Switch
-            checked={settings.launchAtLogin}
-            label="Launch at login"
-            onChange={(value) => void save({ launchAtLogin: value })}
-          />
-        </SettingRow>
-        <SettingRow label="Appearance">
-          <SegmentedControl
-            ariaLabel="Appearance"
-            onChange={(theme) => void save({ theme })}
-            options={[
-              { label: "System", value: "system" },
-              { label: "Light", value: "light" },
-              { label: "Dark", value: "dark" },
-            ]}
-            value={settings.theme}
-          />
-        </SettingRow>
-        <SettingRow
+          onChange={(value) => void save({ launchAtLogin: value })}
+        />
+      </SettingRow>
+      <SettingRow label="Appearance">
+        <SegmentedControl
+          ariaLabel="Appearance"
+          onChange={(theme) => void save({ theme })}
+          options={[
+            { label: "System", value: "system" },
+            { label: "Light", value: "light" },
+            { label: "Dark", value: "dark" },
+          ]}
+          value={settings.theme}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Show Flow Bar while idle"
+        description="Keep a quiet indicator visible between dictations."
+      >
+        <Switch
+          checked={settings.showIdleFlowBar}
           label="Show Flow Bar while idle"
-          description="Keep a quiet indicator visible between dictations."
-        >
-          <Switch
-            checked={settings.showIdleFlowBar}
-            label="Show Flow Bar while idle"
-            onChange={(value) => void save({ showIdleFlowBar: value })}
-          />
-        </SettingRow>
-        <SettingRow
+          onChange={(value) => void save({ showIdleFlowBar: value })}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Start in background"
+        description="Keep the main window closed when Kivo starts."
+      >
+        <Switch
+          checked={settings.startInBackground}
           label="Start in background"
-          description="Keep the main window closed when Kivo starts."
-        >
-          <Switch
-            checked={settings.startInBackground}
-            label="Start in background"
-            onChange={(value) => void save({ startInBackground: value })}
-          />
-        </SettingRow>
-      </SettingsGroup>
-    </SettingsContent>
+          onChange={(value) => void save({ startInBackground: value })}
+        />
+      </SettingRow>
+    </SettingsGroup>
   );
 }
 
@@ -1252,7 +1262,7 @@ function keyLinkLabel(info: AiProviderInfo): string {
   return "Get an API key from Google AI Studio";
 }
 
-function AboutSection({
+function AboutPreferences({
   busy,
   context,
   setBusy,
@@ -1325,10 +1335,7 @@ function AboutSection({
   }
 
   return (
-    <SettingsContent
-      title="About"
-      subtitle="A quiet writing and dictation utility for your desktop."
-    >
+    <>
       <div {...stylex.props(styles.lockup)}>
         <div {...stylex.props(styles.lockupMark)}>
           <Icon name="audio" size={27} />
@@ -1339,7 +1346,7 @@ function AboutSection({
         </div>
       </div>
       {lifetimeUsage ? <p>{lifetimeUsage}</p> : null}
-      <SettingsGroup>
+      <SettingsGroup header="About">
         <SettingRow
           label="Software updates"
           description={updateStatusDescription(installed, busy, updateResult)}
@@ -1438,7 +1445,7 @@ function AboutSection({
         No accounts, hosted analytics, or telemetry. Optional usage statistics stay on this device;
         your text is processed only when you invoke Kivo.
       </p>
-    </SettingsContent>
+    </>
   );
 }
 
