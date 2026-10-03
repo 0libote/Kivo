@@ -200,6 +200,14 @@ jobs:
       - name: Verify macOS installer for review
         if: github.event_name == 'pull_request' && runner.os == 'macOS'
         run: bash scripts/verify-macos-bundle.sh src-tauri/target/debug/bundle
+      - name: Upload macOS installer for testing
+        if: github.event_name == 'pull_request' && runner.os == 'macOS'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-macos-review-installer
+          retention-days: 7
+          if-no-files-found: error
+          path: src-tauri/target/debug/bundle/dmg/*.dmg
       - name: Build Windows installer for review
         if: github.event_name == 'pull_request' && runner.os == 'Windows'
         run: bun tauri build --debug --bundles nsis
