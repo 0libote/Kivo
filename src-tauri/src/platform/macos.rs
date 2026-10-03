@@ -286,6 +286,18 @@ impl PlatformImpl {
         Ok(())
     }
 
+    /// Clears the first-run prompt memory after `tccutil reset` drops Kivo's
+    /// TCC rows. Without this the re-read still reports Denied (Open
+    /// Settings) when there is no entry left to enable — the user must see
+    /// Allow again so the next request re-creates the System Settings entry.
+    /// macOS also caches AX / event-tap trust per process, so a grant made in
+    /// System Settings only reports Granted after a relaunch.
+    pub(super) fn reset_permission_prompts(&self) {
+        let _ = self;
+        ACCESSIBILITY_PROMPTED.store(false, Ordering::Release);
+        INPUT_MONITORING_PROMPTED.store(false, Ordering::Release);
+    }
+
     pub(super) fn register_dictation_shortcut(
         &self,
         shortcut: HoldShortcut,

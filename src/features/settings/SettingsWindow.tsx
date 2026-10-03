@@ -361,6 +361,7 @@ function PermissionsPreferences({
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
   const [busy, setBusy] = useState<PermissionKind | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [relaunching, setRelaunching] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useNativeEvent<PermissionStatus[]>("permission-status-changed", setPermissions);
 
@@ -379,8 +380,11 @@ function PermissionsPreferences({
   // macOS grants happen in System Settings / system prompts outside the app:
   // the native request returns before the user answers (mic/speech are
   // async), and Accessibility can only be toggled in Settings. Re-read on
-  // window focus and poll while open so a grant flips to Allowed without
-  // requiring the manual Refresh button.
+  // window focus and poll while open so mic/speech flip to Allowed without
+  // requiring the manual Refresh button. Accessibility and Input Monitoring
+  // are cached per process by macOS: a grant made in System Settings only
+  // reports Granted after Kivo is relaunched, so polling alone can never
+  // turn those two rows green.
   useEffect(() => {
     const poll = () => {
       void nativeBridge
@@ -442,7 +446,7 @@ function PermissionsPreferences({
     try {
       setPermissions(await nativeBridge.resetPermissionGrants());
       setNotice(
-        "Old entries cleared. Re-allow each permission in turn — open System Settings where asked.",
+        "Old entries cleared. Click Allow for each permission to re-create its entry, then relaunch Kivo.",
       );
     } catch (error) {
       setNotice(
@@ -450,6 +454,21 @@ function PermissionsPreferences({
       );
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function relaunch() {
+    setRelaunching(true);
+    setNotice(null);
+    try {
+      await nativeBridge.restartApp();
+    } catch (error) {
+      setNotice(
+        error instanceof NativeError
+          ? error.message
+          : "Kivo couldn’t relaunch. Quit and reopen it manually.",
+      );
+      setRelaunching(false);
     }
   }
 
@@ -471,6 +490,14 @@ function PermissionsPreferences({
     "speech-recognition",
   ];
   const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
+  // macOS caches Accessibility / Input Monitoring trust per process: after the
+  // user toggles either in System Settings the rows stay red until relaunch,
+  // which is why those two look "stuck" while Microphone / Speech Recognition
+  // flip green on their own.
+  const needsRelaunch =
+    context.platform === "macos" &&
+    (byKind.get("accessibility")?.state === "denied" ||
+      byKind.get("input-monitoring")?.state === "denied");
 
   return (
     <>
@@ -510,7 +537,7 @@ function PermissionsPreferences({
                   </span>
                 ) : (
                   <Button
-                    isDisabled={busy !== null || resetting || !loaded}
+                    isDisabled={busy !== null || resetting || relaunching || !loaded}
                     label={permissionActionLabel(busy === kind, denied)}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
                     size="sm"
@@ -523,7 +550,7 @@ function PermissionsPreferences({
         })}
         <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
           <Button
-            isDisabled={busy !== null || resetting}
+            isDisabled={busy !== null || resetting || relaunching}
             label="Refresh status"
             onClick={refresh}
             size="sm"
@@ -531,9 +558,18 @@ function PermissionsPreferences({
           />
           {context.platform === "macos" ? (
             <Button
-              isDisabled={busy !== null || resetting || !loaded}
+              isDisabled={busy !== null || resetting || relaunching || !loaded}
               label={resetting ? "Clearing…" : "Clear stale entries"}
               onClick={() => void resetGrants()}
+              size="sm"
+              variant="secondary"
+            />
+          ) : null}
+          {needsRelaunch ? (
+            <Button
+              isDisabled={busy !== null || resetting || relaunching}
+              label={relaunching ? "Relaunching…" : "Relaunch Kivo"}
+              onClick={() => void relaunch()}
               size="sm"
               variant="secondary"
             />
@@ -542,12 +578,13 @@ function PermissionsPreferences({
       </SettingsGroup>
       {context.platform === "macos" ? (
         <p {...stylex.props(styles.note)}>
-          Status refreshes automatically. Beta builds are ad-hoc signed, so macOS forgets
-          Accessibility and Fn-shortcut grants on every update — re-allow after updating, or use a
-          Developer-ID signed stable release for grants that persist. If an old build's entry is
-          stuck and the new one can't be enabled, Clear stale entries removes Kivo's old grants so
-          you can re-allow from scratch. Unlocking Privacy &amp; Security and Keychain prompts each
-          ask for a password by design.
+          Microphone and Speech Recognition refresh automatically. Accessibility and Fn-shortcut
+          grants only take effect after a relaunch — allow them in System Settings, then Relaunch
+          Kivo. Beta builds are ad-hoc signed, so macOS forgets those two grants on every update —
+          re-allow after updating, or use a Developer-ID signed stable release for grants that
+          persist. If an old build's entry is stuck and the new one can't be enabled, Clear stale
+          entries removes Kivo's old grants so you can Allow from scratch. Unlocking Privacy &amp;
+          Security and Keychain prompts each ask for a password by design.
         </p>
       ) : null}
     </>

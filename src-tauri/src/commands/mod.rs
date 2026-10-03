@@ -1615,6 +1615,10 @@ pub fn reset_permission_grants(
     platform: State<'_, Arc<crate::platform::PlatformServices>>,
 ) -> Result<Vec<FrontendPermissionStatus>, CommandError> {
     reset_tcc_grants().map_err(platform_command_error)?;
+    // The TCC rows are gone, so drop the in-process "already prompted" memory
+    // too: the next read must offer Allow (re-create the entry) rather than
+    // Open Settings (enable an entry that no longer exists).
+    platform.reset_permission_prompts();
     let statuses = permission_statuses(&platform).map_err(platform_command_error)?;
     refresh_shortcuts_after_permission(&app, &core, &statuses);
     let _ = app.emit("permission-status-changed", &statuses);
