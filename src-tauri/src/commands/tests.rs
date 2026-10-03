@@ -129,7 +129,6 @@ fn core(endpoint: &str, selected_text: Option<&str>) -> (Arc<AppCore>, Arc<MockT
         last_cursor: Mutex::new(None),
         writing_generation: AtomicU64::new(0),
         writing_cancel: tokio::sync::watch::channel(()).0,
-        stats: Mutex::new(None),
     };
     (Arc::new(core), text)
 }

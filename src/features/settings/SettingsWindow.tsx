@@ -29,13 +29,11 @@ import { HomeSection } from "./HomeSection";
 import { LocalAiSetup } from "./LocalAiSetup";
 import { LocalSpeechModels } from "./LocalSpeechModels";
 import { ModelQueueEditor } from "./ModelQueueEditor";
-import { StatsSection } from "./StatsSection";
 import { VozSetup } from "./VozSetup";
 import { WritingPresetList } from "./WritingPresetEditor";
 
 type SettingsSection =
   | "home"
-  | "stats"
   | "general"
   | "dictation"
   | "writing"
@@ -93,7 +91,6 @@ interface SettingsWindowProps {
 
 const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = [
   { id: "home", label: "Home", icon: "home" },
-  { id: "stats", label: "Statistics", icon: "info" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
   { id: "ai", label: "AI", icon: "connection" },
@@ -284,8 +281,6 @@ function SectionContent(props: SectionContentProps) {
   switch (props.section) {
     case "home":
       return null;
-    case "stats":
-      return <StatsSection settings={props.settings} save={props.save} />;
     case "permissions":
       return (
         <PermissionsSection
@@ -1268,28 +1263,6 @@ function AboutSection({
   readonly updateResult: UpdateResult | null;
 }) {
   const [installed, setInstalled] = useState(false);
-  const [lifetimeUsage, setLifetimeUsage] = useState<string | null>(null);
-  useEffect(() => {
-    void nativeBridge
-      .getStatsSummary()
-      .then(({ rows }) => {
-        const relevant = rows.filter((row) => row.kind === "dictation" && row.action === "dictate");
-        const characters = relevant.reduce((total, row) => total + row.charsOut, 0);
-        if (characters === 0) return;
-        const first = relevant.map((row) => row.date).sort((a, b) => a.localeCompare(b))[0];
-        const since = first
-          ? new Date(`${first}T00:00:00Z`).toLocaleDateString(undefined, {
-              month: "short",
-              year: "numeric",
-              timeZone: "UTC",
-            })
-          : "the beginning";
-        setLifetimeUsage(
-          `${Math.round(characters / 5).toLocaleString()} estimated words dictated since ${since}`,
-        );
-      })
-      .catch(() => {});
-  }, []);
   // Older builds without an updater key cannot install signed updates.
   const [installUnsupported, setInstallUnsupported] = useState(false);
   const updateAvailable = updateResult?.available === true;
@@ -1338,7 +1311,6 @@ function AboutSection({
           <p {...stylex.props(styles.lockupVersion)}>Version {context.version}</p>
         </div>
       </div>
-      {lifetimeUsage ? <p>{lifetimeUsage}</p> : null}
       <SettingsGroup>
         <SettingRow
           label="Software updates"
@@ -1435,8 +1407,8 @@ function AboutSection({
         </button>
       </div>
       <p {...stylex.props(styles.privacyNote)}>
-        No accounts, hosted analytics, or telemetry. Optional usage statistics stay on this device;
-        your text is processed only when you invoke Kivo.
+        No accounts, hosted analytics, or telemetry; your text is processed only when you invoke
+        Kivo.
       </p>
     </SettingsContent>
   );

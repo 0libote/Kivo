@@ -26,7 +26,7 @@ Linux is a development test bench with simulated OS integration; it is not a sup
 
 System dictation works without an AI key. Optional on-device transcription models can be installed in Settings → Dictation. Hosted writing tools and optional dictation cleanup send text to the provider you choose; local AI endpoints keep those requests on your computer. Link summaries require Gemini.
 
-Keys are stored in macOS Keychain or Windows Credential Manager. Optional usage statistics stay local and contain no text. Kivo keeps the latest dictation in memory for recovery, rather than saving a transcript history.
+Keys are stored in macOS Keychain or Windows Credential Manager. Kivo keeps the latest dictation in memory for recovery, rather than saving a transcript history.
 
 ## Develop
 

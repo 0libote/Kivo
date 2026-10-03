@@ -19,7 +19,6 @@ pub struct AppSettings {
     pub dictation: DictationSettings,
     pub writing_tools: WritingToolsSettings,
     pub ai: AiSettings,
-    pub stats: StatsSettings,
 }
 
 impl Default for AppSettings {
@@ -30,7 +29,6 @@ impl Default for AppSettings {
             dictation: DictationSettings::default(),
             writing_tools: WritingToolsSettings::default(),
             ai: AiSettings::default(),
-            stats: StatsSettings::default(),
         }
     }
 }
@@ -44,7 +42,6 @@ impl AppSettings {
         if old_schema_version < 2 {
             self.migrate_v2_defaults();
         }
-        self.stats.normalize();
         self.schema_version = SETTINGS_SCHEMA_VERSION;
         self.general.validate()?;
         self.dictation.migrate_foreign_default();
@@ -84,31 +81,6 @@ impl AppSettings {
             && self.ai.models[0].trim() == "kimi-k2.7-code"
         {
             self.ai.models = vec![self.ai.provider.default_model().to_owned()];
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct StatsSettings {
-    pub enabled: bool,
-    /// 0 retains daily aggregates indefinitely.
-    pub retention_days: u16,
-}
-
-impl Default for StatsSettings {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            retention_days: 0,
-        }
-    }
-}
-
-impl StatsSettings {
-    fn normalize(&mut self) {
-        if !matches!(self.retention_days, 0 | 30 | 90 | 365) {
-            self.retention_days = 0;
         }
     }
 }
