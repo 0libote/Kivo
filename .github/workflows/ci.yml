@@ -18,8 +18,7 @@ name: CI & Build
 # - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
 #   the `native` matrix (macOS + Windows) owns clippy + tests, so each
 #   desktop's `#[cfg(target_os)]` sources still compile on every PR. The
-#   matrix no longer pays for a bun install (pure-Rust checks) or a
-#   duplicated fmt run.
+#   PRs also exercise installer bundling after the native checks.
 # - Foreign-desktop *logic* (shortcut defaults, cross-OS settings migration,
 #   native-shortcut checks, permission requirements) is tested
 #   host-parameterized: every runner executes both directions (see
@@ -137,16 +136,15 @@ jobs:
 
   native:
     # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
-    # desktop's `#[cfg(target_os)]` sources build on every PR. Format and
-    # lockfile checks live in `rust-static`, and no bun install is needed
-    # here (pure-Rust checks), so expensive runners are not billed for work
-    # ubuntu already did.
+    # desktop's `#[cfg(target_os)]` sources build on every PR. PRs also build
+    # debug installers to validate packaging without release credentials.
+    # Format and lockfile checks live in `rust-static`.
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # CI never debugs these binaries. Full debug info made the Windows
       # dependency cache 1.77 GB and took five minutes just to save.
@@ -185,6 +183,26 @@ jobs:
           workspaces: src-tauri
       - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      # PRs must exercise the actual bundlers without release credentials or
+      # publishing. Debug packages keep this check cheaper than release builds.
+      - if: github.event_name == 'pull_request'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - if: github.event_name == 'pull_request'
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build macOS installer for review
+        if: github.event_name == 'pull_request' && runner.os == 'macOS'
+        run: bash scripts/build-macos.sh build --debug --bundles dmg
+        env:
+          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+      - name: Verify macOS installer for review
+        if: github.event_name == 'pull_request' && runner.os == 'macOS'
+        run: bash scripts/verify-macos-bundle.sh src-tauri/target/debug/bundle
+      - name: Build Windows installer for review
+        if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        run: bun tauri build --debug --bundles nsis
 
   # Automated code review / security gates. Each gate runs independently and
   # starts immediately (no `needs` on the CI jobs above) so one slow suite
@@ -399,6 +417,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
+          tauriScript: bash scripts/build-macos.sh
           args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
       - name: Verify macOS installer before upload
         run: bash scripts/verify-macos-bundle.sh src-tauri/target/aarch64-apple-darwin/release/bundle

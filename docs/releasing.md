@@ -27,7 +27,7 @@ xattr -dr com.apple.quarantine /Applications/Kivo.app
 
 There is no free certificate configuration that makes an individual developer's app Apple-verified. Developer ID distribution requires [Apple Developer Program membership](https://developer.apple.com/programs/whats-included/) (currently US$99/year or local equivalent); [fee waivers](https://developer.apple.com/help/account/membership/fee-waivers/) are limited to eligible organizations. Do not disable Gatekeeper globally or reset permissions on every launch.
 
-The branded Finder window uses committed artwork and explicit icon positions. CI sets `TAURI_BUNDLER_DMG_IGNORE_CI=true` because Tauri otherwise skips Finder customization on CI runners. `scripts/verify-macos-bundle.sh` checks the original and DMG-contained app signatures, Finder metadata, background directory, and Applications link on the macOS runner. Installer artwork sources and exports are documented in [packaging/README.md](../packaging/README.md).
+The branded Finder window uses committed artwork and explicit icon positions. CI sets `TAURI_BUNDLER_DMG_IGNORE_CI=true` because Tauri otherwise skips Finder customization on CI runners. Both macOS release workflows invoke `scripts/build-macos.sh`, which removes empty Apple credential variables before launching Tauri so absent secrets do not trigger certificate import or notarization. `scripts/verify-macos-bundle.sh` checks the original and DMG-contained app signatures, Finder metadata, background directory, and Applications link on the macOS runner. PR checks also build debug DMG and NSIS installers without release secrets and verify the DMG. Installer artwork sources and exports are documented in [packaging/README.md](../packaging/README.md).
 
 ### Windows .exe
 

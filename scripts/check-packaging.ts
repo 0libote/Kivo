@@ -270,8 +270,7 @@ for (const [key, width, height] of [
   check(
     `Windows ${key} has the NSIS bitmap dimensions`,
     Boolean(
-      bmp &&
-        bmp.subarray(0, 2).toString() === "BM" &&
+      bmp?.subarray(0, 2).toString() === "BM" &&
         bmp.readInt32LE(18) === width &&
         bmp.readInt32LE(22) === height &&
         bmp.readUInt16LE(28) === 24,
@@ -289,8 +288,9 @@ for (const workflow of ["ci.yml", "release.yml"]) {
   );
   check(
     `${workflow} keeps free signing when Apple secrets are absent`,
-    source.includes("APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}"),
-    "an empty environment variable overrides Tauri's configured ad-hoc identity; use '-' explicitly",
+    source.includes("APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}") &&
+      source.includes("tauriScript: bash scripts/build-macos.sh"),
+    "use the macOS build wrapper to unset empty Apple secrets and preserve the ad-hoc identity",
   );
 }
 // --- Windows floor consistency --------------------------------------------------

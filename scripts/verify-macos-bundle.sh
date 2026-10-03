@@ -18,7 +18,7 @@ esac
 mount_point="$(mktemp -d "${TMPDIR:-/tmp}/kivo-dmg.XXXXXX")"
 mounted=false
 cleanup() {
-  if [ "$mounted" = true ]; then
+  if [[ "$mounted" = true ]]; then
     hdiutil detach "$mount_point" -quiet
   fi
   rmdir "$mount_point"
@@ -27,16 +27,16 @@ trap cleanup EXIT
 
 shopt -s nullglob
 images=("$bundle_root"/dmg/*.dmg)
-if [ "${#images[@]}" -ne 1 ]; then
+if [[ "${#images[@]}" -ne 1 ]]; then
   echo "Expected exactly one macOS installer." >&2
   exit 1
 fi
 hdiutil attach "${images[0]}" -readonly -nobrowse -mountpoint "$mount_point" -quiet
 mounted=true
-test -f "$mount_point/.DS_Store"
-test -f "$mount_point/.background/background.png"
+[[ -f "$mount_point/.DS_Store" ]]
+[[ -f "$mount_point/.background/background.png" ]]
 cmp "$mount_point/.background/background.png" "$(dirname "$0")/../packaging/macos/background.png"
-test -L "$mount_point/Applications"
-test "$(readlink "$mount_point/Applications")" = /Applications
+[[ -L "$mount_point/Applications" ]]
+[[ "$(readlink "$mount_point/Applications")" = /Applications ]]
 codesign --verify --deep --strict --verbose=2 "$mount_point/Kivo.app"
 echo "Verified app signatures, Finder layout, branded background and Applications link."

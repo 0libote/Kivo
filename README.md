@@ -13,7 +13,7 @@ Get an installer from [GitHub Releases](https://github.com/0libote/Kivo/releases
 | macOS | Apple Silicon, macOS 26+ | `.dmg` |
 | Windows | Windows 11 24H2+ | `-setup.exe` |
 
-The beta is not a stable release. without Apple signing credentials, macOS beta builds are ad-hoc signed and not notarized; permission grants may need to be renewed after an update. Windows builds may show a SmartScreen warning. See [installation and signing](docs/releasing.md) for details.
+The beta is not a stable release. Without Apple signing credentials, macOS beta builds are ad-hoc signed and not notarized; permission grants may need to be renewed after an update. Windows builds may show a SmartScreen warning. See [installation and signing](docs/releasing.md) for details.
 
 Linux is a development test bench with simulated OS integration; it is not a supported release platform.
 
