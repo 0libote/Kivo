@@ -19,6 +19,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "category": "Productivity",
     "shortDescription": "A quiet, system-wide writing and dictation utility.",
     "longDescription": "Kivo provides native system-wide dictation and focused Gemini-powered writing tools while keeping sensitive integration in the desktop core.",
@@ -31,8 +32,7 @@
         "windowSize": { "width": 660, "height": 440 },
         "appPosition": { "x": 180, "y": 230 },
         "applicationFolderPosition": { "x": 480, "y": 230 }
-      },
-      "frameworks": ["native/macos/VozBridge/libKivoVozBridge.dylib"]
+      }
     },
     "windows": {
       "digestAlgorithm": "sha256",

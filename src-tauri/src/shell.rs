@@ -251,6 +251,15 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             _ => {}
         });
+    #[cfg(target_os = "macos")]
+    {
+        // App icons have an opaque tile; macOS template icons use alpha as
+        // their mask, so the menu bar needs the transparent K mark instead.
+        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!(
+            "../icons/tray-icon.png"
+        ))?);
+    }
+    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -1865,6 +1874,17 @@ mod tests {
         version_is_newer,
     };
     use crate::config::HostPlatform;
+
+    #[test]
+    fn macos_menu_bar_icon_is_a_transparent_mark() {
+        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
+            .expect("menu bar icon must decode");
+        assert_eq!((icon.width(), icon.height()), (44, 44));
+        let (pixels, _) = icon.rgba().as_chunks::<4>();
+        assert!(pixels.iter().any(|pixel| pixel[3] == 0));
+        assert!(pixels.iter().any(|pixel| pixel[3] == 255));
+        assert_eq!(icon.rgba()[3], 0, "template must not have an opaque tile");
+    }
 
     #[test]
     fn accelerator_normalization_maps_whole_modifier_tokens_only() {

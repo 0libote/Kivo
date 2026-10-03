@@ -59,6 +59,7 @@ const tauriConf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.js
   build: { beforeBuildCommand: string; frontendDist: string };
   bundle: {
     targets: unknown;
+    icon?: string[];
     macOS?: {
       signingIdentity?: string | null;
       dmg?: {
@@ -107,9 +108,34 @@ check(
 const WINDOWS_FLOOR_BUILD = "26100"; // Windows 11 24H2: supported floor.
 
 // --- Icons (both bundlers fail late when these are missing) ------------------
+check(
+  "bundle icons are configured for macOS and Windows",
+  ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"].every((icon) =>
+    tauriConf.bundle.icon?.includes(icon),
+  ),
+  "existing icon files are not bundled unless bundle.icon lists them",
+);
+const freeEntitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
+check(
+  "macOS retains hardened-runtime library validation",
+  !freeEntitlements.includes("com.apple.security.cs.disable-library-validation"),
+  "the statically linked bridge must not require a library-validation exception",
+);
+const vozPackage = readFileSync(
+  join(root, "src-tauri/native/macos/VozBridge/Package.swift"),
+  "utf8",
+);
+const nativeBuild = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
+check(
+  "macOS speech bridge is statically linked",
+  vozPackage.includes("type: .static") &&
+    nativeBuild.includes("cargo:rustc-link-lib=static=KivoVozBridge"),
+  "a separate ad-hoc dylib has no Team ID and cannot pass library validation",
+);
 for (const icon of [
   "src-tauri/icons/icon.ico", // NSIS/Windows
   "src-tauri/icons/icon.icns", // dmg/macOS
+  "src-tauri/icons/tray-icon.png", // macOS menu bar template
 ]) {
   check(
     `icon exists: ${icon}`,

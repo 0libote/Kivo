@@ -19,3 +19,11 @@ exports and their sources together. Run `bun run check:packaging` to validate
 the configured asset paths and export dimensions. The macOS workflow also
 mounts the finished DMG and verifies its contents and app signatures before
 beta publication; stable releases stay drafts until reviewed.
+
+The app icons in `src-tauri/icons` are explicitly listed in `bundle.icon`.
+macOS uses the separate transparent `tray-icon.png` as a menu bar template;
+its SVG contains the same K mark without the app icon's opaque tile. Regenerate
+it with `bun tauri icon src-tauri/icons/tray-icon.svg --output /tmp/kivo-tray-icons --png 44`
+and copy `/tmp/kivo-tray-icons/44x44.png` to `src-tauri/icons/tray-icon.png`.
+The macOS verifier checks the bundled icon and launches the DMG-contained app
+to catch dynamic library or startup failures that signature checks miss.
