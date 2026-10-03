@@ -82,6 +82,10 @@ shellTest("configured Apple credentials pass through unchanged", async () => {
   const result = await build(Object.fromEntries(keys.map((key, index) => [key, values[index]])));
   expect(result.status).toBe(0);
   expect(result.output.slice(0, keys.length)).toEqual(values);
+  expect(result.output.slice(-2)).toEqual([
+    "--config",
+    '{"bundle":{"macOS":{"entitlements":"Entitlements.developer-id.plist"}}}',
+  ]);
 });
 
 shellTest(

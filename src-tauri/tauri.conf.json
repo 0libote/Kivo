@@ -19,6 +19,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
     "category": "Productivity",
     "shortDescription": "A quiet, system-wide writing and dictation utility.",
     "longDescription": "Kivo provides native system-wide dictation and focused Gemini-powered writing tools while keeping sensitive integration in the desktop core.",

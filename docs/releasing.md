@@ -8,6 +8,8 @@
 
 `bun tauri build` produces the macOS app and DMG. The bundle is ad-hoc signed by default (`signingIdentity: "-"` in `src-tauri/tauri.conf.json`, free, no certificate needed) to give the app and bundled native code complete signatures. This does not make the app Apple-verified; downloaded builds can still be blocked by Gatekeeper. The stable release workflow overrides this with a real Developer ID via `APPLE_SIGNING_IDENTITY` when the Apple signing/notarization secrets are configured. Direct distribution is required; do not enable App Sandbox or submit this build to the Mac App Store.
 
+Ad-hoc builds keep hardened runtime but include the library-validation exception in `Entitlements.plist`: their signatures have no Team ID, so macOS would otherwise reject the bundled Voz library before startup. Developer ID builds through `scripts/build-macos.sh` use `Entitlements.developer-id.plist`, retaining library validation. The macOS packaging gate launches the DMG-contained app and waits for startup completion in addition to checking its signatures and icon.
+
 Beta builds are available from the [continuous releases](https://github.com/0libote/Kivo/releases/tag/continuous). Both release workflows use Developer ID signing and notarization when the Apple secrets are configured; otherwise they keep free ad-hoc signing. Updater signatures authenticate downloads but do not replace Apple's code signing.
 
 Install from the DMG:

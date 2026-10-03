@@ -102,6 +102,7 @@ pub fn run() {
             } else {
                 shell::show_surface(&handle, "onboarding", true)?;
             }
+            eprintln!("Kivo startup complete");
             Ok(())
         })
         .on_window_event(|window, event| {
