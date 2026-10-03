@@ -5,7 +5,6 @@ mod platform;
 mod security;
 mod shell;
 mod speech;
-mod stats;
 mod text;
 
 use std::sync::Arc;
@@ -74,16 +73,6 @@ pub fn run() {
             )?;
             let settings = commands::FrontendSettings::from(core.settings()?);
             app.manage(model_store);
-            let stats = Arc::new(crate::stats::StatsStore::new(
-                app.path().app_config_dir()?.join("stats.json"),
-            ));
-            if settings.stats_retention_days > 0 {
-                stats.prune_before(&crate::stats::utc_date_days_ago(
-                    settings.stats_retention_days,
-                ));
-            }
-            core.attach_stats(stats.clone());
-            app.manage(stats);
             app.manage(Arc::clone(&voz_runtime));
             app.manage(platform);
             app.manage(core);
@@ -126,10 +115,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_app_context,
             commands::get_settings,
-            commands::get_stats_summary,
-            commands::get_stats_series,
-            commands::clear_stats,
-            commands::export_stats,
             commands::update_settings,
             commands::get_permission_statuses,
             commands::request_permission,

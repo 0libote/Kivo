@@ -165,8 +165,6 @@ export interface AiProviderInfo {
 }
 
 export interface AppSettings {
-  statsEnabled: boolean;
-  statsRetentionDays: number;
   launchAtLogin: boolean;
   theme: ThemePreference;
   showIdleFlowBar: boolean;
@@ -196,32 +194,6 @@ export interface AppSettings {
   aiReasoningMode: "fast" | "balanced" | "deep";
   aiCustomBaseUrl: string | null;
   onboardingComplete: boolean;
-}
-
-export interface StatsRow {
-  date: string;
-  kind: string;
-  action: string;
-  provider: string | null;
-  model: string | null;
-  engine: string | null;
-  errorCategory: string | null;
-  count: number;
-  ok: number;
-  fail: number;
-  cancel: number;
-  failoversRescued: number;
-  charsIn: number;
-  charsOut: number;
-  msSum: number;
-  msMax: number;
-  tokensIn: number | null;
-  tokensOut: number | null;
-  costMicroUsd: number | null;
-}
-export interface StatsDocument {
-  schemaVersion: number;
-  rows: StatsRow[];
 }
 
 export interface PermissionStatus {
@@ -373,8 +345,6 @@ export function defaultSettings(platform: Platform): AppSettings {
   const dictationShortcut = DICTATION_SHORTCUTS[platform];
   const writingShortcut = WRITING_SHORTCUTS[platform];
   return {
-    statsEnabled: true,
-    statsRetentionDays: 0,
     launchAtLogin: false,
     theme: "system",
     showIdleFlowBar: false,
