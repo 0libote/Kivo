@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
-import { DictationPractice } from "../../components/DictationPractice";
 import { Icon, type IconName } from "../../components/Icon";
 import { formatShortcut } from "../../components/shortcut";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -73,7 +72,6 @@ export function HomeSection({
           title="Writing Tools"
         />
       </div>
-      <DictationPractice platform={context.platform} shortcut={settings.dictationShortcut} />
       {recovery ? (
         <section aria-label="Last dictation" {...stylex.props(styles.recovery)}>
           <div {...stylex.props(styles.recoveryHeader)}>
@@ -105,10 +103,6 @@ export function HomeSection({
           </div>
         </section>
       ) : null}
-      <p {...stylex.props(styles.footnote)}>
-        Close this window to keep Kivo in{" "}
-        {context.platform === "windows" ? "the system tray" : "the menu bar"}.
-      </p>
       {notice ? <output {...stylex.props(styles.feedback)}>{notice}</output> : null}
     </section>
   );
@@ -320,12 +314,6 @@ const styles = stylex.create({
     display: "flex",
     gap: "8px",
     marginTop: "12px",
-  },
-  footnote: {
-    margin: "28px 0 0",
-    paddingInlineStart: "2px",
-    color: "var(--kivo-text-tertiary)",
-    fontSize: "11px",
   },
   feedback: {
     margin: "12px 0 0",

@@ -14,8 +14,8 @@ test("settings navigation and controls work", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
   await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "General", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "General" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await expect(page.getByRole("heading", { name: "AI", exact: true })).toBeVisible();
   await expect(page.getByLabel("Google AI Studio API key")).toBeVisible();
@@ -132,8 +132,8 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
-  await page.getByRole("button", { name: "About", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "About" })).toBeVisible();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await page.evaluate(async () => {
     const path = "/src/platform/native.ts";
     const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
@@ -159,7 +159,7 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
 test("about installs rolling beta updates in-app", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.goto("/?surface=settings&harness=1");
-  await page.getByRole("button", { name: "About", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.evaluate(async () => {
     const path = "/src/platform/native.ts";
     const { nativeBridge } = (await import(path)) as {

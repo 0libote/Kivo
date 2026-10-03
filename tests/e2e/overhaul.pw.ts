@@ -20,8 +20,6 @@ for (const platform of ["windows", "macos"] as const) {
     await expect(page.getByLabel("Popup width")).toHaveCount(0);
     await expect(page.getByLabel("Editable selected text")).toHaveCount(0);
     await page.getByRole("button", { name: "Home", exact: true }).click();
-    await page.getByRole("button", { name: "Try dictation" }).click();
-    await expect(page.getByLabel("Dictation practice")).toBeFocused();
     for (const theme of ["light", "dark"] as const) {
       await page.evaluate(async (theme) => {
         const path = "/src/platform/native.ts";
@@ -46,7 +44,7 @@ for (const platform of ["windows", "macos"] as const) {
     await page.getByRole("button", { name: "Clear", exact: true }).click();
     await expect(page.getByRole("region", { name: "Last dictation" })).toHaveCount(0);
     await page.setViewportSize({ width: 620, height: 500 });
-    for (const section of ["General", "Dictation", "Writing Tools", "AI", "About"]) {
+    for (const section of ["Settings", "Dictation", "Writing Tools", "AI"]) {
       await page.getByRole("button", { name: section, exact: true }).click();
       await expect(page.getByRole("heading", { name: section, exact: true }).first()).toBeVisible();
       expect(
@@ -57,8 +55,6 @@ for (const platform of ["windows", "macos"] as const) {
     }
     await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" });
     await page.getByRole("button", { name: "Home", exact: true }).click();
-    await page.getByRole("button", { name: "Try dictation" }).click();
-    await expect(page.getByLabel("Dictation practice")).toBeFocused();
     await page.screenshot({ path: testInfo.outputPath("home-high-contrast.png") });
     expect(errors).toEqual([]);
     await context.close();

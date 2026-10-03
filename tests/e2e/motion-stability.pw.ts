@@ -112,11 +112,10 @@ test("onboarding steps transition and settings sections fit at narrow widths", a
     await expectNoHorizontalOverflow(page);
   }
   await expectSectionFits("Home");
-  await expectSectionFits("General");
+  await expectSectionFits("Settings");
   await expectSectionFits("Dictation");
   await expectSectionFits("Writing Tools");
   await expectSectionFits("AI");
-  await expectSectionFits("About");
   assertNoErrors();
 });
 

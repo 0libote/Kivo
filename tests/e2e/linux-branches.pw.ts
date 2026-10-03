@@ -45,7 +45,7 @@ test("settings shows the Linux bench permission copy", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
-  await page.getByRole("button", { name: "Permissions", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
     page.getByText("Linux test bench: microphone and speech are simulated"),
   ).toBeVisible();
