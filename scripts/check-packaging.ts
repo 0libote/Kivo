@@ -224,6 +224,12 @@ check(
 );
 
 // --- macOS bundle metadata (fails the dmg build late when missing) -------------
+const libSource = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
+check(
+  "macOS hides the Dock at runtime (tray-only agent)",
+  libSource.includes("set_activation_policy") && libSource.includes("ActivationPolicy::Accessory"),
+  "lib.rs must set ActivationPolicy::Accessory on macOS; Info.plist alone does not cover `tauri dev`",
+);
 const entitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
 check(
   "Entitlements.plist keeps microphone access",
@@ -349,6 +355,20 @@ check(
   "committed updater pubkey stays empty",
   tauriConf.plugins.updater.pubkey === "",
   "a pubkey in the repo would silently ship beta builds with the wrong update trust; prepare-release-config.ts injects it from secrets",
+);
+
+// --- Beta updater signatures must bind the manifest version ----------------------
+// `tauri build` signs for the plain package version, but continuous.json
+// announces `version+sha`. The updater plugin rejects that mismatch, so the
+// beta jobs must re-sign with `--app-version version+sha` before publishing
+// (build-continuous-manifest.ts verifies this at publish time).
+const ciSource = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+check(
+  "beta updater archives are re-signed for version+sha",
+  ciSource.includes("signer sign --app-version") &&
+    ciSource.includes("Re-sign macOS updater archive for the beta version") &&
+    ciSource.includes("Re-sign Windows updater archive for the beta version"),
+  "ci.yml beta jobs must re-sign with --app-version version+sha or beta installs fail with SignedVersionMismatch",
 );
 
 // --- Artifact name parity (what CI uploads vs. what releases expect) ---------
