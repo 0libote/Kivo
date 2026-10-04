@@ -237,11 +237,6 @@ check(
   "audio-input entitlement missing; dictation has no mic on macOS",
 );
 const infoPlist = readFileSync(join(root, "src-tauri/Info.plist"), "utf8");
-check(
-  "Info.plist hides the Dock (tray-only agent)",
-  infoPlist.includes("LSUIElement"),
-  "LSUIElement missing; the app shows in the Dock instead of living in the menu bar/tray only",
-);
 for (const key of [
   "NSMicrophoneUsageDescription",
   "NSSpeechRecognitionUsageDescription",
@@ -253,6 +248,11 @@ for (const key of [
     `${key} missing; the OS prompt shows no purpose string`,
   );
 }
+check(
+  "Info.plist hides the Dock icon (LSUIElement)",
+  infoPlist.includes("LSUIElement"),
+  "LSUIElement missing; Kivo would gain a Dock tile instead of living in the menu bar",
+);
 check(
   "Swift speech bridge source exists",
   existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")),

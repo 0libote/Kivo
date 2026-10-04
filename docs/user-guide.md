@@ -97,7 +97,19 @@ What to check on the Mac:
   `tccutil reset All com.kivo.desktop` for Kivo only, no sudo needed),
   then re-allow each permission in turn. Manual equivalent:
   `tccutil reset All com.kivo.desktop`, then re-add Kivo in
-  System Settings → Privacy & Security → Accessibility.
+  System Settings → Privacy & Security → Accessibility and Input Monitoring.
+- If Kivo never appears in the Accessibility / Input Monitoring lists at
+  all, no system prompt ever fired for that copy — and without a prompt
+  there is no entry to toggle. Click Allow on the matching in-app row
+  (Settings → Permissions, or onboarding) and watch for the system
+  prompt; no prompt means no entry. Dev checkouts (`cargo run`,
+  `tauri dev`) register under the debug binary path and every rebuild
+  invalidates the entry, so verify permission behavior with the
+  installed `/Applications/Kivo.app` copy and look for the full binary
+  path in the list, not just "Kivo". On managed Macs an MDM profile can
+  block these two services entirely: microphone and Speech Recognition
+  working while Accessibility / Input Monitoring can never be enabled
+  points there.
 - `log show --last 10m --predicate 'process == "Kivo"'` and Console.app
   show the prompt / TCC denial lines; Kivo never logs text, transcripts,
   or keys.

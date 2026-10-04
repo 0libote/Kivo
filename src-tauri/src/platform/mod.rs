@@ -307,6 +307,14 @@ impl PlatformServices {
         self.implementation.request_permission(permission)
     }
 
+    /// Clears the first-run prompt memory (macOS Accessibility / Input
+    /// Monitoring). Called after `tccutil reset` so the rows return to Allow
+    /// instead of pointing at System Settings entries that no longer exist.
+    /// No-op where there is no prompt memory.
+    pub fn reset_permission_prompts(&self) {
+        self.implementation.reset_permission_prompts()
+    }
+
     pub fn register_dictation_shortcut(
         &self,
         shortcut: HoldShortcut,

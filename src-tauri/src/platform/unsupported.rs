@@ -50,6 +50,8 @@ impl PlatformImpl {
         Err(unsupported("request_permission"))
     }
 
+    pub(super) fn reset_permission_prompts(&self) {}
+
     pub(super) fn register_dictation_shortcut(
         &self,
         _shortcut: HoldShortcut,
