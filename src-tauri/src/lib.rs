@@ -45,8 +45,9 @@ pub fn run() {
                 // bundle Info.plist and Tauri starts as Regular. Force the
                 // accessory policy so Kivo lives in the menu bar, not the
                 // Dock, in both cases. Settings/onboarding windows still
-                // show and focus; they just don't gain a Dock tile.
-                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                // show and focus; they just don't gain a Dock tile. Bare
+                // call: this setter returns unit, which clippy denies binding.
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
