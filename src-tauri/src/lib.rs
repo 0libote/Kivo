@@ -39,6 +39,15 @@ pub fn run() {
         .manage(ShellState::new())
         .setup(|app| {
             let handle = app.handle().clone();
+            #[cfg(target_os = "macos")]
+            {
+                // Tray-only agent: LSUIElement in Info.plist hides the Dock
+                // for bundled .app launches, but `tauri dev` runs the binary
+                // directly without an .app bundle, so enforce the same policy
+                // at runtime. Accessory keeps menu-bar/tray + windows while
+                // staying out of the Dock and Cmd-Tab switcher.
+                handle.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
             // On-device models live in the app data directory and are managed

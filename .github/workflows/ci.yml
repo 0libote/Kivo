@@ -427,6 +427,25 @@ jobs:
         with:
           tauriScript: bash scripts/build-macos.sh
           args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
+      # `tauri build` signs the updater archive for the plain package version
+      # (0.1.0), but the rolling manifest announces `0.1.0+<sha>`. Since the
+      # CLI records the version in the signature's trusted comment and the
+      # updater plugin enforces signed == announced, the plain signature
+      # always fails beta installs (SignedVersionMismatch). Re-sign for the
+      # exact manifest version; the .app bundle version itself stays plain so
+      # CFBundleShortVersionString remains numeric.
+      - name: Re-sign macOS updater archive for the beta version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          sha="${KIVO_BUILD_SHA:?KIVO_BUILD_SHA is required}"
+          beta_version="$version+$sha"
+          mac_archive="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name '*.app.tar.gz' | head -n 1)"
+          test -n "$mac_archive" || { echo "macOS updater archive not found for re-sign"; exit 1; }
+          bun tauri signer sign --app-version "$beta_version" "$mac_archive"
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       - name: Verify macOS installer before upload
         run: bash scripts/verify-macos-bundle.sh src-tauri/target/aarch64-apple-darwin/release/bundle
       - name: Upload bundle for the publish job
@@ -491,6 +510,23 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Same signed-version binding as macos-beta above: `tauri build` signs
+      # for the plain package version, but continuous.json announces
+      # `version+sha`. Re-sign the NSIS updater bundle for the exact manifest
+      # version so the updater plugin accepts it.
+      - name: Re-sign Windows updater archive for the beta version
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if (-not $env:KIVO_BUILD_SHA) { throw 'KIVO_BUILD_SHA is required.' }
+          $betaVersion = "$version+$env:KIVO_BUILD_SHA"
+          $exe = Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'Windows updater archive not found for re-sign.' }
+          bun tauri signer sign --app-version $betaVersion $exe.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Updater re-sign failed.' }
       - name: Upload installer for the publish job
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

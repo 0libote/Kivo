@@ -17,6 +17,9 @@ cleanup() {
 trap cleanup EXIT
 
 app="$bundle_root/macos/Kivo.app"
+# Tray-only agent: the bundle must stay out of the Dock. Info.plist merging is
+# silent when it breaks, so fail here rather than shipping a dock icon.
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :LSUIElement' "$app/Contents/Info.plist" 2>/dev/null)" == "true" ]]
 icon_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")"
 [[ -f "$app/Contents/Resources/$icon_name" ]]
 codesign --verify --deep --strict --verbose=2 "$app"
