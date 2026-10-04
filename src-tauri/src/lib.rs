@@ -38,6 +38,17 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ShellState::new())
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                // LSUIElement=true hides the Dock icon in the bundled .app,
+                // but dev runs (`bun run dev` / `cargo run`) never read the
+                // bundle Info.plist and Tauri starts as Regular. Force the
+                // accessory policy so Kivo lives in the menu bar, not the
+                // Dock, in both cases. Settings/onboarding windows still
+                // show and focus; they just don't gain a Dock tile. Bare
+                // call: this setter returns unit, which clippy denies binding.
+                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
@@ -80,7 +91,15 @@ pub fn run() {
             shell::create_windows(&handle)?;
             shell::create_tray(&handle)?;
             shell::apply_theme(&handle, &settings.theme);
-            let _ = shell::register_shortcuts(&handle, &settings);
+            // Input Monitoring (Fn-hold detection) can only be granted in
+            // System Settings and only takes effect after a relaunch, so a
+            // denied grant fails here on every start until then. Log the
+            // reason: otherwise the tray looks alive while the Fn shortcut
+            // is silently inert, which is indistinguishable from a dead
+            // event tap in Console.app.
+            if let Err(error) = shell::register_shortcuts(&handle, &settings) {
+                eprintln!("Kivo shortcuts unavailable at startup: {}", error.message);
+            }
             if settings.onboarding_complete {
                 shell::sync_idle_flow_bar(&handle);
             }

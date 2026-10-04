@@ -243,6 +243,11 @@ for (const key of [
   );
 }
 check(
+  "Info.plist hides the Dock icon (LSUIElement)",
+  infoPlist.includes("LSUIElement"),
+  "LSUIElement missing; Kivo would gain a Dock tile instead of living in the menu bar",
+);
+check(
   "Swift speech bridge source exists",
   existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")),
   "build.rs compiles this on macOS; a missing file breaks only the macOS build",

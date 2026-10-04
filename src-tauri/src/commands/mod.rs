@@ -1615,6 +1615,10 @@ pub fn reset_permission_grants(
     platform: State<'_, Arc<crate::platform::PlatformServices>>,
 ) -> Result<Vec<FrontendPermissionStatus>, CommandError> {
     reset_tcc_grants().map_err(platform_command_error)?;
+    // The TCC rows are gone, so drop the in-process "already prompted" memory
+    // too: the next read must offer Allow (re-create the entry) rather than
+    // Open Settings (enable an entry that no longer exists).
+    platform.reset_permission_prompts();
     let statuses = permission_statuses(&platform).map_err(platform_command_error)?;
     refresh_shortcuts_after_permission(&app, &core, &statuses);
     let _ = app.emit("permission-status-changed", &statuses);
@@ -1624,9 +1628,11 @@ pub fn reset_permission_grants(
 /// `tccutil reset All <bundle-id>` drops every TCC grant for Kivo's bundle
 /// id (Accessibility, Input Monitoring, Microphone, Speech Recognition)
 /// without touching other apps. Per-user database, so no sudo needed.
+/// Absolute path: GUI-launched apps inherit a sparse PATH where a bare
+/// lookup can fail (same reason copy_text uses /usr/bin/pbcopy).
 #[cfg(target_os = "macos")]
 fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
-    let output = std::process::Command::new("tccutil")
+    let output = std::process::Command::new("/usr/bin/tccutil")
         .args(["reset", "All", "com.kivo.desktop"])
         .output()
         .map_err(|_| {
