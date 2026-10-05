@@ -168,6 +168,7 @@ mod tests {
                     microphone_id: None,
                     locale: Some("en".into()),
                     backend: SpeechBackend::Voz,
+                    vocabulary: Vec::new(),
                 },
                 Arc::new(|_| {}),
             )

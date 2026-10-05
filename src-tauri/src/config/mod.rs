@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -220,6 +220,11 @@ pub struct DictationSettings {
     /// Tools ordered queue; a value pins cleanup to one model (typically a
     /// smaller/cheaper one) on the same AI provider.
     pub cleanup_model: Option<String>,
+    /// Custom vocabulary: exact spellings the transcriber should prefer and
+    /// AI cleanup / Writing Tools must not "correct", each with optional
+    /// context for the AI. Empty by default.
+    #[serde(default, deserialize_with = "deserialize_vocabulary")]
+    pub vocabulary: Vec<VocabularyEntry>,
 }
 
 impl Default for DictationSettings {
@@ -236,6 +241,7 @@ impl Default for DictationSettings {
             speech_engine: SpeechEnginePreference::System,
             local_speech_model: None,
             cleanup_model: None,
+            vocabulary: Vec::new(),
         }
     }
 }
@@ -267,6 +273,33 @@ impl DictationSettings {
             let trimmed = id.trim();
             self.cleanup_model = (!trimmed.is_empty()).then(|| trimmed.to_owned());
         }
+        // Custom vocabulary: trim, drop empties, fold duplicates
+        // case-insensitively (first spelling wins; a later duplicate still
+        // fills in a missing meaning), and cap the count so an imported list
+        // can neither bloat the settings file nor dilute the model hint
+        // into noise.
+        let mut index_by_word: HashMap<String, usize> = HashMap::new();
+        let mut normalized: Vec<VocabularyEntry> = Vec::new();
+        for entry in self.vocabulary.drain(..) {
+            let word = truncate(entry.word.trim(), MAX_VOCABULARY_WORD_CHARS);
+            if word.is_empty() {
+                continue;
+            }
+            let meaning = truncate(entry.meaning.trim(), MAX_VOCABULARY_MEANING_CHARS);
+            let key = word.to_lowercase();
+            if let Some(&index) = index_by_word.get(&key) {
+                if normalized[index].meaning.is_empty() && !meaning.is_empty() {
+                    normalized[index].meaning = meaning;
+                }
+                continue;
+            }
+            if normalized.len() >= MAX_VOCABULARY_WORDS {
+                continue;
+            }
+            index_by_word.insert(key, normalized.len());
+            normalized.push(VocabularyEntry { word, meaning });
+        }
+        self.vocabulary = normalized;
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
@@ -290,6 +323,14 @@ impl DictationSettings {
             && id.len() > 128
         {
             return Err(SettingsError::InvalidAiModel);
+        }
+        if self.vocabulary.len() > MAX_VOCABULARY_WORDS
+            || self.vocabulary.iter().any(|entry| {
+                entry.word.chars().count() > MAX_VOCABULARY_WORD_CHARS
+                    || entry.meaning.chars().count() > MAX_VOCABULARY_MEANING_CHARS
+            })
+        {
+            return Err(SettingsError::InvalidVocabulary);
         }
         Ok(())
     }
@@ -376,6 +417,49 @@ pub struct WritingPresetSettings {
     /// Per-preset model priority. Empty follows the global AI model queue.
     #[serde(default)]
     pub models: Vec<String>,
+}
+
+/// Custom dictation vocabulary ("Custom words" in Settings → Dictation).
+/// Names, acronyms, and terms the transcriber should prefer with the user's
+/// exact spelling, each with optional context ("what it means") for the AI.
+/// Stored as entries (no wrong→right correction rules): engines receive the
+/// words as hints and the AI prompts carry words plus meanings as protected
+/// terms.
+pub const MAX_VOCABULARY_WORDS: usize = 200;
+pub const MAX_VOCABULARY_WORD_CHARS: usize = 60;
+pub const MAX_VOCABULARY_MEANING_CHARS: usize = 200;
+
+/// One custom word plus optional context for the AI. Serialized as an object;
+/// a bare string still deserializes (early settings files stored words only).
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct VocabularyEntry {
+    pub word: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub meaning: String,
+}
+
+fn deserialize_vocabulary<'de, D>(deserializer: D) -> Result<Vec<VocabularyEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum WordOrEntry {
+        Word(String),
+        Entry(VocabularyEntry),
+    }
+    let items = Vec::<WordOrEntry>::deserialize(deserializer)?;
+    Ok(items
+        .into_iter()
+        .map(|item| match item {
+            WordOrEntry::Word(word) => VocabularyEntry {
+                word,
+                meaning: String::new(),
+            },
+            WordOrEntry::Entry(entry) => entry,
+        })
+        .collect())
 }
 
 /// Caps mirrored by `src/features/writing-tools/presets.ts`.
@@ -569,6 +653,7 @@ pub enum SettingsError {
     InvalidLanguage,
     InvalidLocalModel,
     InvalidAiModel,
+    InvalidVocabulary,
 }
 
 impl fmt::Display for SettingsError {
@@ -587,6 +672,7 @@ impl fmt::Display for SettingsError {
             Self::InvalidLanguage => "The configured language is invalid.",
             Self::InvalidLocalModel => "The configured speech model is invalid.",
             Self::InvalidAiModel => "The configured AI model is not supported.",
+            Self::InvalidVocabulary => "The custom vocabulary list is invalid.",
         };
         formatter.write_str(message)
     }
@@ -1134,5 +1220,84 @@ mod tests {
                 .cleanup_model,
             None
         );
+    }
+
+    #[test]
+    fn dictation_vocabulary_normalizes_and_caps() {
+        use super::VocabularyEntry;
+        fn entry(word: &str, meaning: &str) -> VocabularyEntry {
+            VocabularyEntry {
+                word: word.into(),
+                meaning: meaning.into(),
+            }
+        }
+        // Empty by default.
+        assert!(AppSettings::default().dictation.vocabulary.is_empty());
+
+        // Trims, drops empties, folds case-insensitive duplicates (first
+        // spelling wins, later duplicates still fill a missing meaning).
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = vec![
+            entry("  Kivo  ", ""),
+            entry("", "dropped"),
+            entry("kivo", "our product"),
+            entry("SOC 2", "compliance framework"),
+            entry("soc 2 ", ""),
+        ];
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            normalized.dictation.vocabulary,
+            vec![
+                entry("Kivo", "our product"),
+                entry("SOC 2", "compliance framework"),
+            ]
+        );
+
+        // Over-long words and meanings truncate to their caps instead of
+        // failing.
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = vec![entry(
+            &"x".repeat(super::MAX_VOCABULARY_WORD_CHARS + 10),
+            &"y".repeat(super::MAX_VOCABULARY_MEANING_CHARS + 10),
+        )];
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(normalized.dictation.vocabulary.len(), 1);
+        assert_eq!(
+            normalized.dictation.vocabulary[0].word.chars().count(),
+            super::MAX_VOCABULARY_WORD_CHARS
+        );
+        assert_eq!(
+            normalized.dictation.vocabulary[0].meaning.chars().count(),
+            super::MAX_VOCABULARY_MEANING_CHARS
+        );
+
+        // Huge imports truncate to the cap (first entries win).
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = (0..super::MAX_VOCABULARY_WORDS + 50)
+            .map(|n| entry(&format!("word-{n}"), ""))
+            .collect();
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            normalized.dictation.vocabulary.len(),
+            super::MAX_VOCABULARY_WORDS
+        );
+        assert_eq!(normalized.dictation.vocabulary[0].word, "word-0");
+    }
+
+    #[test]
+    fn dictation_vocabulary_reads_legacy_word_lists() {
+        // Settings written while the vocabulary was a plain word list keep
+        // working: bare strings become entries without a meaning.
+        let legacy = serde_json::json!({
+            "schemaVersion": 3,
+            "dictation": { "vocabulary": ["Kivo", {"word": "SOC 2", "meaning": "compliance"}] },
+        });
+        let settings: AppSettings = serde_json::from_value(legacy).unwrap();
+        let settings = settings.validate_and_normalize().unwrap();
+        assert_eq!(settings.dictation.vocabulary.len(), 2);
+        assert_eq!(settings.dictation.vocabulary[0].word, "Kivo");
+        assert_eq!(settings.dictation.vocabulary[0].meaning, "");
+        assert_eq!(settings.dictation.vocabulary[1].word, "SOC 2");
+        assert_eq!(settings.dictation.vocabulary[1].meaning, "compliance");
     }
 }

@@ -25,6 +25,7 @@ import {
 } from "../../types";
 import { testFailureConnection } from "./connection";
 import { DictationCleanupModel } from "./DictationCleanupModel";
+import { DictationVocabulary } from "./DictationVocabulary";
 import { HomeSection } from "./HomeSection";
 import { LocalAiSetup } from "./LocalAiSetup";
 import { LocalSpeechModels } from "./LocalSpeechModels";
@@ -293,6 +294,7 @@ function SectionContent(props: SectionContentProps) {
           microphones={props.microphones}
           settings={props.settings}
           save={props.save}
+          setNotice={props.setNotice}
         />
       );
     case "writing":
@@ -683,12 +685,14 @@ function DictationSection({
   microphones,
   settings,
   save,
+  setNotice,
 }: {
   readonly context: AppContext;
   readonly languages: SpeechLanguage[];
   readonly microphones: MicrophoneDevice[];
   readonly settings: AppSettings;
   readonly save: SaveSettings;
+  readonly setNotice: (value: string | null) => void;
 }) {
   const [vozStatus, setVozStatus] = useState<VozModelStatus>({
     supported: false,
@@ -862,6 +866,13 @@ function DictationSection({
             <DictationCleanupModel save={save} settings={settings} />
           </SettingRow>
         ) : null}
+        <SettingRow
+          label="Custom words"
+          description="Names, acronyms, and terms the transcriber should prefer with your exact spelling — add what each one means so AI cleanup and Writing Tools use them correctly."
+          stacked
+        >
+          <DictationVocabulary onNotice={setNotice} save={save} settings={settings} />
+        </SettingRow>
         <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
           <Switch
             checked={settings.soundFeedback}
