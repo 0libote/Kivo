@@ -56,11 +56,15 @@ pub struct MicrophoneDevice {
     pub is_default: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SpeechStartOptions {
     pub microphone_id: Option<String>,
     pub locale: Option<String>,
     pub backend: SpeechBackend,
+    /// Custom vocabulary ("Custom words"). Engines that support a bias hint
+    /// (Whisper-family `initial_prompt` today) prefer these spellings; every
+    /// engine benefits from the AI prompt protection in `AppCore` regardless.
+    pub vocabulary: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

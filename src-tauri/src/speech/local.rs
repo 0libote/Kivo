@@ -33,6 +33,8 @@ struct LoadedModel {
 struct ActiveSession {
     capture: AudioCapture,
     locale: Option<String>,
+    vocabulary: Vec<String>,
+    whisper_hint: bool,
 }
 
 pub struct LocalSpeechEngine {
@@ -55,17 +57,38 @@ impl LocalSpeechEngine {
         }
     }
 
-    fn resolve_model(&self, model_id: &str) -> Result<std::path::PathBuf, SpeechError> {
-        let id = if model_id.trim().is_empty() {
+    fn effective_model_id<'a>(&self, model_id: &'a str) -> &'a str {
+        if model_id.trim().is_empty() {
             self.store
                 .first_downloaded()
                 .unwrap_or(super::model_store::DEFAULT_LOCAL_MODEL_ID)
         } else {
             model_id
-        };
+        }
+    }
+
+    fn resolve_model(&self, model_id: &str) -> Result<std::path::PathBuf, SpeechError> {
+        let id = self.effective_model_id(model_id);
         self.store
             .path_for(id)
             .ok_or(SpeechError::LocalModelUnavailable)
+    }
+
+    /// Custom-vocabulary `initial_prompt` for Whisper-family models. Other
+    /// families reject the Whisper run extension, so they transcribe
+    /// unchanged and rely on the AI prompt protection instead. Capped to the
+    /// same prompt terms as the AI hint so a huge import stays bounded.
+    fn whisper_initial_prompt(vocabulary: &[String]) -> Option<String> {
+        let terms: Vec<&str> = vocabulary
+            .iter()
+            .map(|word| word.trim())
+            .filter(|word| !word.is_empty())
+            .take(crate::ai::MAX_VOCABULARY_PROMPT_TERMS)
+            .collect();
+        if terms.is_empty() {
+            return None;
+        }
+        Some(format!("Vocabulary: {}.", terms.join(", ")))
     }
 
     async fn ensure_loaded(&self, path: &Path) -> Result<(), SpeechError> {
@@ -100,6 +123,8 @@ impl LocalSpeechEngine {
         &self,
         pcm: Vec<f32>,
         locale: Option<String>,
+        vocabulary: Vec<String>,
+        whisper_hint: bool,
     ) -> Result<SpeechTranscript, SpeechError> {
         let mut loaded = self
             .loaded
@@ -113,9 +138,20 @@ impl LocalSpeechEngine {
                 .unwrap_or(tag.as_str())
                 .to_owned()
         });
+        let family = if whisper_hint {
+            Self::whisper_initial_prompt(&vocabulary).map(|initial_prompt| {
+                transcribe_cpp::RunExtension::Whisper(transcribe_cpp::WhisperRunOptions {
+                    initial_prompt: Some(initial_prompt),
+                    ..Default::default()
+                })
+            })
+        } else {
+            None
+        };
         let (result, loaded) = tokio::task::spawn_blocking(move || {
             let options = RunOptions {
                 language,
+                family,
                 ..RunOptions::default()
             };
             let result = loaded.session.run(&pcm, &options);
@@ -148,6 +184,10 @@ impl SpeechEngine for LocalSpeechEngine {
             self.ensure_loaded(&path).await?;
 
             let capture = AudioCapture::start(options.microphone_id, events).await?;
+            // The hint is decided up front from the catalog family so a
+            // non-Whisper model never receives an extension it rejects.
+            let whisper_hint = !options.vocabulary.is_empty()
+                && ModelStore::is_whisper_family(self.effective_model_id(&model_id));
 
             let id = SpeechSessionId(self.next_session.fetch_add(1, Ordering::Relaxed));
             self.sessions
@@ -158,6 +198,8 @@ impl SpeechEngine for LocalSpeechEngine {
                     ActiveSession {
                         capture,
                         locale: options.locale,
+                        vocabulary: options.vocabulary,
+                        whisper_hint,
                     },
                 );
             Ok(id)
@@ -176,7 +218,13 @@ impl SpeechEngine for LocalSpeechEngine {
                 .remove(&session)
                 .ok_or(SpeechError::NotRunning)?;
             let pcm = session.capture.finish().await?;
-            self.transcribe(pcm, session.locale).await
+            self.transcribe(
+                pcm,
+                session.locale,
+                session.vocabulary,
+                session.whisper_hint,
+            )
+            .await
         })
     }
 

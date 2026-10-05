@@ -747,6 +747,7 @@ mod tests {
                     microphone_id: None,
                     locale: Some("en".into()),
                     backend: SpeechBackend::Voz,
+                    vocabulary: Vec::new(),
                 },
                 Arc::new(|_: SpeechEvent| {}),
             )
@@ -764,6 +765,7 @@ mod tests {
                     microphone_id: None,
                     locale: Some("ja-JP".into()),
                     backend: SpeechBackend::Voz,
+                    vocabulary: Vec::new(),
                 },
                 Arc::new(|_: SpeechEvent| {}),
             )

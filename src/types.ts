@@ -182,6 +182,8 @@ export interface AppSettings {
   localSpeechModel: string | null;
   /** Model used to clean up dictated text; null follows the Writing Tools queue. */
   dictationCleanupModel: string | null;
+  /** Custom words: exact spellings the transcriber should prefer and AI cleanup must not "correct". */
+  dictationVocabulary: string[];
   writingShortcut: string;
   /** Ordered ids of the enabled Writing Tools presets (built-in or custom). */
   enabledWritingActions: string[];
@@ -360,6 +362,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     speechEngine: "system",
     localSpeechModel: null,
     dictationCleanupModel: null,
+    dictationVocabulary: [],
     writingShortcut,
     enabledWritingActions: [...DEFAULT_WRITING_ACTIONS],
     writingPresets: [],

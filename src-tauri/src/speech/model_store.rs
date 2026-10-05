@@ -649,6 +649,13 @@ impl ModelStore {
         self.path_for(id).is_some()
     }
 
+    /// Whether `id` is a Whisper-family model. Only that family accepts an
+    /// `initial_prompt` run extension, so the custom-vocabulary hint is
+    /// confined to it; every other family transcribes unchanged.
+    pub fn is_whisper_family(id: &str) -> bool {
+        catalog_entry(id).is_some_and(|entry| entry.family == "Whisper")
+    }
+
     /// `id` of the first installed model in catalog order, if any.
     pub fn first_downloaded(&self) -> Option<&'static str> {
         CATALOG

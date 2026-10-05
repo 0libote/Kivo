@@ -415,7 +415,7 @@ impl AppCore {
         let started = tokio::select! {
             biased;
             _ = cancelled.changed() => return Ok(DictationPhase::Hidden),
-            result = self.speech.start(SpeechStartOptions { microphone_id: settings.microphone_id, locale, backend }, events) => result,
+            result = self.speech.start(SpeechStartOptions { microphone_id: settings.microphone_id, locale, backend, vocabulary: settings.vocabulary }, events) => result,
         };
         let session = match started {
             Ok(session) => session,
@@ -487,7 +487,7 @@ impl AppCore {
         };
         let (mut final_text, _voz_alignment) = transcript.into_parts();
         if dictation.improve_with_ai
-            && let Ok(prompt) = dictation_cleanup_prompt(&final_text)
+            && let Ok(prompt) = dictation_cleanup_prompt(&final_text, &dictation.vocabulary)
         {
             // Missing keys fail silently here (raw transcript is kept): dictation
             // cleanup is best-effort inside a 4s deadline, never a hard error.
@@ -712,6 +712,10 @@ impl AppCore {
                 .or_else(|| selection.as_ref().map(|value| value.text()))
                 .ok_or(PromptError::EmptySource)?;
             let (provider, mut models, base_url, reasoning_mode) = self.ai_config();
+            let vocabulary = self
+                .settings()
+                .map(|settings| settings.dictation.vocabulary)
+                .unwrap_or_default();
             if let Some(override_models) = models_override.as_ref()
                 && !override_models.is_empty()
             {
@@ -743,9 +747,18 @@ impl AppCore {
                         {
                             return Err(PromptError::SummaryTooLong.into());
                         }
-                        writing_prompt_from_system(instruction.to_owned(), source_text)?
+                        writing_prompt_from_system(
+                            instruction.to_owned(),
+                            source_text,
+                            &vocabulary,
+                        )?
                     }
-                    _ => writing_prompt(action, source_text, custom_instruction.as_deref())?,
+                    _ => writing_prompt(
+                        action,
+                        source_text,
+                        custom_instruction.as_deref(),
+                        &vocabulary,
+                    )?,
                 };
                 let api_key = if provider.key_optional() {
                     self.load_provider_key(provider)?
@@ -1209,6 +1222,8 @@ pub struct FrontendSettings {
     pub local_speech_model: Option<String>,
     #[serde(default)]
     pub dictation_cleanup_model: Option<String>,
+    #[serde(default)]
+    pub dictation_vocabulary: Vec<String>,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
     #[serde(default)]
@@ -1269,6 +1284,7 @@ impl From<AppSettings> for FrontendSettings {
             speech_engine: speech_engine_id(settings.dictation.speech_engine).into(),
             local_speech_model: settings.dictation.local_speech_model,
             dictation_cleanup_model: settings.dictation.cleanup_model,
+            dictation_vocabulary: settings.dictation.vocabulary,
             writing_shortcut: settings.writing_tools.shortcut.accelerator,
             enabled_writing_actions: settings.writing_tools.enabled_actions,
             writing_presets: settings.writing_tools.presets,
@@ -1347,6 +1363,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 speech_engine: parse_speech_engine(&settings.speech_engine),
                 local_speech_model: settings.local_speech_model,
                 cleanup_model: settings.dictation_cleanup_model,
+                vocabulary: settings.dictation_vocabulary,
             },
             writing_tools: crate::config::WritingToolsSettings {
                 shortcut: crate::config::ShortcutBinding::new(settings.writing_shortcut),
@@ -1381,6 +1398,7 @@ pub struct SettingsPatch {
     speech_engine: Option<String>,
     local_speech_model: Option<Option<String>>,
     dictation_cleanup_model: Option<Option<String>>,
+    dictation_vocabulary: Option<Vec<String>>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
     writing_presets: Option<Vec<crate::config::WritingPresetSettings>>,
@@ -1424,6 +1442,7 @@ impl SettingsPatch {
         assign!(speech_engine);
         assign!(local_speech_model);
         assign!(dictation_cleanup_model);
+        assign!(dictation_vocabulary);
         assign!(writing_shortcut);
         assign!(enabled_writing_actions);
         assign!(writing_presets);

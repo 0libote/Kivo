@@ -220,6 +220,9 @@ pub struct DictationSettings {
     /// Tools ordered queue; a value pins cleanup to one model (typically a
     /// smaller/cheaper one) on the same AI provider.
     pub cleanup_model: Option<String>,
+    /// Custom vocabulary: exact spellings the transcriber should prefer and
+    /// AI cleanup / Writing Tools must not "correct". Empty by default.
+    pub vocabulary: Vec<String>,
 }
 
 impl Default for DictationSettings {
@@ -236,6 +239,7 @@ impl Default for DictationSettings {
             speech_engine: SpeechEnginePreference::System,
             local_speech_model: None,
             cleanup_model: None,
+            vocabulary: Vec::new(),
         }
     }
 }
@@ -267,6 +271,18 @@ impl DictationSettings {
             let trimmed = id.trim();
             self.cleanup_model = (!trimmed.is_empty()).then(|| trimmed.to_owned());
         }
+        // Custom vocabulary: trim, drop empties, fold duplicates
+        // case-insensitively (first spelling wins), and cap the count so an
+        // imported list can neither bloat the settings file nor dilute the
+        // model hint into noise.
+        let mut seen = HashSet::new();
+        self.vocabulary = self
+            .vocabulary
+            .drain(..)
+            .map(|word| truncate(word.trim(), MAX_VOCABULARY_WORD_CHARS))
+            .filter(|word| !word.is_empty() && seen.insert(word.to_lowercase()))
+            .take(MAX_VOCABULARY_WORDS)
+            .collect();
     }
 
     fn validate(&self) -> Result<(), SettingsError> {
@@ -290,6 +306,14 @@ impl DictationSettings {
             && id.len() > 128
         {
             return Err(SettingsError::InvalidAiModel);
+        }
+        if self.vocabulary.len() > MAX_VOCABULARY_WORDS
+            || self
+                .vocabulary
+                .iter()
+                .any(|word| word.chars().count() > MAX_VOCABULARY_WORD_CHARS)
+        {
+            return Err(SettingsError::InvalidVocabulary);
         }
         Ok(())
     }
@@ -377,6 +401,14 @@ pub struct WritingPresetSettings {
     #[serde(default)]
     pub models: Vec<String>,
 }
+
+/// Custom dictation vocabulary ("Custom words" in Settings → Dictation).
+/// Names, acronyms, and terms the transcriber and AI cleanup should prefer
+/// with the user's exact spelling. Stored as plain words only (no
+/// wrong→right correction rules): engines receive them as hints and the AI
+/// prompts carry them as protected terms.
+pub const MAX_VOCABULARY_WORDS: usize = 200;
+pub const MAX_VOCABULARY_WORD_CHARS: usize = 60;
 
 /// Caps mirrored by `src/features/writing-tools/presets.ts`.
 pub const MAX_WRITING_PRESETS: usize = 24;
@@ -569,6 +601,7 @@ pub enum SettingsError {
     InvalidLanguage,
     InvalidLocalModel,
     InvalidAiModel,
+    InvalidVocabulary,
 }
 
 impl fmt::Display for SettingsError {
@@ -587,6 +620,7 @@ impl fmt::Display for SettingsError {
             Self::InvalidLanguage => "The configured language is invalid.",
             Self::InvalidLocalModel => "The configured speech model is invalid.",
             Self::InvalidAiModel => "The configured AI model is not supported.",
+            Self::InvalidVocabulary => "The custom vocabulary list is invalid.",
         };
         formatter.write_str(message)
     }
@@ -1134,5 +1168,49 @@ mod tests {
                 .cleanup_model,
             None
         );
+    }
+
+    #[test]
+    fn dictation_vocabulary_normalizes_and_caps() {
+        // Empty by default.
+        assert!(AppSettings::default().dictation.vocabulary.is_empty());
+
+        // Trims, drops empties, folds case-insensitive duplicates (first
+        // spelling wins), and round-trips through save/load.
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = vec![
+            "  Kivo  ".into(),
+            "".into(),
+            "kivo".into(),
+            "SOC 2".into(),
+            "soc 2 ".into(),
+        ];
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            normalized.dictation.vocabulary,
+            vec!["Kivo".to_owned(), "SOC 2".to_owned()]
+        );
+
+        // Over-long words truncate to the cap instead of failing.
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = vec!["x".repeat(super::MAX_VOCABULARY_WORD_CHARS + 10)];
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(normalized.dictation.vocabulary.len(), 1);
+        assert_eq!(
+            normalized.dictation.vocabulary[0].chars().count(),
+            super::MAX_VOCABULARY_WORD_CHARS
+        );
+
+        // Huge imports truncate to the cap (first entries win).
+        let mut settings = AppSettings::default();
+        settings.dictation.vocabulary = (0..super::MAX_VOCABULARY_WORDS + 50)
+            .map(|n| format!("word-{n}"))
+            .collect();
+        let normalized = settings.validate_and_normalize().unwrap();
+        assert_eq!(
+            normalized.dictation.vocabulary.len(),
+            super::MAX_VOCABULARY_WORDS
+        );
+        assert_eq!(normalized.dictation.vocabulary[0], "word-0");
     }
 }
