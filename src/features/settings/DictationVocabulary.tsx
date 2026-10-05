@@ -154,7 +154,6 @@ export function DictationVocabulary({ settings, save, onNotice }: DictationVocab
                     <strong {...stylex.props(styles.word)}>{entry.word}</strong>
                     <input
                       aria-label={`Meaning for ${entry.word}`}
-                      autoFocus
                       disabled={busy}
                       onChange={(event) => setEditMeaning(event.target.value)}
                       onKeyDown={(event) => {
@@ -162,6 +161,12 @@ export function DictationVocabulary({ settings, save, onNotice }: DictationVocab
                         if (event.key === "Escape") setEditing(null);
                       }}
                       placeholder="What it means"
+                      // The row mounts from the Edit button's own click (which
+                      // unmounts), so focus the input as focus management —
+                      // not a page-load autofocus.
+                      ref={(input) => {
+                        input?.focus();
+                      }}
                       value={editMeaning}
                       {...stylex.props(styles.input, styles.inlineInput)}
                     />
