@@ -183,7 +183,7 @@ export interface AppSettings {
   /** Model used to clean up dictated text; null follows the Writing Tools queue. */
   dictationCleanupModel: string | null;
   /** Custom words: exact spellings the transcriber should prefer and AI cleanup must not "correct". */
-  dictationVocabulary: string[];
+  dictationVocabulary: VocabularyWord[];
   writingShortcut: string;
   /** Ordered ids of the enabled Writing Tools presets (built-in or custom). */
   enabledWritingActions: string[];
@@ -203,6 +203,12 @@ export interface PermissionStatus {
   state: PermissionState;
   required: boolean;
   explanation?: string;
+}
+
+/** One custom word plus optional context ("what it means") for the AI. */
+export interface VocabularyWord {
+  word: string;
+  meaning: string;
 }
 
 export interface MicrophoneDevice {

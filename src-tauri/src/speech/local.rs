@@ -33,7 +33,7 @@ struct LoadedModel {
 struct ActiveSession {
     capture: AudioCapture,
     locale: Option<String>,
-    vocabulary: Vec<String>,
+    vocabulary: Vec<crate::config::VocabularyEntry>,
     whisper_hint: bool,
 }
 
@@ -74,14 +74,15 @@ impl LocalSpeechEngine {
             .ok_or(SpeechError::LocalModelUnavailable)
     }
 
-    /// Custom-vocabulary `initial_prompt` for Whisper-family models. Other
-    /// families reject the Whisper run extension, so they transcribe
+    /// Custom-vocabulary `initial_prompt` for Whisper-family models. Words
+    /// only: meanings live in the AI prompts, where there is room for them.
+    /// Other families reject the Whisper run extension, so they transcribe
     /// unchanged and rely on the AI prompt protection instead. Capped to the
     /// same prompt terms as the AI hint so a huge import stays bounded.
-    fn whisper_initial_prompt(vocabulary: &[String]) -> Option<String> {
+    fn whisper_initial_prompt(vocabulary: &[crate::config::VocabularyEntry]) -> Option<String> {
         let terms: Vec<&str> = vocabulary
             .iter()
-            .map(|word| word.trim())
+            .map(|entry| entry.word.trim())
             .filter(|word| !word.is_empty())
             .take(crate::ai::MAX_VOCABULARY_PROMPT_TERMS)
             .collect();
@@ -123,7 +124,7 @@ impl LocalSpeechEngine {
         &self,
         pcm: Vec<f32>,
         locale: Option<String>,
-        vocabulary: Vec<String>,
+        vocabulary: Vec<crate::config::VocabularyEntry>,
         whisper_hint: bool,
     ) -> Result<SpeechTranscript, SpeechError> {
         let mut loaded = self

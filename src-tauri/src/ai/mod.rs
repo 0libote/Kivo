@@ -382,12 +382,24 @@ pub const MAX_VOCABULARY_PROMPT_TERMS: usize = 100;
 /// Custom-words clause shared by dictation cleanup and Writing Tools. The
 /// vocabulary is a word list only (no wrong→right rules), so it acts as a
 /// protection instruction: prefer these exact spellings and never "correct"
-/// them into everyday words. `None` when the list is empty.
-pub fn vocabulary_hint(vocabulary: &[String]) -> Option<String> {
-    let terms: Vec<&str> = vocabulary
+/// them into everyday words. Entries with context render as
+/// `word (what it means)` so the model can disambiguate. `None` when the
+/// list is empty.
+pub fn vocabulary_hint(vocabulary: &[crate::config::VocabularyEntry]) -> Option<String> {
+    let terms: Vec<String> = vocabulary
         .iter()
-        .map(|word| word.trim())
-        .filter(|word| !word.is_empty())
+        .map(|entry| {
+            let word = entry.word.trim();
+            let meaning = entry.meaning.trim();
+            if word.is_empty() {
+                String::new()
+            } else if meaning.is_empty() {
+                word.to_owned()
+            } else {
+                format!("{word} ({meaning})")
+            }
+        })
+        .filter(|term| !term.is_empty())
         .take(MAX_VOCABULARY_PROMPT_TERMS)
         .collect();
     if terms.is_empty() {
@@ -403,7 +415,7 @@ pub fn writing_prompt(
     action: WritingAction,
     source_text: &str,
     custom_instruction: Option<&str>,
-    vocabulary: &[String],
+    vocabulary: &[crate::config::VocabularyEntry],
 ) -> Result<AiPrompt, PromptError> {
     if source_text.trim().is_empty() {
         return Err(PromptError::EmptySource);
@@ -462,7 +474,7 @@ pub fn writing_prompt(
 pub fn writing_prompt_from_system(
     system_instruction: String,
     source_text: &str,
-    vocabulary: &[String],
+    vocabulary: &[crate::config::VocabularyEntry],
 ) -> Result<AiPrompt, PromptError> {
     if source_text.trim().is_empty() {
         return Err(PromptError::EmptySource);
@@ -479,7 +491,7 @@ pub fn writing_prompt_from_system(
 
 pub fn dictation_cleanup_prompt(
     transcript: &str,
-    vocabulary: &[String],
+    vocabulary: &[crate::config::VocabularyEntry],
 ) -> Result<AiPrompt, PromptError> {
     if transcript.trim().is_empty() {
         return Err(PromptError::EmptySource);
@@ -1278,15 +1290,24 @@ mod tests {
 
     #[test]
     fn vocabulary_hint_is_empty_aware_and_bounded() {
+        use crate::config::VocabularyEntry;
+        fn entry(word: &str, meaning: &str) -> VocabularyEntry {
+            VocabularyEntry {
+                word: word.into(),
+                meaning: meaning.into(),
+            }
+        }
         assert_eq!(super::vocabulary_hint(&[]), None);
-        assert_eq!(super::vocabulary_hint(&["  ".to_owned()]), None);
-        let hint = super::vocabulary_hint(&["Kivo".to_owned(), "SOC 2".to_owned()]).unwrap();
-        assert!(hint.contains("Kivo"));
+        assert_eq!(super::vocabulary_hint(&[entry("  ", "")]), None);
+        let hint =
+            super::vocabulary_hint(&[entry("Kivo", "our product"), entry("SOC 2", "")]).unwrap();
+        assert!(hint.contains("Kivo (our product)"));
         assert!(hint.contains("SOC 2"));
+        assert!(!hint.contains("SOC 2 ("));
         assert!(hint.contains("never \"correct\" them"));
         // Oversized lists truncate to the prompt cap.
-        let many: Vec<String> = (0..super::MAX_VOCABULARY_PROMPT_TERMS + 10)
-            .map(|n| format!("word-{n}"))
+        let many: Vec<VocabularyEntry> = (0..super::MAX_VOCABULARY_PROMPT_TERMS + 10)
+            .map(|n| entry(&format!("word-{n}"), ""))
             .collect();
         let hint = super::vocabulary_hint(&many).unwrap();
         assert!(hint.contains("word-0"));
@@ -1295,19 +1316,29 @@ mod tests {
 
     #[test]
     fn vocabulary_reaches_dictation_and_writing_prompts() {
-        let vocabulary = vec!["Kivo".to_owned(), "Siobhán".to_owned()];
+        use crate::config::VocabularyEntry;
+        let vocabulary = vec![
+            VocabularyEntry {
+                word: "Kivo".into(),
+                meaning: "our product".into(),
+            },
+            VocabularyEntry {
+                word: "Siobhán".into(),
+                meaning: String::new(),
+            },
+        ];
         let prompt = dictation_cleanup_prompt("hello", &vocabulary).unwrap();
-        assert!(prompt.system_instruction.contains("Kivo"));
+        assert!(prompt.system_instruction.contains("Kivo (our product)"));
         assert!(prompt.system_instruction.contains("Siobhán"));
 
         let prompt = writing_prompt(WritingAction::Proofread, "hello", None, &vocabulary).unwrap();
-        assert!(prompt.system_instruction.contains("Kivo"));
+        assert!(prompt.system_instruction.contains("Kivo (our product)"));
 
         let prompt =
             writing_prompt_from_system("Do exactly this.".to_owned(), "the source", &vocabulary)
                 .unwrap();
         assert!(prompt.system_instruction.starts_with("Do exactly this."));
-        assert!(prompt.system_instruction.contains("Kivo"));
+        assert!(prompt.system_instruction.contains("Kivo (our product)"));
 
         // Empty vocabulary leaves prompts untouched.
         let prompt = dictation_cleanup_prompt("hello", &[]).unwrap();

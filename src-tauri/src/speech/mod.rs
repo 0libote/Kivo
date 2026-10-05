@@ -62,9 +62,10 @@ pub struct SpeechStartOptions {
     pub locale: Option<String>,
     pub backend: SpeechBackend,
     /// Custom vocabulary ("Custom words"). Engines that support a bias hint
-    /// (Whisper-family `initial_prompt` today) prefer these spellings; every
-    /// engine benefits from the AI prompt protection in `AppCore` regardless.
-    pub vocabulary: Vec<String>,
+    /// (Whisper-family `initial_prompt` today, words only) prefer these
+    /// spellings; every engine benefits from the AI prompt protection in
+    /// `AppCore` regardless.
+    pub vocabulary: Vec<crate::config::VocabularyEntry>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

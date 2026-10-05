@@ -868,7 +868,7 @@ function DictationSection({
         ) : null}
         <SettingRow
           label="Custom words"
-          description="Names, acronyms, and terms the transcriber should prefer with your exact spelling. Also protected from AI cleanup and Writing Tools."
+          description="Names, acronyms, and terms the transcriber should prefer with your exact spelling — add what each one means so AI cleanup and Writing Tools use them correctly."
           stacked
         >
           <DictationVocabulary onNotice={setNotice} save={save} settings={settings} />

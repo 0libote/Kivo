@@ -1223,7 +1223,7 @@ pub struct FrontendSettings {
     #[serde(default)]
     pub dictation_cleanup_model: Option<String>,
     #[serde(default)]
-    pub dictation_vocabulary: Vec<String>,
+    pub dictation_vocabulary: Vec<crate::config::VocabularyEntry>,
     pub writing_shortcut: String,
     pub enabled_writing_actions: Vec<String>,
     #[serde(default)]
@@ -1398,7 +1398,7 @@ pub struct SettingsPatch {
     speech_engine: Option<String>,
     local_speech_model: Option<Option<String>>,
     dictation_cleanup_model: Option<Option<String>>,
-    dictation_vocabulary: Option<Vec<String>>,
+    dictation_vocabulary: Option<Vec<crate::config::VocabularyEntry>>,
     writing_shortcut: Option<String>,
     enabled_writing_actions: Option<Vec<String>>,
     writing_presets: Option<Vec<crate::config::WritingPresetSettings>>,

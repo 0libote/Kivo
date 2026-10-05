@@ -9,6 +9,7 @@ import {
   normalizeAiProvider,
 } from "../ai/models";
 import { FALLBACK_AI_PROVIDERS } from "../ai/providers";
+import { normalizeVocabularySetting } from "../features/settings/vocabulary";
 import {
   type AiModelInfo,
   type AiProviderId,
@@ -281,6 +282,10 @@ class MockBridge implements NativeBridge {
       this.settings.aiProvider,
       migrateAiModels(parsed),
     );
+    // Early harness settings stored bare word lists; coerce them to entries.
+    this.settings.dictationVocabulary = normalizeVocabularySetting(
+      this.settings.dictationVocabulary,
+    );
     // Mirror the native side: only macOS has an in-app consent prompt, so
     // everywhere else the microphone/speech rows read granted (engines
     // assumed present) and input monitoring reads unavailable instead of
@@ -339,6 +344,11 @@ class MockBridge implements NativeBridge {
       this.settings.aiModels = normalizeAiModelList(
         this.settings.aiProvider,
         this.settings.aiModels ?? [],
+      );
+    }
+    if (patch.dictationVocabulary !== undefined) {
+      this.settings.dictationVocabulary = normalizeVocabularySetting(
+        this.settings.dictationVocabulary,
       );
     }
     // Mirror the native normalization: a cleanup override that no longer fits
