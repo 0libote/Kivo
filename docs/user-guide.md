@@ -39,7 +39,7 @@ On-device transcription uses the default microphone unless the selected device c
 
 ## Custom words
 
-Names, acronyms, and terms that dictation keeps getting wrong (people, products, jargon) can be taught under Settings → Dictation → Custom words. Add the exact spelling you want, plus a short note on what it means — for example `SOC 2` with `compliance framework`, or a client's name with how to use it. Words take effect on the next dictation.
+Names, acronyms, and terms that dictation keeps getting wrong (people, products, jargon) can be taught under Settings → Custom words — it has its own section because both dictation and Writing Tools use it, and both link back to it. Add the exact spelling you want, plus a short note on what it means — for example `SOC 2` with `compliance framework`, or a client's name with how to use it. Words take effect on the next dictation.
 
 Custom words work on every transcription engine: they are passed as a hint to Whisper-family on-device models and carried as protected terms into AI dictation cleanup, so cleanup will not "correct" them into everyday words. Writing Tools proofreading and rewriting protects them too. The list holds up to 200 words and works without an AI key; import and export move it between machines as plain text (`word | meaning` per line). Keep it focused on the terms you actually mishear — a short list is a stronger hint than a long one.
 

@@ -20,6 +20,7 @@ import {
   Repeat,
   Settings,
   Sparkles,
+  SpellCheck,
   X,
 } from "lucide-react";
 import type { SVGProps } from "react";
@@ -44,6 +45,7 @@ export type IconName =
   | "rewrite"
   | "settings"
   | "spark"
+  | "spellcheck"
   | "summarize";
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -76,6 +78,7 @@ const icons: Record<IconName, LucideIcon> = {
   rewrite: Repeat,
   settings: Settings,
   spark: Sparkles,
+  spellcheck: SpellCheck,
   summarize: AlignLeft,
 };
 

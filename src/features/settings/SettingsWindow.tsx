@@ -31,9 +31,10 @@ import { LocalAiSetup } from "./LocalAiSetup";
 import { LocalSpeechModels } from "./LocalSpeechModels";
 import { ModelQueueEditor } from "./ModelQueueEditor";
 import { VozSetup } from "./VozSetup";
+import { normalizeVocabularySetting } from "./vocabulary";
 import { WritingPresetList } from "./WritingPresetEditor";
 
-type SettingsSection = "home" | "dictation" | "writing" | "ai" | "settings";
+type SettingsSection = "home" | "dictation" | "writing" | "vocabulary" | "ai" | "settings";
 
 const VOZ_LANGUAGES: SpeechLanguage[] = [
   "bg",
@@ -87,6 +88,7 @@ const SECTIONS: Array<{ id: SettingsSection; label: string; icon: IconName }> = 
   { id: "home", label: "Home", icon: "home" },
   { id: "dictation", label: "Dictation", icon: "microphone" },
   { id: "writing", label: "Writing Tools", icon: "pencil" },
+  { id: "vocabulary", label: "Custom words", icon: "spellcheck" },
   { id: "ai", label: "AI", icon: "connection" },
   { id: "settings", label: "Settings", icon: "settings" },
 ];
@@ -198,6 +200,7 @@ export function SettingsWindow({
             settings={settings}
             onWriting={() => setSection("writing")}
             onDictation={() => setSection("dictation")}
+            onVocabulary={() => setSection("vocabulary")}
           />
         ) : (
           <SectionContent
@@ -207,6 +210,7 @@ export function SettingsWindow({
             context={context}
             languages={languages}
             microphones={microphones}
+            onVocabulary={() => setSection("vocabulary")}
             section={section}
             setApiKey={setApiKey}
             setApiStatus={setApiStatus}
@@ -258,6 +262,7 @@ interface SectionContentProps {
   readonly context: AppContext;
   readonly languages: SpeechLanguage[];
   readonly microphones: MicrophoneDevice[];
+  readonly onVocabulary: () => void;
   readonly section: SettingsSection;
   readonly setApiKey: (value: string) => void;
   readonly setApiStatus: (value: ApiKeyStatus | ((current: ApiKeyStatus) => ApiKeyStatus)) => void;
@@ -294,11 +299,26 @@ function SectionContent(props: SectionContentProps) {
           microphones={props.microphones}
           settings={props.settings}
           save={props.save}
-          setNotice={props.setNotice}
+          onVocabulary={props.onVocabulary}
         />
       );
     case "writing":
-      return <WritingSection context={props.context} settings={props.settings} save={props.save} />;
+      return (
+        <WritingSection
+          context={props.context}
+          settings={props.settings}
+          save={props.save}
+          onVocabulary={props.onVocabulary}
+        />
+      );
+    case "vocabulary":
+      return (
+        <VocabularySection
+          settings={props.settings}
+          save={props.save}
+          setNotice={props.setNotice}
+        />
+      );
     case "ai":
       return (
         <AiSection
@@ -685,14 +705,14 @@ function DictationSection({
   microphones,
   settings,
   save,
-  setNotice,
+  onVocabulary,
 }: {
   readonly context: AppContext;
   readonly languages: SpeechLanguage[];
   readonly microphones: MicrophoneDevice[];
   readonly settings: AppSettings;
   readonly save: SaveSettings;
-  readonly setNotice: (value: string | null) => void;
+  readonly onVocabulary: () => void;
 }) {
   const [vozStatus, setVozStatus] = useState<VozModelStatus>({
     supported: false,
@@ -866,13 +886,7 @@ function DictationSection({
             <DictationCleanupModel save={save} settings={settings} />
           </SettingRow>
         ) : null}
-        <SettingRow
-          label="Custom words"
-          description="Names, acronyms, and terms the transcriber should prefer with your exact spelling — add what each one means so AI cleanup and Writing Tools use them correctly."
-          stacked
-        >
-          <DictationVocabulary onNotice={setNotice} save={save} settings={settings} />
-        </SettingRow>
+        <VocabularySummaryRow settings={settings} onVocabulary={onVocabulary} />
         <SettingRow label="Sound feedback" description="Play restrained start and finish sounds.">
           <Switch
             checked={settings.soundFeedback}
@@ -947,10 +961,12 @@ function WritingSection({
   context,
   settings,
   save,
+  onVocabulary,
 }: {
   readonly context: AppContext;
   readonly settings: AppSettings;
   readonly save: SaveSettings;
+  readonly onVocabulary: () => void;
 }) {
   return (
     <SettingsContent
@@ -966,11 +982,67 @@ function WritingSection({
             value={settings.writingShortcut}
           />
         </SettingRow>
+        <VocabularySummaryRow settings={settings} onVocabulary={onVocabulary} />
       </SettingsGroup>
       <SettingsGroup header="Presets">
         <WritingPresetList save={save} settings={settings} />
       </SettingsGroup>
     </SettingsContent>
+  );
+}
+
+function VocabularySection({
+  settings,
+  save,
+  setNotice,
+}: {
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
+  readonly setNotice: (value: string | null) => void;
+}) {
+  return (
+    <SettingsContent
+      title="Custom words"
+      subtitle="Teach Kivo your names, acronyms, and terms once — dictation prefers your exact spelling and AI cleanup plus Writing Tools leave them alone."
+    >
+      <SettingsGroup>
+        <SettingRow
+          label="Words and meanings"
+          description="Add what each word means so the AI uses it correctly, not just spells it right."
+          stacked
+        >
+          <DictationVocabulary onNotice={setNotice} save={save} settings={settings} />
+        </SettingRow>
+      </SettingsGroup>
+      <p {...stylex.props(styles.note)}>
+        Custom words shape dictated text on every transcription engine and are protected from AI
+        cleanup and Writing Tools. They never leave this computer except inside the AI requests you
+        already send to your chosen provider.
+      </p>
+    </SettingsContent>
+  );
+}
+
+/** Compact cross-link shown where custom words apply (Dictation, Writing Tools). */
+function VocabularySummaryRow({
+  settings,
+  onVocabulary,
+}: {
+  readonly settings: AppSettings;
+  readonly onVocabulary: () => void;
+}) {
+  const count = normalizeVocabularySetting(settings.dictationVocabulary).length;
+  return (
+    <SettingRow
+      label="Custom words"
+      description={
+        count === 0
+          ? "No words taught yet. Names and terms you add are preferred by dictation and protected from AI cleanup."
+          : `${count} ${count === 1 ? "word" : "words"} taught — preferred by dictation and protected from AI cleanup.`
+      }
+    >
+      <Button label="Manage words" onClick={onVocabulary} size="sm" variant="secondary" />
+    </SettingRow>
   );
 }
 

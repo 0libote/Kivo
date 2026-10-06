@@ -132,8 +132,8 @@ test("custom words can be added with meanings and removed", async ({ page }) => 
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
-  await page.getByRole("button", { name: "Dictation", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Dictation" })).toBeVisible();
+  await page.getByRole("button", { name: "Custom words", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Custom words" })).toBeVisible();
   // A word with a meaning renders both, and the count follows.
   await page.getByLabel("Word to add", { exact: true }).fill("Kivo");
   await page.getByLabel("What it means (optional)", { exact: true }).fill("our product");
@@ -142,9 +142,13 @@ test("custom words can be added with meanings and removed", async ({ page }) => 
   await expect(wordList.getByText("Kivo", { exact: true })).toBeVisible();
   await expect(wordList.getByText("our product", { exact: true })).toBeVisible();
   await expect(page.getByText("1 of 200 words", { exact: true })).toBeVisible();
+  // Both consuming sections link back to the flagship section.
+  await page.getByRole("button", { name: "Dictation", exact: true }).click();
+  await page.getByRole("button", { name: "Manage words", exact: true }).first().click();
+  await expect(page.getByRole("heading", { name: "Custom words" })).toBeVisible();
   // The harness persists settings, so the word survives a reload.
   await page.reload();
-  await page.getByRole("button", { name: "Dictation", exact: true }).click();
+  await page.getByRole("button", { name: "Custom words", exact: true }).click();
   await expect(
     page
       .getByRole("list", { name: "Custom words", exact: true })
