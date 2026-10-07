@@ -308,13 +308,13 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
         ref={popup}
         {...stylex.props(styles.popup)}
       >
-        {/* No `layout` animation here: the native shell resizes to the
-            reported content height, so a size spring would fight the
-            ResizeObserver loop and make every menu open visibly wobble.
-            Mode swaps crossfade in place instead. */}
+        {/* Opacity-only entrance. The native shell owns the window size
+            (it resizes to the reported content height), so any
+            slide/scale/spring here would fight the ResizeObserver loop and
+            make every menu open visibly wobble. Mode swaps stay instant. */}
         <motion.div
-          animate={{ opacity: 1, y: 0 }}
-          initial={reduceMotion ? false : { opacity: 0, y: -3 }}
+          animate={{ opacity: 1 }}
+          initial={reduceMotion ? false : { opacity: 0 }}
           transition={reduceMotion ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
           {...stylex.props(styles.modeSurface)}
         >

@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import * as stylex from "@stylexjs/stylex";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { type Dispatch, useCallback, useEffect, useReducer, useRef } from "react";
 import { Icon } from "../../components/Icon";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
@@ -43,22 +43,11 @@ function mockInitialStatus(): DictationStatus {
   return "listening";
 }
 
-/** Stagger the idle wave loop so neighbouring bars never move in lockstep. */
-function waveDelay(index: number): number {
-  if (index % 3 === 1) return -0.18;
-  if (index % 3 === 2) return -0.36;
-  return 0;
-}
-
-const barMotion: Record<DictationStatus, Record<string, number>> = {
-  hidden: { opacity: 0, y: 5, scale: 0.92, width: 84, height: 40 },
-  idle: { opacity: 1, y: 0, scale: 1, width: 38, height: 38 },
-  listening: { opacity: 1, y: 0, scale: 1, width: 116, height: 40 },
-  starting: { opacity: 1, y: 0, scale: 1, width: 116, height: 40 },
-  processing: { opacity: 1, y: 0, scale: 1, width: 116, height: 40 },
-  success: { opacity: 1, y: 0, scale: 1, width: 40, height: 40 },
-  error: { opacity: 1, y: 0, scale: 1, width: 376, height: 88 },
-};
+/** Calm overlay contract: the native shell owns the window size (it animates
+    the frame with a short ease-out in `size_flow_bar`), so React must not
+    animate width/height/scale here. Competing size springs were the wobble:
+    the pill overshot while the frame stepped, and the `wait`-sequenced
+    crossfade left an empty pill mid-transition. React only fades content. */
 
 export function FlowBar({ platform }: { readonly platform: Platform }) {
   const reduceMotion = useReducedMotion();
@@ -109,64 +98,45 @@ export function FlowBar({ platform }: { readonly platform: Platform }) {
         data-state={state.status}
         data-testid="flow-bar"
         initial={false}
-        animate={barMotion[state.status]}
-        transition={
-          reduceMotion
-            ? { duration: 0 }
-            : { type: "spring", stiffness: 520, damping: 38, mass: 0.7 }
-        }
+        animate={{ opacity: state.status === "hidden" ? 0 : 1 }}
+        transition={reduceMotion ? { duration: 0 } : { duration: 0.15, ease: "easeOut" }}
         {...stylex.props(styles.bar, inert && styles.inert)}
       >
-        {/* wait sequences exit-then-enter so the pill never shows a
-            half-removed row snapping against the size spring. popLayout
-            pulls the exiting row out of flow and visibly jumps. */}
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            key={state.status === "starting" ? "processing" : state.status}
-            initial={reduceMotion ? false : { opacity: 0, scale: 0.92, y: 2 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reduceMotion ? undefined : { opacity: 0, scale: 0.94 }}
-            transition={reduceMotion ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
-            {...stylex.props(styles.content)}
-          >
-            {state.status === "idle" ? <IdleContent reduceMotion={reduceMotion} /> : null}
+        {/* Keyed fade-in with no exit: the old content swaps instantly and the
+            new content fades in. No `wait` gap (empty pill flash), no `sync`
+            overlap (double rows briefly widening the pill). */}
+        <motion.div
+          key={state.status === "starting" ? "processing" : state.status}
+          initial={reduceMotion ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={reduceMotion ? { duration: 0 } : { duration: 0.12, ease: "easeOut" }}
+          {...stylex.props(styles.content)}
+        >
+          {state.status === "idle" ? <IdleContent /> : null}
 
-            {state.status === "listening" ? (
-              <ListeningContent level={level} reduceMotion={reduceMotion} dispatch={dispatch} />
-            ) : null}
+          {state.status === "listening" ? (
+            <ListeningContent level={level} dispatch={dispatch} />
+          ) : null}
 
-            {state.status === "processing" || state.status === "starting" ? (
-              <ProcessingContent status={state.status} />
-            ) : null}
+          {state.status === "processing" || state.status === "starting" ? (
+            <ProcessingContent status={state.status} />
+          ) : null}
 
-            {state.status === "success" ? <SuccessContent reduceMotion={reduceMotion} /> : null}
+          {state.status === "success" ? <SuccessContent /> : null}
 
-            {state.status === "error" ? (
-              <ErrorContent message={state.message} canRetry={state.canRetry} dispatch={dispatch} />
-            ) : null}
-          </motion.div>
-        </AnimatePresence>
+          {state.status === "error" ? (
+            <ErrorContent message={state.message} canRetry={state.canRetry} dispatch={dispatch} />
+          ) : null}
+        </motion.div>
       </motion.section>
     </main>
   );
 }
 
-function IdleContent({ reduceMotion }: { readonly reduceMotion: boolean | null }) {
+function IdleContent() {
   return (
     <span {...stylex.props(styles.idle)}>
-      <motion.span
-        animate={
-          reduceMotion
-            ? { opacity: 0.35, scale: 1 }
-            : { opacity: [0.55, 0.18, 0.55], scale: [1, 0.86, 1] }
-        }
-        transition={
-          reduceMotion
-            ? { duration: 0 }
-            : { duration: 2.4, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }
-        }
-        {...stylex.props(styles.idleRing)}
-      />
+      <span {...stylex.props(styles.idleRing)} />
       <Icon name="microphone" size={13} />
     </span>
   );
@@ -185,15 +155,11 @@ function ProcessingContent({ status }: { readonly status: "processing" | "starti
   );
 }
 
-function SuccessContent({ reduceMotion }: { readonly reduceMotion: boolean | null }) {
+function SuccessContent() {
   return (
-    <motion.span
-      animate={{ opacity: 1, scale: reduceMotion ? 1 : [0.65, 1] }}
-      transition={reduceMotion ? { duration: 0 } : { duration: 0.18, ease: [0.2, 0.9, 0.25, 1.2] }}
-      {...stylex.props(styles.success)}
-    >
+    <span {...stylex.props(styles.success)}>
       <Icon name="check" size={17} />
-    </motion.span>
+    </span>
   );
 }
 
@@ -201,53 +167,25 @@ type FlowDispatch = Dispatch<DictationEvent>;
 
 function ListeningContent({
   level,
-  reduceMotion,
   dispatch,
 }: {
   readonly level: number;
-  readonly reduceMotion: boolean | null;
   readonly dispatch: FlowDispatch;
 }) {
   const stopping = useRef(false);
   return (
     <>
       <span {...stylex.props(styles.mic)}>
-        <motion.span
-          animate={
-            reduceMotion
-              ? { opacity: 0.35, scale: 1 }
-              : { opacity: [0.5, 0, 0], scale: [0.7, 1.45, 1.45] }
-          }
-          transition={
-            reduceMotion
-              ? { duration: 0 }
-              : { duration: 1.4, repeat: Number.POSITIVE_INFINITY, ease: "easeOut" }
-          }
-          {...stylex.props(styles.micRing)}
-        />
+        <span {...stylex.props(styles.micRing)} />
         <Icon name="microphone" size={15} />
       </span>
       <span aria-hidden="true" {...stylex.props(styles.waveform)}>
-        {BARS.map((bar, index) => (
-          <motion.i
-            animate={{
-              height: Math.max(3, 3 + Math.min(1, level * bar.weight + (bar.odd ? 0.08 : 0)) * 15),
-              scaleY: reduceMotion ? 1 : [0.55, 1, 0.55],
-            }}
+        {BARS.map((bar) => (
+          <i
             key={bar.id}
-            transition={
-              reduceMotion
-                ? { duration: 0 }
-                : {
-                    height: { duration: 0.075, ease: "linear" },
-                    scaleY: {
-                      duration: 0.72,
-                      repeat: Number.POSITIVE_INFINITY,
-                      ease: "easeInOut",
-                      delay: waveDelay(index),
-                    },
-                  }
-            }
+            style={{
+              height: Math.max(3, 3 + Math.min(1, level * bar.weight + (bar.odd ? 0.08 : 0)) * 15),
+            }}
             {...stylex.props(styles.waveBar)}
           />
         ))}
@@ -377,6 +315,8 @@ const styles = stylex.create({
     overflow: "hidden",
     display: "grid",
     placeItems: "center",
+    width: "100%",
+    height: "100%",
     color: "var(--kivo-overlay-text)",
     backgroundColor: "var(--kivo-overlay-bg)",
     backdropFilter: "blur(var(--spacing-5)) saturate(1.2)",
@@ -385,7 +325,6 @@ const styles = stylex.create({
     borderColor: "var(--kivo-overlay-border)",
     borderRadius: "var(--spacing-5)",
     boxShadow: "var(--kivo-overlay-shadow)",
-    transformOrigin: "bottom",
   },
   inert: {
     pointerEvents: "none",
@@ -406,6 +345,7 @@ const styles = stylex.create({
   idleRing: {
     position: "absolute",
     inset: "calc(var(--spacing-7) / -4)",
+    opacity: 0.35,
     borderWidth: "var(--border-width)",
     borderStyle: "solid",
     borderColor: "var(--kivo-overlay-border-strong)",
@@ -421,6 +361,7 @@ const styles = stylex.create({
   micRing: {
     position: "absolute",
     inset: "calc(var(--spacing-1-5) * -1)",
+    opacity: 0.35,
     borderWidth: "var(--border-width)",
     borderStyle: "solid",
     borderColor: "var(--kivo-overlay-selected)",
