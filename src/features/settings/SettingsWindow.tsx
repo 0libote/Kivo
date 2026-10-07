@@ -1032,15 +1032,13 @@ function VocabularySummaryRow({
   readonly onVocabulary: () => void;
 }) {
   const count = normalizeVocabularySetting(settings.dictationVocabulary).length;
+  const unit = count === 1 ? "word" : "words";
+  const description =
+    count === 0
+      ? "No words taught yet. Names and terms you add are preferred by dictation and protected from AI cleanup."
+      : `${count} ${unit} taught — preferred by dictation and protected from AI cleanup.`;
   return (
-    <SettingRow
-      label="Custom words"
-      description={
-        count === 0
-          ? "No words taught yet. Names and terms you add are preferred by dictation and protected from AI cleanup."
-          : `${count} ${count === 1 ? "word" : "words"} taught — preferred by dictation and protected from AI cleanup.`
-      }
-    >
+    <SettingRow label="Custom words" description={description}>
       <Button label="Manage words" onClick={onVocabulary} size="sm" variant="secondary" />
     </SettingRow>
   );
