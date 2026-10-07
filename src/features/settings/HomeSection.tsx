@@ -6,17 +6,20 @@ import { formatShortcut } from "../../components/shortcut";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
 import type { AppContext, AppSettings } from "../../types";
+import { normalizeVocabularySetting } from "./vocabulary";
 
 export function HomeSection({
   context,
   settings,
   onWriting,
   onDictation,
+  onVocabulary,
 }: {
   readonly context: AppContext;
   readonly settings: AppSettings;
   readonly onWriting: () => void;
   readonly onDictation: () => void;
+  readonly onVocabulary: () => void;
 }) {
   const [recovery, setRecovery] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -71,6 +74,14 @@ export function HomeSection({
           onClick={onWriting}
           title="Writing Tools"
         />
+        <ShortcutRow
+          ariaLabel="Manage custom words"
+          blurb="Names and terms dictation gets right"
+          icon="spellcheck"
+          keys={[vocabularyCountLabel(settings)]}
+          onClick={onVocabulary}
+          title="Custom words"
+        />
       </div>
       {recovery ? (
         <section aria-label="Last dictation" {...stylex.props(styles.recovery)}>
@@ -106,6 +117,11 @@ export function HomeSection({
       {notice ? <output {...stylex.props(styles.feedback)}>{notice}</output> : null}
     </section>
   );
+}
+
+function vocabularyCountLabel(settings: AppSettings): string {
+  const count = normalizeVocabularySetting(settings.dictationVocabulary).length;
+  return `${count} ${count === 1 ? "word" : "words"}`;
 }
 
 function ShortcutRow({
