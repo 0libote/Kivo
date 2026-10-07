@@ -149,8 +149,25 @@ struct WritingContextEvent {
 }
 
 /// User preferences cap the popup; the frontend reports its content height.
+/// The open path sizes the window before the first report arrives, so the
+/// fallback must be near the compact menu height, not the maximum: starting
+/// at the max leaves a tall transparent window that visibly snaps down (and
+/// blocks clicks above the popup) once the real height is reported.
 const WRITING_DEFAULT_WIDTH: f64 = 360.0;
 const WRITING_DEFAULT_HEIGHT: f64 = 420.0;
+/// First-paint estimate per mode, used only until the frontend reports its
+/// measured content height via `set_surface_mode`.
+fn writing_open_height_estimate(mode: &str, max_height: f64) -> f64 {
+    let estimate: f64 = match mode {
+        "menu" => 260.0,
+        "summary" => 220.0,
+        "result" => 360.0,
+        "error" => 150.0,
+        "custom" | "processing" => 64.0,
+        _ => 260.0,
+    };
+    estimate.min(max_height)
+}
 
 pub(crate) fn create_windows(app: &AppHandle) -> tauri::Result<()> {
     build_window(app, "flow-bar", "Kivo Dictation", 220.0, 68.0, false, true)?;
@@ -1021,13 +1038,13 @@ fn size_flow_bar(app: &AppHandle, status: &str) {
 
 pub(crate) fn size_writing_surface(
     app: &AppHandle,
-    _mode: &str,
+    mode: &str,
     content_height: Option<f64>,
 ) -> Result<(), PlatformError> {
     let (width, max_height) = writing_popup_size(app);
     let height = content_height
         .filter(|height| height.is_finite())
-        .unwrap_or(max_height)
+        .unwrap_or_else(|| writing_open_height_estimate(mode, max_height))
         .clamp(44.0, max_height);
     let window = app.get_webview_window("writing-tools").ok_or_else(|| {
         PlatformError::new(
