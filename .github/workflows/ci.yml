@@ -142,7 +142,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -374,93 +374,6 @@ jobs:
   # and hand off via short-lived, run-scoped artifacts. Publication waits for
   # the full security-gate, which also covers frontend and native checks.
   # A failed check can waste build minutes, but cannot publish a red SHA.
-  macos-beta:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    env:
-      # Beta-only fast release tuning. Keeps output in target/release/ (what
-      # the Tauri bundler expects) while skipping the fat-LTO single-codegen
-      # link from Cargo.toml [profile.release] (stable keeps that).
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-      CARGO_PROFILE_RELEASE_STRIP: "false"
-      # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so the
-      # in-app updater can tell same-version betas apart by commit.
-      KIVO_BUILD_SHA: ${{ github.sha }}
-      # Keep Finder's background/icon layout; Tauri otherwise skips it in CI.
-      TAURI_BUNDLER_DMG_IGNORE_CI: "true"
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: src-tauri
-      - run: bun install --frozen-lockfile --ignore-scripts
-      # No typecheck/test rerun: the `frontend` and `native` gates check this
-      # same SHA in parallel, and publication requires their success.
-      # Free ad-hoc signing is the fallback. If Developer ID credentials
-      # exist, use the same identity/notarization as stable releases so beta
-      # updates do not unnecessarily invalidate macOS permission grants.
-      - run: bun run prepare:release
-        env:
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-      - name: Build macOS installer (beta)
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        with:
-          tauriScript: bash scripts/build-macos.sh
-          args: --target aarch64-apple-darwin --config src-tauri/target/release-tauri.conf.json
-      # `tauri build` signs the updater archive for the plain package version
-      # (0.1.0), but the rolling manifest announces `0.1.0+<sha>`. Since the
-      # CLI records the version in the signature's trusted comment and the
-      # updater plugin enforces signed == announced, the plain signature
-      # always fails beta installs (SignedVersionMismatch). Re-sign for the
-      # exact manifest version; the .app bundle version itself stays plain so
-      # CFBundleShortVersionString remains numeric.
-      - name: Re-sign macOS updater archive for the beta version
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
-          sha="${KIVO_BUILD_SHA:?KIVO_BUILD_SHA is required}"
-          beta_version="$version+$sha"
-          mac_archive="$(find src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name '*.app.tar.gz' | head -n 1)"
-          test -n "$mac_archive" || { echo "macOS updater archive not found for re-sign"; exit 1; }
-          bun tauri signer sign --app-version "$beta_version" "$mac_archive"
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      - name: Verify macOS installer before upload
-        run: bash scripts/verify-macos-bundle.sh src-tauri/target/aarch64-apple-darwin/release/bundle
-      - name: Upload bundle for the publish job
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kivo-beta-macos
-          # Consumed minutes later by `publish-continuous`; not for humans.
-          retention-days: 1
-          # NOTE: explicit `--target` redirects cargo output to
-          # target/<triple>/release, not target/release.
-          path: |
-            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz.sig
-
   windows-beta:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
@@ -547,8 +460,8 @@ jobs:
     # notes) so overlapping main pushes serialize here
     # while the builders above overlap. Asset names match what the old
     # tauri-action/gh flow shipped (dmg + app tarball + setup exe).
-    needs: [macos-beta, windows-beta, security-gate]
-    if: needs.macos-beta.result == 'success' && needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
+    needs: [windows-beta, security-gate]
+    if: needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
@@ -563,10 +476,6 @@ jobs:
           bun-version: 1.4.2
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: kivo-beta-macos
-          path: beta/macos
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
           name: kivo-beta-windows
           path: beta/windows
       - name: Publish assets to the continuous pre-release
@@ -577,14 +486,9 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           # upload-artifact preserves the matched parents (dmg/…, macos/…),
           # so locate by name instead of assuming a flat layout.
-          dmg="$(find beta/macos -maxdepth 3 -name '*.dmg' | head -n 1)"
-          mac_archive="$(find beta/macos -name '*.app.tar.gz' | head -n 1)"
           # Tauri v2 signs the NSIS installer in place and re-uses it as the
           # Windows update bundle, so the installer is the archive.
           win_installer="$(find beta/windows -name '*-setup.exe' | head -n 1)"
-          test -n "$dmg" || { echo "macOS dmg not found in artifact"; exit 1; }
-          test -n "$mac_archive" || { echo "macOS updater archive not found in artifact"; exit 1; }
-          test -f "$mac_archive.sig" || { echo "macOS updater signature not found in artifact"; exit 1; }
           test -n "$win_installer" || { echo "Windows installer not found in artifact"; exit 1; }
           test -f "$win_installer.sig" || { echo "Windows updater signature not found in artifact"; exit 1; }
           # Publishers serialize, but they may arrive out of commit order.
@@ -595,7 +499,7 @@ jobs:
               exit 0
             fi
           fi
-          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$mac_archive" "$win_installer"
+          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$win_installer"
           notes_file="${RUNNER_TEMP}/kivo-beta-notes.md"
           cp packaging/beta-release-notes.md "$notes_file"
           printf '\nBuild: `%s` · Version: `%s` · Built: %s\n' "$GITHUB_SHA" "$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$notes_file"
@@ -608,7 +512,7 @@ jobs:
               --title "Kivo — latest beta" \
               --notes-file "$notes_file"
           fi
-          gh release upload continuous "$dmg" "$mac_archive" "$mac_archive.sig" "$win_installer" "$win_installer.sig" --clobber
+          gh release upload continuous "$win_installer" "$win_installer.sig" --clobber
           gh release upload continuous beta/continuous.json --clobber
           gh release edit continuous \
             --prerelease \
