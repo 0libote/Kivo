@@ -9,7 +9,7 @@
 
 use std::{path::Path, time::Duration};
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(target_os = "windows")]
 use std::process::Command;
 
 use futures_util::StreamExt;
@@ -84,23 +84,16 @@ async fn list_models(client: &reqwest::Client, base_url: &str) -> Option<Vec<Str
 fn installer_url() -> Option<&'static str> {
     #[cfg(target_os = "windows")]
     return Some("https://ollama.com/download/OllamaSetup.exe");
-    #[cfg(target_os = "macos")]
-    return Some("https://ollama.com/download/Ollama.dmg");
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     return None;
 }
 
 /// Downloads the official installer and hands it to the OS. The user still
 /// approves the install; Kivo never runs it silently.
 pub async fn install_runtime(app: &AppHandle) -> Result<(), String> {
-    let url = installer_url().ok_or_else(|| {
-        "Installing a local AI runtime is only supported on macOS and Windows.".to_owned()
-    })?;
-    let file_name = if cfg!(target_os = "windows") {
-        "kivo-ollama-setup.exe"
-    } else {
-        "Kivo-Ollama.dmg"
-    };
+    let url = installer_url()
+        .ok_or_else(|| "Installing a local AI runtime is only supported on Windows.".to_owned())?;
+    let file_name = "kivo-ollama-setup.exe";
     let path = std::env::temp_dir().join(file_name);
 
     let response = reqwest::Client::new()
@@ -138,9 +131,7 @@ pub async fn install_runtime(app: &AppHandle) -> Result<(), String> {
 fn launch_installer(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let result = Command::new(path).spawn();
-    #[cfg(target_os = "macos")]
-    let result = Command::new("open").arg(path).spawn();
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     let result: std::io::Result<std::process::Child> = {
         // Unsupported host: keep the path meaningful for the error context.
         let _ = path;

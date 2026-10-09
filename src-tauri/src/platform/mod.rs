@@ -8,9 +8,7 @@ pub(crate) mod adapters;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 mod unsupported;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -19,9 +17,7 @@ pub(crate) mod windows_speech;
 
 #[cfg(target_os = "linux")]
 use linux::PlatformImpl;
-#[cfg(target_os = "macos")]
-use macos::PlatformImpl;
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 use unsupported::PlatformImpl;
 #[cfg(target_os = "windows")]
 use windows::PlatformImpl;
@@ -34,10 +30,10 @@ pub enum PlatformErrorKind {
     NotFound,
     InvalidState,
     ShortcutConflict,
-    // Constructed only by the cfg-gated macOS/Windows speech backends; kept on
+    // Constructed only by the cfg-gated Windows speech backend; kept on
     // all targets so error mapping in shell.rs stays portable. The Linux-only
     // dead-code warning is expected.
-    #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Speech,
     Os,
 }
@@ -108,7 +104,7 @@ pub struct ActiveApplication {
     pub process_id: u32,
     pub name: String,
     pub identifier: Option<String>,
-    /// HWND on Windows and the owning process id on macOS. It is never sent back
+    /// HWND on Windows. It is never sent back
     /// by the frontend and is only used to correlate a selection snapshot.
     #[serde(skip)]
     pub native_handle: usize,
@@ -148,8 +144,6 @@ pub enum PermissionStatus {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ModifierKey {
-    #[cfg(target_os = "macos")]
-    Function,
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     Control,
     #[cfg(target_os = "windows")]
@@ -161,20 +155,13 @@ pub enum ModifierKey {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HoldShortcut {
     pub modifiers: Vec<ModifierKey>,
-    /// Optional native virtual-key code. `None` denotes a modifier-only hold.
+    /// Optional native virtual-key code. None denotes a modifier-only hold.
     pub key_code: Option<u32>,
     pub suppress: bool,
 }
 
 impl HoldShortcut {
     pub fn platform_default() -> Self {
-        #[cfg(target_os = "macos")]
-        return Self {
-            modifiers: vec![ModifierKey::Function],
-            key_code: None,
-            suppress: true,
-        };
-
         #[cfg(target_os = "windows")]
         return Self {
             modifiers: vec![ModifierKey::Control, ModifierKey::Meta],
@@ -193,7 +180,7 @@ impl HoldShortcut {
             suppress: false,
         };
 
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         Self {
             modifiers: Vec::new(),
             key_code: None,
@@ -307,14 +294,6 @@ impl PlatformServices {
         self.implementation.request_permission(permission)
     }
 
-    /// Clears the first-run prompt memory (macOS Accessibility / Input
-    /// Monitoring). Called after `tccutil reset` so the rows return to Allow
-    /// instead of pointing at System Settings entries that no longer exist.
-    /// No-op where there is no prompt memory.
-    pub fn reset_permission_prompts(&self) {
-        self.implementation.reset_permission_prompts()
-    }
-
     pub fn register_dictation_shortcut(
         &self,
         shortcut: HoldShortcut,
@@ -325,7 +304,7 @@ impl PlatformServices {
     }
 
     /// Applies native chrome/material behavior to an existing Tauri native
-    /// window. The handle is `NSWindow*` on macOS and `HWND` on Windows.
+    /// window. The handle is `HWND` on Windows.
     pub fn style_window(&self, native_window: usize, kind: OverlayKind) -> PlatformResult<()> {
         if native_window == 0 {
             return Err(PlatformError::new(

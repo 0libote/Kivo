@@ -10,7 +10,6 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob:; img-src 'self' asset: data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net"
@@ -19,21 +18,13 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
     "category": "Productivity",
     "shortDescription": "A quiet, system-wide writing and dictation utility.",
     "longDescription": "Kivo provides native system-wide dictation and focused Gemini-powered writing tools while keeping sensitive integration in the desktop core.",
-    "macOS": {
-      "minimumSystemVersion": "26.0",
-      "entitlements": "Entitlements.plist",
-      "signingIdentity": "-",
-      "dmg": {
-        "background": "../packaging/macos/background.png",
-        "windowSize": { "width": 660, "height": 440 },
-        "appPosition": { "x": 180, "y": 230 },
-        "applicationFolderPosition": { "x": 480, "y": 230 }
-      }
-    },
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com"

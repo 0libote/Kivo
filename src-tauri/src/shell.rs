@@ -5,8 +5,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Instant;
-#[cfg(target_os = "macos")]
-use std::{io::Write, process::Stdio};
 
 use serde::Serialize;
 use tauri::{
@@ -225,7 +223,7 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
     let mut tray = TrayIconBuilder::with_id("kivo")
         .tooltip("Kivo")
         .menu(&menu)
-        .icon_as_template(cfg!(target_os = "macos"))
+        .icon_as_template(false)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "settings" => {
@@ -254,15 +252,6 @@ pub(crate) fn create_tray(app: &AppHandle) -> tauri::Result<()> {
             }
             _ => {}
         });
-    #[cfg(target_os = "macos")]
-    {
-        // App icons have an opaque tile; macOS template icons use alpha as
-        // their mask, so the menu bar needs the transparent K mark instead.
-        tray = tray.icon(tauri::image::Image::from_bytes(include_bytes!(
-            "../icons/tray-icon.png"
-        ))?);
-    }
-    #[cfg(not(target_os = "macos"))]
     if let Some(icon) = app.default_window_icon() {
         tray = tray.icon(icon.clone());
     }
@@ -301,7 +290,6 @@ fn build_window(
         .title(title)
         .inner_size(width, height)
         .decorations(!transparent)
-        .transparent(transparent)
         // On Windows, Tauri's undecorated shadow adds its own native frame.
         // A rectangular frame must not surround the smaller recording pill.
         .shadow(!transparent)
@@ -311,6 +299,8 @@ fn build_window(
         .visible(false)
         .resizable(label == "settings")
         .visible_on_all_workspaces(label == "flow-bar");
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    let builder = builder.transparent(transparent);
     let builder = if matches!(label, "settings" | "onboarding") {
         builder.min_inner_size(width.min(520.0), height.min(420.0))
     } else {
@@ -326,13 +316,11 @@ fn style_window(app: &AppHandle, label: &str, kind: OverlayKind) {
     // On unsupported hosts there is no native styling to apply; reference the
     // window so the binding stays used on every target (avoids Linux-only
     // unused-variable warnings without cfg-rename churn).
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     let _ = &window;
-    #[cfg(target_os = "macos")]
-    let handle = window.ns_window().ok().map(|handle| handle as usize);
     #[cfg(target_os = "windows")]
     let handle = window.hwnd().ok().map(|handle| handle.0 as usize);
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     let handle: Option<usize> = None;
     if let (Some(handle), Some(platform)) = (handle, app.try_state::<Arc<PlatformServices>>()) {
         let _ = platform.style_window(handle, kind);
@@ -449,14 +437,11 @@ fn is_native_dictation_shortcut(shortcut: &str) -> bool {
 /// platforms. The stored default is "Ctrl+Meta" but shell.rs normalizes
 /// Ctrl→Control / Meta→Super before this check, hence "Control+Super".
 /// Linux never uses the native monitor: every accelerator (including the
-/// macOS/Windows native spellings) goes through the portable global-shortcut
+/// legacy or Windows native spellings) goes through the portable global-shortcut
 /// plugin, so the Linux test bench exercises the same registration path as
 /// a custom shortcut on the shipping targets.
 fn is_native_dictation_shortcut_for(shortcut: &str, host: HostPlatform) -> bool {
-    matches!(
-        (host, shortcut),
-        (HostPlatform::Macos, "Fn") | (HostPlatform::Windows, "Control+Super")
-    )
+    matches!((host, shortcut), (HostPlatform::Windows, "Control+Super"))
 }
 
 fn dispatch_dictation_event(app: AppHandle, event: HoldShortcutEvent) {
@@ -857,7 +842,7 @@ pub(crate) async fn begin_dictation(app: &AppHandle, core: &AppCore) -> Result<(
 pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandError> {
     let core = app.state::<AppCore>();
     // Native capture must finish while the original application's control
-    // still owns focus. Both UIA and macOS Accessibility depend on this.
+    // still owns focus. UI Automation depends on this.
     match core.open_writing_tools().await {
         Ok(context) => {
             hide_surface(app, "flow-bar");
@@ -1186,19 +1171,6 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
         return;
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        let sound = match moment {
-            FeedbackMoment::Start => "/System/Library/Sounds/Tink.aiff",
-            FeedbackMoment::Finish => "/System/Library/Sounds/Pop.aiff",
-        };
-        let _ = Command::new("afplay")
-            .arg(sound)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn();
-    }
-
     #[cfg(target_os = "windows")]
     {
         let _ = moment;
@@ -1213,7 +1185,7 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
     // early return above is never the final statement (silences
     // clippy::needless_return on targets where both blocks above are compiled
     // out).
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     let _ = moment;
 }
 
@@ -1260,37 +1232,22 @@ pub(crate) fn hide_surface(app: &AppHandle, surface: &str) {
 }
 
 pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(), PlatformError> {
-    #[cfg(target_os = "macos")]
-    let url = match permission {
-        PermissionKind::Accessibility => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-        }
-        PermissionKind::InputMonitoring => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
-        }
-        PermissionKind::Microphone => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
-        }
-        PermissionKind::SpeechRecognition => {
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
-        }
-    };
     #[cfg(target_os = "windows")]
     let url = match permission {
         // Desktop SAPI uses installed speech languages, not online speech consent.
         PermissionKind::Microphone => "ms-settings:privacy-microphone",
         _ => "ms-settings:speech",
     };
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     {
         let _ = permission;
         Err(PlatformError::new(
             PlatformErrorKind::Unsupported,
             "open_permission_settings",
-            "System settings pages are only available on macOS and Windows.",
+            "System settings pages are only available on Windows.",
         ))
     }
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     open_url(url)
 }
 
@@ -1310,12 +1267,6 @@ pub(crate) fn open_external(_app: &AppHandle, url: &str) -> Result<(), PlatformE
 }
 
 fn open_url(url: &str) -> Result<(), PlatformError> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("open");
-        command.arg(url);
-        command
-    };
     #[cfg(target_os = "windows")]
     {
         use windows::{
@@ -1339,7 +1290,7 @@ fn open_url(url: &str) -> Result<(), PlatformError> {
             Err(window_error("open_url"))
         }
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(target_os = "windows"))]
     let mut command = {
         let mut command = Command::new("xdg-open");
         command.arg(url);
@@ -1409,27 +1360,7 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
         }
         Ok(())
     }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = app;
-        // Absolute path: GUI-launched apps inherit a sparse PATH where a bare
-        // `pbcopy` lookup can fail.
-        let mut child = Command::new("/usr/bin/pbcopy")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|_| clipboard_error())?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(clipboard_error)?
-            .write_all(text.as_bytes())
-            .map_err(|_| clipboard_error())?;
-        if !child.wait().map_err(|_| clipboard_error())?.success() {
-            return Err(clipboard_error());
-        }
-        Ok(())
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(not(target_os = "windows"))]
     {
         let _ = app;
         // Linux test bench: prefer Wayland then X11 clipboard tools. Only an
@@ -1447,7 +1378,7 @@ pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(target_os = "windows"))]
 fn try_linux_copy(program: &str, args: &[&str], text: &str) -> bool {
     use std::{io::Write, process::Stdio};
     let mut child = match Command::new(program)
@@ -1714,7 +1645,7 @@ pub async fn install_update(app: AppHandle) -> Result<(), CommandError> {
 }
 
 /// Relaunch after an in-app install. The Windows installer exits the app
-/// itself; on macOS the user finishes the update with this restart.
+/// itself; other development hosts finish the update with this restart.
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
@@ -1800,17 +1731,6 @@ mod tests {
     use crate::config::HostPlatform;
 
     #[test]
-    fn macos_menu_bar_icon_is_a_transparent_mark() {
-        let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon.png"))
-            .expect("menu bar icon must decode");
-        assert_eq!((icon.width(), icon.height()), (44, 44));
-        let (pixels, _) = icon.rgba().as_chunks::<4>();
-        assert!(pixels.iter().any(|pixel| pixel[3] == 0));
-        assert!(pixels.iter().any(|pixel| pixel[3] == 255));
-        assert_eq!(icon.rgba()[3], 0, "template must not have an opaque tile");
-    }
-
-    #[test]
     fn accelerator_normalization_maps_whole_modifier_tokens_only() {
         assert_eq!(normalize_accelerator("Ctrl+Space"), "Control+Space");
         assert_eq!(normalize_accelerator("Ctrl+Meta"), "Control+Super");
@@ -1823,12 +1743,7 @@ mod tests {
     #[test]
     fn native_dictation_shortcuts_are_os_exclusive_on_both_hosts() {
         // Runs on every CI platform: a Windows-only shortcut must never be
-        // treated as native on macOS and vice versa.
-        assert!(is_native_dictation_shortcut_for("Fn", HostPlatform::Macos));
-        assert!(!is_native_dictation_shortcut_for(
-            "Control+Super",
-            HostPlatform::Macos
-        ));
+        // treated as native on the Linux bench.
         assert!(!is_native_dictation_shortcut_for(
             "Fn",
             HostPlatform::Windows
@@ -1839,7 +1754,6 @@ mod tests {
         ));
         // Portable shortcuts always go through the global-shortcut plugin.
         for host in [
-            HostPlatform::Macos,
             HostPlatform::Windows,
             HostPlatform::Linux,
             HostPlatform::Other,
@@ -1847,7 +1761,7 @@ mod tests {
             assert!(!is_native_dictation_shortcut_for("Ctrl+Alt+D", host));
             assert!(!is_native_dictation_shortcut_for("Control+Space", host));
         }
-        // Linux never selects the native monitor, even for the macOS/Windows
+        // Linux never selects the native monitor, even for legacy/Windows
         // native spellings: the bench always uses the portable path.
         assert!(!is_native_dictation_shortcut_for("Fn", HostPlatform::Linux));
         assert!(!is_native_dictation_shortcut_for(

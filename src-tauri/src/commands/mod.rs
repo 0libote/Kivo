@@ -1543,10 +1543,8 @@ pub fn get_app_context(app: AppHandle, shell: State<'_, crate::shell::ShellState
     AppContext {
         platform: if cfg!(target_os = "windows") {
             "windows"
-        } else if cfg!(target_os = "linux") {
-            "linux"
         } else {
-            "macos"
+            "linux"
         },
         version: app.package_info().version.to_string(),
         development: cfg!(debug_assertions),
@@ -1624,63 +1622,6 @@ pub fn open_permission_settings(kind: String) -> Result<(), CommandError> {
 
 /// Clears Kivo's own TCC entries so a new build can be enabled when a stale
 /// entry from a previous (ad-hoc signed) build is stuck in System Settings.
-/// Scoped to Kivo's bundle id only: other apps' grants are never touched.
-/// After the reset the user re-allows each permission; statuses are
-/// re-read and broadcast like any other permission change.
-#[tauri::command]
-pub fn reset_permission_grants(
-    app: AppHandle,
-    core: State<'_, AppCore>,
-    platform: State<'_, Arc<crate::platform::PlatformServices>>,
-) -> Result<Vec<FrontendPermissionStatus>, CommandError> {
-    reset_tcc_grants().map_err(platform_command_error)?;
-    // The TCC rows are gone, so drop the in-process "already prompted" memory
-    // too: the next read must offer Allow (re-create the entry) rather than
-    // Open Settings (enable an entry that no longer exists).
-    platform.reset_permission_prompts();
-    let statuses = permission_statuses(&platform).map_err(platform_command_error)?;
-    refresh_shortcuts_after_permission(&app, &core, &statuses);
-    let _ = app.emit("permission-status-changed", &statuses);
-    Ok(statuses)
-}
-
-/// `tccutil reset All <bundle-id>` drops every TCC grant for Kivo's bundle
-/// id (Accessibility, Input Monitoring, Microphone, Speech Recognition)
-/// without touching other apps. Per-user database, so no sudo needed.
-/// Absolute path: GUI-launched apps inherit a sparse PATH where a bare
-/// lookup can fail (same reason copy_text uses /usr/bin/pbcopy).
-#[cfg(target_os = "macos")]
-fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
-    let output = std::process::Command::new("/usr/bin/tccutil")
-        .args(["reset", "All", "com.kivo.desktop"])
-        .output()
-        .map_err(|_| {
-            crate::platform::PlatformError::new(
-                crate::platform::PlatformErrorKind::Os,
-                "reset_permission_grants",
-                "Could not clear the old permission entries.",
-            )
-        })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(crate::platform::PlatformError::new(
-            crate::platform::PlatformErrorKind::Os,
-            "reset_permission_grants",
-            "Could not clear the old permission entries.",
-        ))
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn reset_tcc_grants() -> Result<(), crate::platform::PlatformError> {
-    Err(crate::platform::PlatformError::new(
-        crate::platform::PlatformErrorKind::Unsupported,
-        "reset_permission_grants",
-        "Clearing permission entries is only available on macOS.",
-    ))
-}
-
 #[tauri::command]
 pub async fn list_microphones(
     core: State<'_, AppCore>,
@@ -1694,7 +1635,7 @@ pub fn list_speech_languages() -> Vec<SpeechLanguage> {
     if let Some(languages) = windows_speech_languages() {
         return languages;
     }
-    // macOS enumerates the OS voices elsewhere; Linux uses the simulated
+    // Linux uses the simulated
     // test-bench engine. Same shape on every host so the picker never
     // appears empty and selection code paths stay identical.
     vec![
@@ -1850,7 +1791,7 @@ pub async fn list_ai_models(
     // blocklist; Zen/Go/Custom OpenAI-style listings with curated pricing),
     // so newest models appear without a Kivo update. Falls back to the
     // curated list when no key is stored or the fetch fails (offline /
-    // invalid key), so the selector never appears empty. Identical on macOS
+    // invalid key), so the selector never appears empty. Identical on Linux
     // and Windows: keys stay in the Rust process and are sent via header.
     // The frontend passes the provider it is currently rendering so model
     // discovery cannot race an in-flight provider settings save.
@@ -2132,23 +2073,17 @@ fn selection_context(context: WritingPopupContext) -> SelectionContext {
     }
 }
 
-/// Whether a permission gates core functionality on `host`. Pure over the
-/// host so every CI platform tests both requirement matrices: input
-/// monitoring (Fn-hold detection) and OS speech recognition only exist on
-/// macOS, while accessibility and microphone gate every desktop. Linux is
-/// the dev/test bench: its fake speech engine needs no consent prompt, so
-/// speech recognition is not required there (like Windows SAPI).
+/// Accessibility and microphone gate core functionality. Windows desktop
+/// speech requires installed engines, not a separate consent prompt.
 pub(crate) fn permission_required_for(
     permission: crate::platform::PermissionKind,
-    host: crate::config::HostPlatform,
+    _host: crate::config::HostPlatform,
 ) -> bool {
     match permission {
         crate::platform::PermissionKind::Accessibility => true,
         crate::platform::PermissionKind::Microphone => true,
         crate::platform::PermissionKind::InputMonitoring
-        | crate::platform::PermissionKind::SpeechRecognition => {
-            matches!(host, crate::config::HostPlatform::Macos)
-        }
+        | crate::platform::PermissionKind::SpeechRecognition => false,
     }
 }
 
@@ -2180,7 +2115,7 @@ fn permission_statuses(
             crate::platform::PermissionKind::InputMonitoring,
             "input-monitoring",
             permission_required_for(crate::platform::PermissionKind::InputMonitoring, host),
-            "Detect the Fn hold shortcut.",
+            "No input-monitoring permission is required.",
         ),
         (
             crate::platform::PermissionKind::Microphone,

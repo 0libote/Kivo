@@ -77,7 +77,6 @@ export interface NativeBridge {
   getPermissions(): Promise<PermissionStatus[]>;
   requestPermission(kind: PermissionKind): Promise<PermissionStatus[]>;
   openPermissionSettings(kind: PermissionKind): Promise<void>;
-  resetPermissionGrants(): Promise<PermissionStatus[]>;
   listMicrophones(): Promise<MicrophoneDevice[]>;
   listSpeechLanguages(): Promise<SpeechLanguage[]>;
   listLocalSpeechModels(): Promise<LocalSpeechModelInfo[]>;
@@ -127,7 +126,7 @@ export interface NativeBridge {
 export function detectedPlatform(): Platform {
   if (/Windows/i.test(navigator.userAgent)) return "windows";
   if (/Linux|X11/i.test(navigator.userAgent)) return "linux";
-  return "macos";
+  return "windows";
 }
 
 function surfaceFromLabel(label: string | undefined): Surface {
@@ -188,7 +187,6 @@ class TauriBridge implements NativeBridge {
     call<PermissionStatus[]>("request_permission", { kind });
   openPermissionSettings = (kind: PermissionKind) =>
     call<void>("open_permission_settings", { kind });
-  resetPermissionGrants = () => call<PermissionStatus[]>("reset_permission_grants");
   listMicrophones = () => call<MicrophoneDevice[]>("list_microphones");
   listSpeechLanguages = () => call<SpeechLanguage[]>("list_speech_languages");
   listLocalSpeechModels = () => call<LocalSpeechModelInfo[]>("list_local_speech_models");
@@ -286,24 +284,19 @@ class MockBridge implements NativeBridge {
     this.settings.dictationVocabulary = normalizeVocabularySetting(
       this.settings.dictationVocabulary,
     );
-    // Mirror the native side: only macOS has an in-app consent prompt, so
-    // everywhere else the microphone/speech rows read granted (engines
-    // assumed present) and input monitoring reads unavailable instead of
-    // looping on an ungrantable Allow button. Linux uses the simulated
-    // speech engine, which is always present.
-    const portable = this.platform !== "macos";
+    // Windows has no in-app consent prompt; the Linux bench simulates speech.
     this.permissions = [
       { kind: "accessibility", state: "not-determined", required: true },
       {
         kind: "input-monitoring",
-        state: this.platform === "macos" ? "not-determined" : "unavailable",
+        state: "unavailable",
         required: false,
       },
-      { kind: "microphone", state: portable ? "granted" : "not-determined", required: true },
+      { kind: "microphone", state: "granted", required: true },
       {
         kind: "speech-recognition",
-        state: portable ? "granted" : "not-determined",
-        required: this.platform === "macos",
+        state: "granted",
+        required: false,
       },
     ];
   }
@@ -384,18 +377,6 @@ class MockBridge implements NativeBridge {
   openPermissionSettings(): Promise<void> {
     // Intentional no-op: browser harness has no OS settings screen to open.
     return Promise.resolve();
-  }
-
-  async resetPermissionGrants() {
-    // Mirror a TCC reset: entries the OS would forget become grantable again.
-    await delay(350);
-    this.permissions = this.permissions.map((permission) =>
-      permission.state === "unavailable"
-        ? permission
-        : { ...permission, state: "not-determined" as const },
-    );
-    this.emit("permission-status-changed", structuredClone(this.permissions));
-    return structuredClone(this.permissions);
   }
 
   listMicrophones(): Promise<MicrophoneDevice[]> {
@@ -740,7 +721,6 @@ class MockBridge implements NativeBridge {
 
   getWritingContext(): Promise<SelectionContext> {
     const applicationNames: Record<Platform, string> = {
-      macos: "TextEdit",
       windows: "Notepad",
       linux: "Text Editor",
     };

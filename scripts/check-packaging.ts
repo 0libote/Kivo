@@ -1,11 +1,4 @@
-/**
- * Packaging parity gate: fails fast (seconds, any OS) when the macOS and
- * Windows packaging metadata drift apart. The full bundle builds only run on
- * main-push betas and tag releases, so without this check a breakage here
- * merges and fails late.
- *
- * Run: `bun run check:packaging`
- */
+/** Validate Windows packaging, updater signatures, and shared build metadata. */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,15 +53,6 @@ const tauriConf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.js
   bundle: {
     targets: unknown;
     icon?: string[];
-    macOS?: {
-      signingIdentity?: string | null;
-      dmg?: {
-        background: string;
-        windowSize: { width: number; height: number };
-        appPosition: { x: number; y: number };
-        applicationFolderPosition: { x: number; y: number };
-      };
-    };
     windows?: { digestAlgorithm?: string };
   };
   plugins: { updater: { endpoints: string[]; pubkey: string } };
@@ -90,9 +74,9 @@ check(
   "desktop packaging must not repeat the TypeScript gate that CI and bun run build already run",
 );
 check(
-  "bundle targets cover both desktops",
+  "base bundle targets allow the Linux development bench",
   tauriConf.bundle.targets === "all",
-  `targets is ${JSON.stringify(tauriConf.bundle.targets)}; "all" builds dmg/app on macOS and nsis on Windows (narrowed by tauri.windows.conf.json)`,
+  `targets is ${JSON.stringify(tauriConf.bundle.targets)}; Windows releases narrow targets to nsis (narrowed by tauri.windows.conf.json)`,
 );
 check(
   "updater endpoints include the rolling beta manifest",
@@ -109,39 +93,12 @@ const WINDOWS_FLOOR_BUILD = "26100"; // Windows 11 24H2: supported floor.
 
 // --- Icons (both bundlers fail late when these are missing) ------------------
 check(
-  "bundle icons are configured for macOS and Windows",
-  ["icons/icon.png", "icons/icon.icns", "icons/icon.ico"].every((icon) =>
-    tauriConf.bundle.icon?.includes(icon),
-  ),
+  "bundle icons are configured for Windows",
+  ["icons/icon.png", "icons/icon.ico"].every((icon) => tauriConf.bundle.icon?.includes(icon)),
   "existing icon files are not bundled unless bundle.icon lists them",
 );
-const freeEntitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
-check(
-  "macOS retains hardened-runtime library validation",
-  !freeEntitlements.includes("com.apple.security.cs.disable-library-validation"),
-  "the statically linked bridge must not require a library-validation exception",
-);
-const vozPackage = readFileSync(
-  join(root, "src-tauri/native/macos/VozBridge/Package.swift"),
-  "utf8",
-);
-const nativeBuild = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
-check(
-  "macOS speech bridge is statically linked",
-  vozPackage.includes("type: .static") &&
-    nativeBuild.includes("cargo:rustc-link-lib=static=KivoVozBridge"),
-  "a separate ad-hoc dylib has no Team ID and cannot pass library validation",
-);
-for (const icon of [
-  "src-tauri/icons/icon.ico", // NSIS/Windows
-  "src-tauri/icons/icon.icns", // dmg/macOS
-  "src-tauri/icons/tray-icon.png", // macOS menu bar template
-]) {
-  check(
-    `icon exists: ${icon}`,
-    existsSync(join(root, icon)),
-    "missing file breaks the corresponding bundle",
-  );
+for (const icon of ["src-tauri/icons/icon.png", "src-tauri/icons/icon.ico"]) {
+  check(`icon exists: ${icon}`, existsSync(join(root, icon)), "missing bundle icon");
 }
 
 // --- Rust package version -----------------------------------------------------
@@ -156,10 +113,10 @@ check(
 // --- Voz runtime packaging ----------------------------------------------------
 const viteSource = readFileSync(join(root, "vite.config.ts"), "utf8");
 check(
-  "Windows-only Voz worker stays out of macOS/Linux bundles",
+  "Windows-only Voz worker stays out of Linux bundles",
   viteSource.includes('process.env.TAURI_ENV_PLATFORM === "windows"') &&
     viteSource.includes("voz.worker.stub.ts"),
-  "the Windows worker should not enter macOS/Linux frontend output",
+  "the Windows worker should not enter Linux frontend output",
 );
 const vozWorkerSource = readFileSync(join(root, "src/features/dictation/voz.worker.ts"), "utf8");
 check(
@@ -191,13 +148,6 @@ check(
     cspDirectives.get("connect-src")?.has("https://cdn.jsdelivr.net") === true,
   "the on-demand Windows runtime cannot load unless jsDelivr is allowed for scripts and fetches",
 );
-const vozBuildSource = readFileSync(join(root, "src-tauri/build.rs"), "utf8");
-check(
-  "native Swift Voz bridge follows the Cargo target architecture",
-  vozBuildSource.includes("CARGO_CFG_TARGET_ARCH") && vozBuildSource.includes("--triple"),
-  "SwiftPM must compile the bridge for the app architecture before Tauri bundles and signs it",
-);
-
 // --- Capability windows match the windows the shell creates -------------------
 // The bundler allows any label, so a renamed window label merges fine and
 // then fails at runtime when show_surface cannot find the window.
@@ -223,70 +173,6 @@ check(
   `missing from capabilities: [${missingWindows}]; not created by shell.rs: [${extraWindows}]`,
 );
 
-// --- macOS bundle metadata (fails the dmg build late when missing) -------------
-const libSource = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
-check(
-  "macOS hides the Dock at runtime (tray-only agent)",
-  libSource.includes("set_activation_policy") && libSource.includes("ActivationPolicy::Accessory"),
-  "lib.rs must set ActivationPolicy::Accessory on macOS; Info.plist alone does not cover `tauri dev`",
-);
-const entitlements = readFileSync(join(root, "src-tauri/Entitlements.plist"), "utf8");
-check(
-  "Entitlements.plist keeps microphone access",
-  entitlements.includes("com.apple.security.device.audio-input"),
-  "audio-input entitlement missing; dictation has no mic on macOS",
-);
-const infoPlist = readFileSync(join(root, "src-tauri/Info.plist"), "utf8");
-for (const key of [
-  "NSMicrophoneUsageDescription",
-  "NSSpeechRecognitionUsageDescription",
-  "NSAccessibilityUsageDescription",
-]) {
-  check(
-    `Info.plist keeps ${key}`,
-    infoPlist.includes(key),
-    `${key} missing; the OS prompt shows no purpose string`,
-  );
-}
-check(
-  "Info.plist hides the Dock icon (LSUIElement)",
-  infoPlist.includes("LSUIElement"),
-  "LSUIElement missing; Kivo would gain a Dock tile instead of living in the menu bar",
-);
-check(
-  "Swift speech bridge source exists",
-  existsSync(join(root, "src-tauri/native/macos/SpeechBridge.swift")),
-  "build.rs compiles this on macOS; a missing file breaks only the macOS build",
-);
-check(
-  "macOS ad-hoc signs free builds",
-  tauriConf.bundle.macOS?.signingIdentity === "-",
-  `got ${JSON.stringify(tauriConf.bundle.macOS?.signingIdentity)}; null skips bundle signing and ships a half-signed .app that Gatekeeper reports as "damaged" with no bypass. "-" ad-hoc signs for free; release.yml still overrides with a real Developer ID via APPLE_SIGNING_IDENTITY`,
-);
-const dmg = tauriConf.bundle.macOS?.dmg;
-const background = dmg && join(root, "src-tauri", dmg.background);
-check(
-  "macOS installer includes branded artwork",
-  Boolean(background && existsSync(background)),
-  "DMG background missing; shipped installers lose their installation guidance",
-);
-if (background && existsSync(background) && dmg) {
-  const png = readFileSync(background);
-  check(
-    "macOS background matches the Finder window",
-    png.subarray(1, 4).toString() === "PNG" &&
-      png.readUInt32BE(16) === dmg.windowSize.width &&
-      png.readUInt32BE(20) === dmg.windowSize.height,
-    "background dimensions must match dmg.windowSize",
-  );
-  check(
-    "macOS drag targets fit the installer window",
-    [dmg.appPosition, dmg.applicationFolderPosition].every(
-      ({ x, y }) => x > 0 && x < dmg.windowSize.width && y > 0 && y < dmg.windowSize.height,
-    ) && dmg.appPosition.x < dmg.applicationFolderPosition.x,
-    "app and Applications positions must fit the window in drag order",
-  );
-}
 const nsis = windowsConf.bundle.windows.nsis as typeof windowsConf.bundle.windows.nsis & {
   installerIcon?: string;
   headerImage?: string;
@@ -313,21 +199,6 @@ for (const [key, width, height] of [
         bmp.readUInt16LE(28) === 24,
     ),
     `expected a ${width} × ${height} 24-bit BMP`,
-  );
-}
-for (const workflow of ["ci.yml", "release.yml"]) {
-  const source = readFileSync(join(root, ".github/workflows", workflow), "utf8");
-  check(
-    `${workflow} preserves and verifies the macOS installer layout`,
-    source.includes('TAURI_BUNDLER_DMG_IGNORE_CI: "true"') &&
-      source.includes("bash scripts/verify-macos-bundle.sh"),
-    "Tauri skips Finder customization in CI unless explicitly enabled; verify before shipping",
-  );
-  check(
-    `${workflow} keeps free signing when Apple secrets are absent`,
-    source.includes("APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}") &&
-      source.includes("tauriScript: bash scripts/build-macos.sh"),
-    "use the macOS build wrapper to unset empty Apple secrets and preserve the ad-hoc identity",
   );
 }
 // --- Windows floor consistency --------------------------------------------------
@@ -366,7 +237,6 @@ const ciSource = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
 check(
   "beta updater archives are re-signed for version+sha",
   ciSource.includes("signer sign --app-version") &&
-    ciSource.includes("Re-sign macOS updater archive for the beta version") &&
     ciSource.includes("Re-sign Windows updater archive for the beta version"),
   "ci.yml beta jobs must re-sign with --app-version version+sha or beta installs fail with SignedVersionMismatch",
 );
@@ -380,4 +250,4 @@ if (failures > 0) {
   console.error(`\n${failures} packaging check(s) failed.`);
   process.exit(1);
 }
-console.info("\nAll packaging parity checks passed.");
+console.info("\nAll Windows packaging checks passed.");

@@ -253,7 +253,7 @@ impl SpeechEngine for PlatformSpeechEngine {
             .await
             .map_err(|_| SpeechError::Backend)?
             .map_err(speech_error_from_platform)?;
-            // Native macOS startup prepares its model asynchronously. Do not
+            // Native speech startup may prepare its model asynchronously. Do not
             // announce Listening until the microphone actually starts.
             tokio::time::timeout(Duration::from_secs(10), startup)
                 .await

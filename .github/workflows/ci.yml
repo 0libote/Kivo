@@ -16,13 +16,13 @@ name: CI & Build
 #   builds never gate the fast static gates (previously audit/codeql waited
 #   ~30min on `native` before even starting).
 # - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
-#   the `native` matrix (macOS + Windows) owns clippy + tests, so each
+#   the `native` matrix (Windows + Linux bench) owns clippy + tests, so each
 #   desktop's `#[cfg(target_os)]` sources still compile on every PR. The
 #   PRs also exercise installer bundling after the native checks.
 # - Foreign-desktop *logic* (shortcut defaults, cross-OS settings migration,
 #   native-shortcut checks, permission requirements) is tested
 #   host-parameterized: every runner executes both directions (see
-#   `HostPlatform` in src-tauri/src/config plus `check:platform-parity`),
+#   `HostPlatform` in src-tauri/src/config plus `check:contracts`),
 #   instead of `#[cfg]`-gated tests that only ever exercise their own host
 #   and let the other desktop drift silently.
 # - Concurrency is job-level, never workflow-level: superseded PR pushes
@@ -63,7 +63,7 @@ jobs:
   frontend-windows:
     name: Frontend checks (Windows)
     # JavaScript is portable, but paths, line endings, and toolchain behavior
-    # still differ on Windows. Typecheck + unit tests only; lint and the web
+    # still differ on Windows. Run unit and browser tests here; lint and the web
     # build stay on the ubuntu `frontend` job so they are not paid for twice.
     # The static gates also run here (seconds, no extra install) to prove the
     # gate scripts themselves work with Windows paths/line endings.
@@ -81,13 +81,22 @@ jobs:
       - run: bun typecheck
       - run: bun run test
       - run: bun run check:packaging
-      - run: bun run check:platform-parity
+      - run: bun run check:contracts
       - run: bun run check:bridge
+      - run: bun --bun playwright install chromium
+      - run: bun run test:ui
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-windows-browser-failures
+          path: test-results/
+          retention-days: 7
 
   packaging:
-    name: Packaging + platform parity gates
+    name: Packaging + application contracts
     # Fast static checks (seconds, no compile): packaging metadata agreement
-    # plus macOS/Windows branch parity (shortcut defaults, native-shortcut
+    # plus Windows/Linux bench branch parity (shortcut defaults, native-shortcut
     # strings, permission requirements, harness matrix). The real bundle
     # builds only run on main/tags, so these gates are what stop packaging
     # or single-OS breakage from merging in a PR.
@@ -103,7 +112,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun run check:packaging
-      - run: bun run check:platform-parity
+      - run: bun run check:contracts
       - run: bun run check:bridge
 
   rust-static:
@@ -112,15 +121,15 @@ jobs:
     # parses every file including the `#[cfg(target_os)]` sources that only
     # compile on the other desktop, and `cargo metadata --locked` fails fast
     # on a Cargo.toml/Cargo.lock drift that would otherwise only surface
-    # inside the macOS/Windows native builds below.
+    # inside the Windows/Linux bench native builds below.
     # NOTE: full `cargo check/clippy --target <foreign desktop>` was tried
     # here and deliberately dropped: third-party C build scripts (aws-lc-sys
-    # for Windows, objc2 helpers for macOS) need that desktop's C toolchain,
+    # for Windows) need that desktop's C toolchain,
     # which no ubuntu runner has. Foreign-target compilation stays covered
     # by the per-OS `native` matrix (every PR compiles both desktops), and
     # foreign-target *logic* is covered without compiling by the
     # host-parameterized unit tests (config/shell/commands) plus
-    # `check:platform-parity` in the `packaging` job.
+    # `check:contracts` in the `packaging` job.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -142,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest]
+        os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -178,6 +187,9 @@ jobs:
           if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
           "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Vulkan SDK ready at $sdk"
+      - name: Install Linux test-bench build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake build-essential
       - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: src-tauri
@@ -192,25 +204,18 @@ jobs:
           bun-version: 1.4.2
       - if: github.event_name == 'pull_request'
         run: bun install --frozen-lockfile --ignore-scripts
-      - name: Build macOS installer for review
-        if: github.event_name == 'pull_request' && runner.os == 'macOS'
-        run: bash scripts/build-macos.sh build --debug --bundles app,dmg
-        env:
-          TAURI_BUNDLER_DMG_IGNORE_CI: "true"
-      - name: Verify macOS installer for review
-        if: github.event_name == 'pull_request' && runner.os == 'macOS'
-        run: bash scripts/verify-macos-bundle.sh src-tauri/target/debug/bundle
-      - name: Upload macOS installer for testing
-        if: github.event_name == 'pull_request' && runner.os == 'macOS'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: kivo-macos-review-installer
-          retention-days: 7
-          if-no-files-found: error
-          path: src-tauri/target/debug/bundle/dmg/*.dmg
       - name: Build Windows installer for review
         if: github.event_name == 'pull_request' && runner.os == 'Windows'
         run: bun tauri build --debug --bundles nsis
+      - name: Upload Windows installer for testing
+        if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kivo-windows-review-installer
+          retention-days: 7
+          if-no-files-found: error
+          path: src-tauri/target/debug/bundle/nsis/*-setup.exe
+
 
   # Automated code review / security gates. Each gate runs independently and
   # starts immediately (no `needs` on the CI jobs above) so one slow suite
@@ -223,7 +228,7 @@ jobs:
     name: UI tests (Playwright)
     # Ubuntu + Chromium only (cheap). Both platform branches are still
     # covered: the browser harness derives its platform from
-    # navigator.userAgent, and the suite spoofs Windows and macOS agents
+    # navigator.userAgent, and the suite spoofs Windows and Linux agents
     # (see windows-branches.pw.ts, overhaul.pw.ts, summaries.pw.ts).
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -381,7 +386,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Same beta-only fast release tuning as macos-beta above. NSIS is the
+      # Beta-only fast release tuning. NSIS is the
       # only Windows route: a single bundle build, no second packaging pass.
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
@@ -423,7 +428,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # Same signed-version binding as macos-beta above: `tauri build` signs
+      # Signed-version binding: `tauri build` signs
       # for the plain package version, but continuous.json announces
       # `version+sha`. Re-sign the NSIS updater bundle for the exact manifest
       # version so the updater plugin accepts it.
@@ -459,7 +464,7 @@ jobs:
     # Owns every mutation of the `continuous` release (asset uploads and
     # notes) so overlapping main pushes serialize here
     # while the builders above overlap. Asset names match what the old
-    # tauri-action/gh flow shipped (dmg + app tarball + setup exe).
+    # tauri-action/gh flow shipped (setup exe).
     needs: [windows-beta, security-gate]
     if: needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
     concurrency:
@@ -484,7 +489,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          # upload-artifact preserves the matched parents (dmg/…, macos/…),
+          # upload-artifact preserves the matched parents (nsis/…),
           # so locate by name instead of assuming a flat layout.
           # Tauri v2 signs the NSIS installer in place and re-uses it as the
           # Windows update bundle, so the installer is the archive.

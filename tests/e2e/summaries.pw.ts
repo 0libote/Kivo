@@ -51,14 +51,14 @@ async function installHarness(page: Page, context: SelectionContext) {
   );
 }
 
-for (const platform of ["macos", "windows"] as const) {
+for (const platform of ["windows", "linux"] as const) {
   for (const theme of ["light", "dark"] as const) {
     test(`${platform} ${theme}: selected text and links use the compact Flow surface`, async ({
       browser,
     }, testInfo) => {
       const context = await browser.newContext({
         viewport: { width: 360, height: 420 },
-        userAgent: platform === "windows" ? "Windows" : "Macintosh",
+        userAgent: platform === "windows" ? "Windows" : "Linux",
       });
       const page = await context.newPage();
       await page.addInitScript(

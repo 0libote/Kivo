@@ -38,17 +38,6 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ShellState::new())
         .setup(|app| {
-            #[cfg(target_os = "macos")]
-            {
-                // LSUIElement=true hides the Dock icon in the bundled .app,
-                // but dev runs (`bun run dev` / `cargo run`) never read the
-                // bundle Info.plist and Tauri starts as Regular. Force the
-                // accessory policy so Kivo lives in the menu bar, not the
-                // Dock, in both cases. Settings/onboarding windows still
-                // show and focus; they just don't gain a Dock tile. Bare
-                // call: this setter returns unit, which clippy denies binding.
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            }
             let handle = app.handle().clone();
             let platform = Arc::new(PlatformServices::new()?);
             let settings_path = app.path().app_config_dir()?.join("settings.json");
@@ -60,13 +49,7 @@ pub fn run() {
             #[cfg(windows)]
             let voz_runtime: Arc<dyn VozRuntime> =
                 Arc::new(crate::speech::voz::WindowsVozRuntime::new(handle.clone()));
-            #[cfg(target_os = "macos")]
-            let voz_runtime: Arc<dyn VozRuntime> =
-                Arc::new(crate::speech::voz::MacVozRuntime::new(
-                    handle.clone(),
-                    app.path().app_data_dir()?.join("voz-model-cache"),
-                ));
-            #[cfg(not(any(windows, target_os = "macos")))]
+            #[cfg(not(windows))]
             let voz_runtime: Arc<dyn VozRuntime> =
                 Arc::new(crate::speech::voz::UnavailableVozRuntime);
             let voz_speech = Arc::new(VozSpeechEngine::new(Arc::clone(&voz_runtime)));
@@ -138,7 +121,6 @@ pub fn run() {
             commands::get_permission_statuses,
             commands::request_permission,
             commands::open_permission_settings,
-            commands::reset_permission_grants,
             commands::list_microphones,
             commands::list_speech_languages,
             commands::list_local_speech_models,

@@ -6,12 +6,6 @@ import type { Platform } from "../types";
  */
 export function formatShortcut(value: string, platform: Platform) {
   return value.split("+").map((part) => {
-    if (platform === "macos") {
-      if (part === "Meta") return "⌘";
-      if (part === "Alt") return "⌥";
-      if (part === "Shift") return "⇧";
-      if (part === "Ctrl") return "⌃";
-    }
     if (platform === "windows" && part === "Meta") return "Win";
     return part;
   });

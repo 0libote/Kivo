@@ -1,5 +1,8 @@
 # Kivo: project review and Windows redesign plan
 
+> Historical review: predates the Windows-only migration. macOS findings and release gates below no longer apply.
+
+
 > Implementation update (12 September 2026): the overhaul is now in the working tree. See [implementation status and validation](IMPLEMENTATION.md) for what changed, verified screenshots, and the remaining native release checks. The findings and source line numbers below describe the pre-overhaul code.
 
 

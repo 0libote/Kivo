@@ -62,7 +62,7 @@
       <p class="lede">Everything you need to dictate, polish, and summarize — and a plain-English explanation of what happens under the hood. Developers: the <a href="dev.html">developer guide</a> covers the codebase.</p>
 
       <h2 id="getting-started">Getting started</h2>
-      <p><strong>1. Install.</strong> Apple Silicon macOS 26 or later (.dmg; beta builds are ad-hoc signed), or Windows 11 24H2+ (.exe installer). Kivo runs in the background — look for it in the menu bar / system tray.</p>
+      <p><strong>1. Install.</strong> Windows 11 24H2+ (.exe installer). Kivo runs in the background — look for it in the system tray.</p>
       <p><strong>2. Walk through onboarding.</strong> First launch shows a short setup flow: permissions, shortcut overview, and the optional AI key. Closing Settings never quits Kivo — it keeps running quietly.</p>
       <p><strong>3. Grant permissions only when asked.</strong> Kivo never asks up front for everything. It prompts in context:</p>
       <table>
@@ -78,11 +78,11 @@
       <h2 id="gemini-key">Adding your AI key</h2>
       <p>Dictation works with no key at all — you get the raw OS transcript. Writing actions need a configured AI provider or a running local endpoint. Link summaries require Gemini.</p>
       <p><strong>To configure AI:</strong> open <strong>Settings → AI</strong>, choose Gemini, OpenCode Zen, OpenCode Go, or a custom OpenAI-compatible endpoint, and save a key if required. Arrange up to five models in order, then use <strong>Test connection</strong>. Requests try your model queue in order; key or balance problems stop failover. Local endpoints can work without a key.</p>
-      <div class="callout"><strong>Where’s my key stored?</strong> In macOS Keychain or Windows Credential Manager — managed entirely by the Rust process. It is never returned to the webview, never logged, and only leaves your machine inside the HTTPS request for the action you invoke.</div>
+      <div class="callout"><strong>Where’s my key stored?</strong> In Windows Credential Manager — managed entirely by the Rust process. It is never returned to the webview, never logged, and only leaves your machine inside the HTTPS request for the action you invoke.</div>
 
       <h2 id="dictation">Dictation</h2>
       <h3>Hold, speak, release</h3>
-      <p>Defaults: <kbd>Fn</kbd> on macOS, <kbd>Ctrl</kbd> + <kbd>Win</kbd> on Windows (changeable in Settings → Dictation). Hold the shortcut in any app, speak, release — the transcript lands at your cursor.</p>
+      <p>Defaults: <kbd>Ctrl</kbd> + <kbd>Win</kbd> on Windows (changeable in Settings → Dictation). Hold the shortcut in any app, speak, release — the transcript lands at your cursor.</p>
       <h3>The Flow Bar</h3>
       <p>The pill overlay tells you exactly what’s happening:</p>
       <table>
@@ -98,7 +98,7 @@
       <h3>AI cleanup (optional)</h3>
       <p><strong>Improve dictated text with AI</strong> tidies punctuation and obvious filler without changing your meaning. Turn it off in Settings → Dictation for verbatim transcripts.</p>
       <h3>Language &amp; microphone</h3>
-      <p>Pick a microphone (or System Default) and a dictation language in Settings → Dictation. <strong>Automatic</strong> follows your input language on macOS, and the system speech language on Windows — where only installed languages can start dictation.</p>
+      <p>Pick a microphone (or System Default) and a dictation language in Settings → Dictation. <strong>Automatic</strong> follows the system speech language on Windows — where only installed languages can start dictation.</p>
 
       <h2 id="writing-tools">Writing Tools</h2>
       <p>Select text in any app, hit your Writing Tools shortcut (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> on Mac, <kbd>Ctrl</kbd> + <kbd>Space</kbd> on Windows). A compact popup opens next to your cursor or selection.</p>
@@ -153,7 +153,7 @@
           <tr><td>Popup menu</td><td>Arrows · <kbd>Enter</kbd></td><td>Move · run action</td></tr>
         </tbody>
       </table>
-      <p>Both global shortcuts are re-recordable in Settings. On macOS, <kbd>Fn</kbd> is best-effort when the system assigns the Globe key elsewhere.</p>
+      <p>Both global shortcuts are re-recordable in Settings.</p>
 
       <h2 id="limits">Limits &amp; timing</h2>
       <table>
@@ -169,7 +169,7 @@
 
       <h2 id="troubleshooting">Troubleshooting</h2>
       <h3>Dictation won’t start</h3>
-      <p>Check the microphone permission, confirm the shortcut isn’t claimed by another app (macOS Globe/<kbd>Fn</kbd> conflicts are common), and on Windows verify your speech language is installed.</p>
+      <p>Check the microphone permission, confirm the shortcut isn’t claimed by another app, and on Windows verify your speech language is installed.</p>
       <h3>Writing actions show a configuration error</h3>
       <p>You need a valid Gemini key: Settings → AI → save, then <strong>Test connection</strong>. A “rate limited” status means Gemini is throttling — wait and retry.</p>
       <h3>Replace doesn’t work in an app</h3>

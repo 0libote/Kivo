@@ -6,12 +6,10 @@ import { detectedPlatform, surfaceFromLabel } from "./native";
 // Runs on every CI OS (ubuntu + windows) and covers both platform branches
 // regardless of the host runner: the harness derives its platform from
 // navigator.userAgent, so spoofing the UA exercises the Windows branches
-// even on Linux/macOS runners (mirrored in e2e by windows-branches.pw.ts).
+// even on Linux runners (mirrored in e2e by windows-branches.pw.ts).
 
 const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-const MACOS_UA =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const LINUX_UA =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -34,14 +32,9 @@ describe("detectedPlatform", () => {
 
   it("detects Linux from the user agent", () => {
     // Linux is the dev/test bench: the full app runs under Tauri there, so
-    // the harness must take the Linux branches, not the macOS fallback.
+    // the harness must take the Linux branches, not the Windows fallback.
     setUserAgent(LINUX_UA);
     expect(detectedPlatform()).toBe("linux");
-  });
-
-  it("defaults to macOS for macOS agents", () => {
-    setUserAgent(MACOS_UA);
-    expect(detectedPlatform()).toBe("macos");
   });
 });
 
@@ -69,23 +62,10 @@ describe("surfaceFromLabel", () => {
 });
 
 describe("shortcut labels cover both platforms", () => {
-  it("renders every macOS modifier as a symbol", () => {
-    expect(formatShortcut("Meta+Alt+Shift+Ctrl+X", "macos")).toEqual(["⌘", "⌥", "⇧", "⌃", "X"]);
-  });
-
   it("labels Win on Windows and never leaks Meta", () => {
     const rendered = formatShortcut("Ctrl+Meta+Space", "windows");
     expect(rendered).toContain("Win");
     expect(rendered.join("+")).not.toContain("Meta");
-  });
-
-  it("keeps the native defaults distinct per platform", () => {
-    expect(defaultSettings("macos").dictationShortcut).not.toBe(
-      defaultSettings("windows").dictationShortcut,
-    );
-    expect(defaultSettings("macos").writingShortcut).not.toBe(
-      defaultSettings("windows").writingShortcut,
-    );
   });
 
   it("gives Linux a portable dictation hold distinct from its writing shortcut", () => {

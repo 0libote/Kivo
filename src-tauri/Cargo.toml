@@ -17,7 +17,7 @@ tauri-build = { version = "2.6.3", features = [] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "stream", "system-proxy"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri = { version = "2.11.5", features = ["tray-icon", "image-png"] }
 tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.2"
 tauri-plugin-single-instance = "2.4.4"
@@ -40,20 +40,17 @@ earshot = "1.2.2"
 glib = { path = "vendor/glib-0.18.5" }
 
 # On-device transcription runtime (whisper-family GGML/GGUF), static and
-# self-contained (no DLLs to ship). Backend per target: Metal on macOS, Vulkan
-# on Windows x86_64, CPU elsewhere.
+# self-contained (no DLLs to ship). Backend per target: Vulkan on Windows x86_64, CPU on the Linux bench
+# and other architectures.
 #
 # The Vulkan backend is compiled in, not shipped as a module, so building it
 # needs the Vulkan SDK (glslc + headers) on the build machine; end users need
 # only a Vulkan-capable GPU driver and fall back to CPU when none is present.
 # Windows-on-ARM and Linux stay CPU-only.
-[target.'cfg(target_os = "macos")'.dependencies]
-transcribe-cpp = { version = "0.2.3", default-features = false, features = ["metal"] }
-
 [target.'cfg(all(windows, target_arch = "x86_64"))'.dependencies]
 transcribe-cpp = { version = "0.2.3", default-features = false, features = ["vulkan"] }
 
-[target.'cfg(not(any(target_os = "macos", all(windows, target_arch = "x86_64"))))'.dependencies]
+[target.'cfg(not(all(windows, target_arch = "x86_64")))'.dependencies]
 transcribe-cpp = { version = "0.2.3", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
@@ -84,7 +81,7 @@ opt-level = "s"
 panic = "abort"
 strip = true
 
-# Beta / continuous builds (ci.yml macos-beta/windows-beta) intentionally override this profile
+# Beta / continuous builds (ci.yml windows-beta) intentionally override this profile
 # via CARGO_PROFILE_RELEASE_* env vars (thin LTO, 16 codegen units, no strip)
 # so the output stays in target/release/ (Tauri bundler + upload paths assume
 # that) while skipping the ~2min fat-LTO link. Do not add a separate

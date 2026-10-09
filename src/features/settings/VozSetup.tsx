@@ -59,13 +59,10 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
       })
       .catch((cause) => {
         if (!active) return;
-        const supported =
-          !nativeBridge.isNative || context.platform === "macos" || context.platform === "windows";
+        const supported = !nativeBridge.isNative || context.platform === "windows";
         let runtime = initialStatus.runtime;
         if (context.platform === "windows") {
           runtime = "WebView2 · ONNX Runtime Web";
-        } else if (context.platform === "macos") {
-          runtime = "Core ML · Apple Neural Engine";
         }
         setStatus({
           ...initialStatus,
@@ -108,17 +105,13 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
 
   const isWorking = status.phase === "downloading" || status.phase === "preparing";
   const platformInfo = {
-    macos: {
-      size: "about 467 MB",
-      note: "Uses Core ML on Apple Silicon. The first preparation after download can take about 20 seconds.",
-    },
     windows: {
       size: "about 390 MB",
       note: "Uses WebGPU when available, with the SDK’s CPU fallback. The browser runtime can use about 1.2 GB of memory while loaded.",
     },
     linux: {
       size: "not available in the Linux test harness",
-      note: "Voz runs only on supported macOS and Windows releases. The Linux harness keeps simulated speech for development and tests.",
+      note: "Voz runs only on supported Windows releases. The Linux harness keeps simulated speech for development and tests.",
     },
   }[context.platform];
   let modelAction: ReactNode;

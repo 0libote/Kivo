@@ -8,9 +8,10 @@ pub(super) struct PlatformImpl {
 
 impl PlatformImpl {
     pub(super) fn new() -> PlatformResult<Self> {
-        Ok(Self {
-            credentials: UnsupportedCredentialStore,
-        })
+        Err(PlatformError::unsupported(
+            "initialize_platform",
+            "Kivo supports Windows. Linux is available only as a development test bench.",
+        ))
     }
 
     pub(super) fn credential_store(&self) -> &dyn CredentialStore {
@@ -49,8 +50,6 @@ impl PlatformImpl {
     pub(super) fn request_permission(&self, _permission: PermissionKind) -> PlatformResult<()> {
         Err(unsupported("request_permission"))
     }
-
-    pub(super) fn reset_permission_prompts(&self) {}
 
     pub(super) fn register_dictation_shortcut(
         &self,
