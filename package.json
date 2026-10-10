@@ -20,8 +20,8 @@
     "test:watch": "bun test --watch",
     "test:ui": "playwright test",
     "test:ui:smoke": "playwright test tests/e2e/windows-branches.pw.ts tests/e2e/surfaces.pw.ts",
-    "theme:build": "bun --bun astryx theme build src/theme/kivo.ts -o src/theme/built/kivo.css",
-    "theme:check": "bun --bun astryx theme build src/theme/kivo.ts -o src/theme/built/kivo.css --check",
+    "theme:build": "bunx --bun astryx theme build src/theme/kivo.ts -o src/theme/built/kivo.css",
+    "theme:check": "bunx --bun astryx theme build src/theme/kivo.ts -o src/theme/built/kivo.css --check",
     "check:bridge": "bun scripts/check-bridge.ts",
     "check": "bun run typecheck && bun run format:check && bun run lint && bun run knip && bun run theme:check && bun run test && bun run check:bridge && bun run check:packaging && bun run check:contracts",
     "ai-check": "bun run check && bun run format:rust && bun run lint:rust && cargo test --locked --manifest-path src-tauri/Cargo.toml",
@@ -69,5 +69,8 @@
     "oxlint": "^1.85.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.1"
+  },
+  "patchedDependencies": {
+    "@astryxdesign/cli@0.6.3": "patches/@astryxdesign%2Fcli@0.6.3.patch"
   }
 }

@@ -1,0 +1,14 @@
+diff --git a/api/theme/build/build.mjs b/api/theme/build/build.mjs
+index 2c70c84a5780dd5c8df7f64a0c4829dc887b6fd9..8f4099a9792a55f5cd79ebf5d16db90c2bce626b 100644
+--- a/api/theme/build/build.mjs
++++ b/api/theme/build/build.mjs
+@@ -390,7 +390,8 @@ async function loadKnownValuesIndex() {
+       valuesByOwner[targetName(doc.name)] = valuesFromProps(doc.props);
+     }
+     for (const component of /** @type {any[]} */ (doc?.components ?? [])) {
+-      if (typeof component?.name === 'string') {
++      // Name-only subcomponent references must not erase the owning doc's props.
++      if (typeof component?.name === 'string' && component.props?.length) {
+         valuesByOwner[targetName(component.name)] = valuesFromProps(
+           component.props,
+         );
