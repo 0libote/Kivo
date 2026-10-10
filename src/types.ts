@@ -3,11 +3,11 @@ import type { IconName } from "./components/Icon";
 /**
  * Every OS runs one shared AppCore; only a thin adapter differs per host.
  * `linux` is the dev/test bench (simulated speech + file vault) so the full
- * app is exercisable on Linux even though only macOS/Windows ship. If a flow
- * works on one platform it works on all three unless the adapter says
- * otherwise — and the adapter surface is ~6 methods, all unit-tested.
+ * app is exercisable on Linux even though only Windows ships. The
+ * shared frontend and AppCore behavior is tested on both hosts; native
+ * Windows integration needs its own validation.
  */
-export type Platform = "macos" | "windows" | "linux";
+export type Platform = "windows" | "linux";
 /**
  * Native windows plus `gallery`: a frontend-only dev bench (never a Tauri
  * window, never an IPC surface) that renders every bit inline for Linux
@@ -331,20 +331,18 @@ export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 /**
  * Per-platform defaults. Mirrors `dictation_default_for` /
  * `writing_tools_default_for` in `src-tauri/src/config/mod.rs` (checked by
- * `scripts/check-platform-parity.ts`). Linux uses the portable
+ * `scripts/check-contracts.ts`). Linux uses the portable
  * Control+Alt+Space dictation hold (no native Fn / Ctrl+Win monitor there)
  * and shares the Windows writing shortcut so writing behavior matches the
  * bench. Kept as data, not branches, so adding a platform is a compiler
  * error until its defaults are chosen.
  */
 const DICTATION_SHORTCUTS: Record<Platform, string> = {
-  macos: "Fn",
   windows: "Ctrl+Meta",
   linux: "Control+Alt+Space",
 };
 
 const WRITING_SHORTCUTS: Record<Platform, string> = {
-  macos: "Ctrl+Shift+Space",
   windows: "Ctrl+Space",
   linux: "Ctrl+Space",
 };

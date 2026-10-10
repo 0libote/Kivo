@@ -54,9 +54,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
       .getApiKeyStatus()
       .then((nextApi) => active && setApiStatus(nextApi))
       .catch(() => active && setMessage("Saved key status isn’t available right now."));
-    // Grants happen outside the app (system prompt / System Settings) and
-    // the native request returns before the user answers, so re-read on
-    // focus and poll while onboarding is open.
+    // Re-read microphone access when returning from Windows Settings.
     const interval = window.setInterval(pollPermissions, 2500);
     window.addEventListener("focus", pollPermissions);
     return () => {
@@ -114,17 +112,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
             the new one animates, which reads as a flicker. */}
         <AnimatePresence initial={false} mode="wait">
           {step === 0 ? <WelcomeStep key={step} onStart={() => setStep(1)} /> : null}
-          {step === 1 ? (
-            <PermissionsStep
-              busyPermission={busyPermission}
-              dictationShortcut={settings.dictationShortcut}
-              key={step}
-              platform={context.platform}
-              request={(kind) => void request(kind)}
-              setMessage={setMessage}
-              statusByKind={statusByKind}
-            />
-          ) : null}
+          {step === 1 ? <PermissionsStep key={step} platform={context.platform} /> : null}
           {step === 2 ? (
             <DictationStep
               dictationShortcut={settings.dictationShortcut}
@@ -215,7 +203,7 @@ function WelcomeStep({ onStart }: { readonly onStart: () => void }) {
   );
 }
 
-interface StepPermissionsProps {
+interface DictationStepProps {
   readonly busyPermission: PermissionKind | null;
   readonly dictationShortcut: string;
   readonly platform: AppContext["platform"];
@@ -224,15 +212,7 @@ interface StepPermissionsProps {
   readonly statusByKind: Partial<Record<PermissionKind, PermissionStatus>>;
 }
 
-function PermissionsStep({
-  busyPermission,
-  dictationShortcut,
-  platform,
-  request,
-  setMessage,
-  statusByKind,
-}: StepPermissionsProps) {
-  const isMacos = platform === "macos";
+function PermissionsStep({ platform }: { readonly platform: AppContext["platform"] }) {
   return (
     <StepFrame>
       <div {...stylex.props(styles.stepIcon)}>
@@ -241,44 +221,16 @@ function PermissionsStep({
       <p {...stylex.props(styles.eyebrow)}>Step 1 of 3</p>
       <h1 {...stylex.props(styles.title)}>Work with text everywhere</h1>
       <p {...stylex.props(styles.copy)}>
-        {isMacos
-          ? "Accessibility lets Kivo read only the text you select and insert text where your cursor is."
-          : "Kivo uses Windows UI Automation to work with the selected text and cursor in your active app."}
+        {platform === "windows"
+          ? "Kivo uses Windows UI Automation to work with the selected text and cursor in your active app."
+          : "The Linux test bench simulates text access for development and testing."}
       </p>
-      {isMacos ? (
-        <div {...stylex.props(styles.permissionList)}>
-          <PermissionRow
-            busy={busyPermission === "accessibility"}
-            label="Accessibility"
-            onOpen={() =>
-              void nativeBridge
-                .openPermissionSettings("accessibility")
-                .catch(() => setMessage("The system settings page couldn’t be opened."))
-            }
-            onRequest={() => request("accessibility")}
-            status={statusByKind.accessibility?.state ?? "not-determined"}
-          />
-          <PermissionRow
-            busy={busyPermission === "input-monitoring"}
-            label={dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring"}
-            onOpen={() =>
-              void nativeBridge
-                .openPermissionSettings("input-monitoring")
-                .catch(() => setMessage("The system settings page couldn’t be opened."))
-            }
-            onRequest={() => request("input-monitoring")}
-            optional={dictationShortcut !== "Fn"}
-            status={statusByKind["input-monitoring"]?.state ?? "not-determined"}
-          />
-        </div>
-      ) : (
-        <div {...stylex.props(styles.nativeNote)}>
-          <Icon name="check" size={17} />
-          <span {...stylex.props(styles.nativeNoteText)}>
-            No permission prompt is normally required.
-          </span>
-        </div>
-      )}
+      <div {...stylex.props(styles.nativeNote)}>
+        <Icon name="check" size={17} />
+        <span {...stylex.props(styles.nativeNoteText)}>
+          No permission prompt is normally required.
+        </span>
+      </div>
     </StepFrame>
   );
 }
@@ -290,9 +242,7 @@ function DictationStep({
   setMessage,
   statusByKind,
   dictationShortcut,
-}: StepPermissionsProps) {
-  const showSpeechRecognition =
-    platform === "macos" && statusByKind["speech-recognition"]?.state !== "unavailable";
+}: DictationStepProps) {
   const openSettings = (kind: PermissionKind) => {
     void nativeBridge
       .openPermissionSettings(kind)
@@ -317,15 +267,6 @@ function DictationStep({
           onRequest={() => request("microphone")}
           status={statusByKind.microphone?.state ?? "not-determined"}
         />
-        {showSpeechRecognition ? (
-          <PermissionRow
-            busy={busyPermission === "speech-recognition"}
-            label="Speech Recognition"
-            onOpen={() => openSettings("speech-recognition")}
-            onRequest={() => request("speech-recognition")}
-            status={statusByKind["speech-recognition"]?.state ?? "not-determined"}
-          />
-        ) : null}
       </div>
       <div {...stylex.props(styles.practice)}>
         <DictationPractice platform={platform} shortcut={dictationShortcut} />

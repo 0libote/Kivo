@@ -9,13 +9,7 @@
 1. Install [Bun](https://bun.com/docs/installation).
 2. Install stable Rust with [rustup](https://rustup.rs/).
 3. Install the current [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/).
-4. Install CMake and a C++ toolchain (Visual Studio Build Tools with Desktop development with C++ on Windows, Xcode command-line tools on macOS, `build-essential` on Linux). The on-device speech runtime (`transcribe.cpp`, via the `transcribe-cpp` crate) is compiled from source on the first build; no model files are downloaded at build time.
-
-### macOS
-
-- Xcode 26 and its command-line tools.
-- A Developer ID Application certificate for distribution and an Apple account configured for notarization.
-- Accessibility, Input Monitoring, Microphone, and Speech Recognition permission during development.
+4. Install CMake and a C++ toolchain (Visual Studio Build Tools with Desktop development with C++ on Windows, `build-essential` on Linux). The on-device speech runtime (`transcribe.cpp`, via the `transcribe-cpp` crate) is compiled from source on the first build; no model files are downloaded at build time.
 
 ### Windows
 
@@ -59,7 +53,7 @@ Open `http://127.0.0.1:1420/?surface=gallery&harness=1` for the test bench: one 
 
 ### Linux test bench
 
-Linux runs the full app against a simulated adapter, so the shared core (state machines, IPC, settings, AI failover) is exercised exactly as on macOS and Windows. Only macOS and Windows ship; Linux exists so every flow is verifiable without those machines.
+Linux runs the full app against a simulated adapter, so the shared core (state machines, IPC, settings, AI failover) is exercised through the same application contracts as Windows. Windows is the sole supported product; Linux is a development bench with no desktop feature-parity promise. Browser tests and shared Rust tests run on Linux, but Windows UI Automation, hooks, WebView2, audio devices, and installers require Windows verification.
 
 ```sh
 # Tauri system prerequisites for your distro, plus ALSA headers for the
@@ -103,4 +97,12 @@ React owns presentation and transient UI state. Rust owns shortcuts, window plac
 
 Presentation uses the Astryx design system (`@astryxdesign/core`) with StyleX for app-specific layout. The Kivo theme is defined in `src/theme/kivo.ts` and pre-compiled to `src/theme/built/` by `bun run theme:build`; both the built CSS and JS are committed and checked in CI by `bun run theme:check`. Motion (`motion/react`) drives the compact overlay and step transitions. There is no hand-written component CSS: document-level rules live in `src/styles/app.css` and the only other stylesheets are Astryx's prebuilt CSS and the markdown prose rules for sanitized AI output.
 
-Platform code is isolated under `src-tauri/src/platform/`. macOS 26 uses Accessibility/Core Graphics/AppKit/Keychain and `SpeechAnalyzer` with `DictationTranscriber`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Shared speech routing, capture, and session handling live under `src-tauri/src/speech/`; `local.rs` and `model_store.rs` retain Kivo's transcribe-cpp engine, and `voz.rs` adapts Voz behind the same engine contract. macOS calls the pinned Swift SDK through `src-tauri/native/macos/VozBridge`; Windows hosts the pinned browser SDK in a lazy worker in the persistent flow-bar WebView2. `docs/voz-integration-plan.md` records the runtime choices and upstream constraints. Linux continues to use the simulated speech adapter and reports Voz as unavailable. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free AX/UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
+The Bun patch for `@astryxdesign/cli@0.6.3` prevents name-only component references from erasing documented built-in variants. This keeps theme declarations independent of filesystem traversal order. `tests/theme-generation.test.ts` checks both scan orders; remove the patch when the upstream generator fixes this behavior.
+
+Platform code is isolated under `src-tauri/src/platform/`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Shared speech routing, capture, and session handling live under `src-tauri/src/speech/`; `local.rs` and `model_store.rs` retain Kivo's transcribe-cpp engine, and `voz.rs` adapts Voz behind the same engine contract. Windows hosts the pinned browser SDK in a lazy worker in the persistent flow-bar WebView2. `docs/voz-integration-plan.md` records the runtime choices and upstream constraints. Linux continues to use the simulated speech adapter and reports Voz as unavailable. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
+
+## Support and verification policy
+
+Windows x86_64 on Windows 11 24H2+ is the release target. macOS desktop support has been removed; browser-only frontend development remains possible on other hosts. Linux is retained solely for the simulated native bench and shared tests, not distribution. Do not add cross-desktop parity requirements.
+
+CI compiles, lints, and tests the Windows backend on every PR and builds a review NSIS installer. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.

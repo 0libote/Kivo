@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on macOS and Windows. No accounts, no telemetry — System or on-device speech, optional AI polish." />
+  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on Windows. No accounts, no telemetry — System or on-device speech, optional AI polish." />
   <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)" />
   <title>Kivo — Talk instead of type</title>
@@ -40,7 +40,7 @@
   <main class="wrap">
     <!-- Hero -->
     <section class="hero">
-      <span class="eyebrow"><span class="eyebrow__dot"></span>macOS 26 &nbsp;·&nbsp; Windows 11 &nbsp;·&nbsp; system-wide</span>
+      <span class="eyebrow"><span class="eyebrow__dot"></span>Windows 11 &nbsp;·&nbsp; system-wide</span>
       <h1>Talk instead of type. <em>Write better, faster.</em></h1>
       <p class="hero__sub">
         Kivo is a quiet background utility for system-wide dictation and focused writing
@@ -52,8 +52,8 @@
         <a class="btn btn--secondary" href="docs.html">Read the docs</a>
       </div>
       <div class="hero__keys">
-        <span><kbd>Fn</kbd> hold to dictate</span>
-        <span><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> writing tools</span>
+        <span><kbd>Ctrl</kbd> + <kbd>Win</kbd> hold to dictate</span>
+        <span><kbd>Ctrl</kbd> + <kbd>Space</kbd> writing tools</span>
         <span><kbd>esc</kbd> to dismiss</span>
       </div>
 
@@ -96,7 +96,7 @@
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No accounts</li>
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No telemetry</li>
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>OS-native speech</li>
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Keys stay in your keychain</li>
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Keys stay in Credential Manager</li>
       </ul>
     </section>
 
@@ -109,7 +109,7 @@
         <li class="step">
           <span class="step__num">1</span>
           <h3>Hold to dictate</h3>
-          <p>Hold <kbd>Fn</kbd> (Mac) or your chosen shortcut anywhere — email, docs, code, chat. The Flow Bar appears and listens. Release to insert.</p>
+          <p>Hold <kbd>Ctrl</kbd> + <kbd>Win</kbd> or your chosen shortcut anywhere — email, docs, code, chat. The Flow Bar appears and listens. Release to insert.</p>
         </li>
         <li class="step">
           <span class="step__num">2</span>
@@ -149,7 +149,7 @@
         <article class="card">
           <div class="card__icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div>
           <h3>Private by construction</h3>
-          <p>Choose system speech or on-device transcription. Writing actions and optional AI cleanup use your chosen provider; local AI stays on your computer. Keys live in Keychain / Credential Manager.</p>
+          <p>Choose system speech or on-device transcription. Writing actions and optional AI cleanup use your chosen provider; local AI stays on your computer. Keys live in Credential Manager.</p>
         </article>
       </div>
     </section>
@@ -175,7 +175,7 @@
               <tr><td>Voice audio</td><td><span class="pill pill--local">Chosen speech engine</span><br />System speech or on-device transcription</td></tr>
               <tr><td>Dictated transcript</td><td><span class="pill pill--local">Local insert</span><br />Optional AI cleanup through your chosen provider</td></tr>
               <tr><td>Writing action text</td><td><span class="pill pill--ok">Chosen AI provider</span><br />Hosted API or local endpoint</td></tr>
-              <tr><td>API key</td><td><span class="pill pill--local">OS vault</span><br />Keychain · Credential Manager</td></tr>
+              <tr><td>API key</td><td><span class="pill pill--local">OS vault</span><br />Credential Manager</td></tr>
             </tbody>
           </table>
         </div>
@@ -185,14 +185,9 @@
     <!-- Platforms -->
     <section class="section" id="platforms">
       <p class="section__eyebrow">Platforms</p>
-      <h2>Native on Mac and Windows.</h2>
-      <p class="section__sub">Real native integration — Accessibility on macOS, UI Automation on Windows — not a browser extension or overlay hack.</p>
+      <h2>Native on Windows.</h2>
+      <p class="section__sub">Real native integration — UI Automation on Windows — not a browser extension or overlay hack.</p>
       <div class="platforms">
-        <div class="platform">
-          <h3>macOS 26+</h3>
-          <p>Apple Silicon app + DMG. Stable builds use Developer ID signing and notarization when configured; beta builds are ad-hoc signed. Direct distribution — the App Sandbox is intentionally off so system-wide Accessibility can work.</p>
-          <code>SpeechAnalyzer · DictationTranscriber · Keychain</code>
-        </div>
         <div class="platform">
           <h3>Windows 11 24H2+</h3>
           <p>A per-user .exe installer. No store account or package identity required. UI Automation + Win32 input, Credential Manager for keys.</p>
@@ -228,7 +223,7 @@
         <a class="btn btn--primary" href="https://github.com/0libote/Kivo" target="_blank" rel="noopener">Get Kivo on GitHub</a>
         <a class="btn btn--ghost-light" href="docs.html#getting-started">Setup guide</a>
       </div>
-      <p class="cta__note">macOS 26+ · Windows 11 24H2+ &nbsp;·&nbsp; Choose a hosted AI provider or local endpoint</p>
+      <p class="cta__note">Windows 11 24H2+ &nbsp;·&nbsp; Choose a hosted AI provider or local endpoint</p>
     </section>
   </main>
 

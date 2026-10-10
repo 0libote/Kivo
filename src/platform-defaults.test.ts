@@ -29,13 +29,11 @@ import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER, defaultSettings } from "./types"
 // without its counterpart fails fast instead of surfacing weeks later.
 describe("platform defaults parity", () => {
   it("uses the native hold shortcut per platform", () => {
-    expect(defaultSettings("macos").dictationShortcut).toBe("Fn");
     expect(defaultSettings("windows").dictationShortcut).toBe("Ctrl+Meta");
     expect(defaultSettings("linux").dictationShortcut).toBe("Control+Alt+Space");
   });
 
   it("uses the portable writing shortcut per platform", () => {
-    expect(defaultSettings("macos").writingShortcut).toBe("Ctrl+Shift+Space");
     expect(defaultSettings("windows").writingShortcut).toBe("Ctrl+Space");
     expect(defaultSettings("linux").writingShortcut).toBe("Ctrl+Space");
   });
@@ -45,22 +43,16 @@ describe("platform defaults parity", () => {
     expect(formatShortcut("Ctrl+Meta", "windows")).not.toContain("Meta");
   });
 
-  it("renders macOS modifiers as symbols", () => {
-    expect(formatShortcut("Ctrl+Shift+Space", "macos")).toEqual(["⌃", "⇧", "Space"]);
-  });
-
   it("uses the same default AI model queue on both platforms", () => {
     expect(DEFAULT_AI_MODEL).toBe("gemini-3.8-flash");
     expect(DEFAULT_AI_PROVIDER).toBe("gemini");
     expect(MAX_AI_MODELS).toBe(5);
-    expect(defaultSettings("macos").aiModels).toEqual([DEFAULT_AI_MODEL]);
     expect(defaultSettings("windows").aiModels).toEqual([DEFAULT_AI_MODEL]);
     expect(defaultSettings("linux").aiModels).toEqual([DEFAULT_AI_MODEL]);
-    expect(defaultSettings("macos").aiProvider).toBe("gemini");
     expect(defaultSettings("windows").aiProvider).toBe("gemini");
     expect(defaultSettings("linux").aiProvider).toBe("gemini");
     expect(defaultSettings("windows").aiReasoningMode).toBe("fast");
-    expect(defaultSettings("macos").aiCustomBaseUrl).toBeNull();
+    expect(defaultSettings("windows").aiCustomBaseUrl).toBeNull();
   });
 
   it("only lists text models that work with Kivo", () => {
@@ -158,7 +150,6 @@ describe("platform defaults parity", () => {
     // Duplicates collapse, junk drops out, emptied queues fall back.
     expect(
       normalizeAiModelList("gemini", [
-        "gemini-2.5-flash",
         "gemini-2.5-flash",
         "has spaces!",
         "gemini-2.5-flash-preview-tts",

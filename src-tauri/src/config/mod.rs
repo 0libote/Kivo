@@ -128,7 +128,6 @@ pub enum ThemePreference {
 // would flag them as never constructed on single-host builds.
 #[allow(dead_code)]
 pub(crate) enum HostPlatform {
-    Macos,
     Windows,
     Linux,
     Other,
@@ -136,13 +135,11 @@ pub(crate) enum HostPlatform {
 
 impl HostPlatform {
     pub(crate) fn current() -> Self {
-        #[cfg(target_os = "macos")]
-        return Self::Macos;
         #[cfg(target_os = "windows")]
         return Self::Windows;
         #[cfg(target_os = "linux")]
         return Self::Linux;
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         return Self::Other;
     }
 }
@@ -152,12 +149,10 @@ impl HostPlatform {
 /// exercises its own host and lets the other default drift silently).
 ///
 /// Linux is the dev/test bench: it uses a portable global-shortcut
-/// accelerator (`Control+Alt+Space`) that never collides with the macOS Fn
-/// hold or the Windows Ctrl+Win hold, so the same AppCore path is exercised
-/// on all three hosts.
+/// accelerator (`Control+Alt+Space`) that differs from the Windows Ctrl+Win hold, so the same AppCore path is exercised
+/// on both hosts.
 pub(crate) fn dictation_default_for(host: HostPlatform) -> ShortcutBinding {
     match host {
-        HostPlatform::Macos => ShortcutBinding::new("Fn"),
         HostPlatform::Windows => ShortcutBinding::new("Ctrl+Meta"),
         HostPlatform::Linux | HostPlatform::Other => ShortcutBinding::new("Control+Alt+Space"),
     }
@@ -169,7 +164,6 @@ pub(crate) fn dictation_default_for(host: HostPlatform) -> ShortcutBinding {
 /// the Windows target.
 pub(crate) fn writing_tools_default_for(host: HostPlatform) -> ShortcutBinding {
     match host {
-        HostPlatform::Macos => ShortcutBinding::new("Ctrl+Shift+Space"),
         HostPlatform::Windows | HostPlatform::Linux | HostPlatform::Other => {
             ShortcutBinding::new("Ctrl+Space")
         }
@@ -178,13 +172,10 @@ pub(crate) fn writing_tools_default_for(host: HostPlatform) -> ShortcutBinding {
 
 /// Replacement for a foreign native dictation default carried over in a
 /// settings file, or `None` when the accelerator is valid on `host`.
-/// Pure over `host` so one test run covers both migration directions.
+/// Pure over `host` so one test run covers legacy-settings migration.
 fn foreign_default_replacement(accelerator: &str, host: HostPlatform) -> Option<ShortcutBinding> {
     match host {
         HostPlatform::Windows if accelerator == "Fn" => Some(dictation_default_for(host)),
-        HostPlatform::Macos if accelerator == "Ctrl+Meta" || accelerator == "Control+Super" => {
-            Some(dictation_default_for(host))
-        }
         // The Linux test bench has no native hold monitor: a carried-over
         // Fn / Ctrl+Win default would fail global-shortcut registration, so
         // migrate it to the portable Linux default instead of leaving
@@ -843,22 +834,6 @@ mod tests {
             foreign_default_replacement("Ctrl+Meta", HostPlatform::Windows),
             None
         );
-        // macOS host: both Windows spellings ("Ctrl+Meta" as stored,
-        // "Control+Super" as normalized in shell.rs) migrate.
-        assert_eq!(
-            foreign_default_replacement("Ctrl+Meta", HostPlatform::Macos),
-            Some(ShortcutBinding::new("Fn"))
-        );
-        assert_eq!(
-            foreign_default_replacement("Control+Super", HostPlatform::Macos),
-            Some(ShortcutBinding::new("Fn"))
-        );
-        assert_eq!(
-            foreign_default_replacement("Ctrl+Alt+D", HostPlatform::Macos),
-            None
-        );
-        assert_eq!(foreign_default_replacement("Fn", HostPlatform::Macos), None);
-
         // Linux host: both native defaults migrate to the portable default.
         assert_eq!(
             foreign_default_replacement("Fn", HostPlatform::Linux),
@@ -877,6 +852,15 @@ mod tests {
             None
         );
 
+        // Legacy macOS settings must not retain an unusable Fn binding.
+        let mut legacy = AppSettings::default();
+        legacy.dictation.shortcut = ShortcutBinding::new("Fn");
+        let migrated = legacy.validate_and_normalize().unwrap();
+        assert_eq!(
+            migrated.dictation.shortcut,
+            dictation_default_for(HostPlatform::current())
+        );
+
         // End-to-end through normalization on the current host: the host's
         // own default survives while custom shortcuts pass through untouched.
         let mut settings = AppSettings::default();
@@ -892,12 +876,8 @@ mod tests {
     fn platform_defaults_match_the_frontend_contract() {
         // Mirror of src/types.ts defaultSettings() and the frontend
         // platform-defaults test. If either side changes a default, update
-        // both together (and scripts/check-platform-parity.ts enforces it in
+        // both together (and scripts/check-contracts.ts enforces it in
         // CI without compiling).
-        assert_eq!(
-            dictation_default_for(HostPlatform::Macos),
-            ShortcutBinding::new("Fn")
-        );
         assert_eq!(
             dictation_default_for(HostPlatform::Windows),
             ShortcutBinding::new("Ctrl+Meta")
@@ -905,10 +885,6 @@ mod tests {
         assert_eq!(
             dictation_default_for(HostPlatform::Linux),
             ShortcutBinding::new("Control+Alt+Space")
-        );
-        assert_eq!(
-            writing_tools_default_for(HostPlatform::Macos),
-            ShortcutBinding::new("Ctrl+Shift+Space")
         );
         assert_eq!(
             writing_tools_default_for(HostPlatform::Windows),

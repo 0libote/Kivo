@@ -1,6 +1,6 @@
 # Kivo
 
-System-wide dictation and writing tools for macOS and Windows. Dictate into your current app, rewrite selected text, or summarize text and links from a compact popup.
+System-wide dictation and writing tools for Windows. Dictate into your current app, rewrite selected text, or summarize text and links from a compact popup.
 
 Kivo runs in the background. It has no account system, telemetry, or hosted analytics.
 
@@ -10,10 +10,9 @@ Get an installer from [GitHub Releases](https://github.com/0libote/Kivo/releases
 
 | Platform | Requirements | Download |
 | --- | --- | --- |
-| macOS | Apple Silicon, macOS 26+ | `.dmg` |
 | Windows | Windows 11 24H2+ | `-setup.exe` |
 
-The beta is not a stable release. The project has no Apple Developer Program subscription, so macOS beta builds are ad-hoc signed and not notarized: Gatekeeper may block the first launch until explicitly allowed, and Accessibility / Input Monitoring grants may need to be renewed after every update. Windows builds may show a SmartScreen warning. See [installation and signing](docs/releasing.md) for details.
+The beta is not a stable release. Windows builds may show a SmartScreen warning. See [installation and signing](docs/releasing.md) for details.
 
 Linux is a development test bench with simulated OS integration; it is not a supported release platform.
 
@@ -26,7 +25,7 @@ Linux is a development test bench with simulated OS integration; it is not a sup
 
 System dictation works without an AI key. Optional on-device transcription models can be installed in Settings → Dictation. Hosted writing tools and optional dictation cleanup send text to the provider you choose; local AI endpoints keep those requests on your computer. Link summaries require Gemini.
 
-Keys are stored in macOS Keychain or Windows Credential Manager. Kivo keeps the latest dictation in memory for recovery, rather than saving a transcript history.
+Keys are stored in Windows Credential Manager. Kivo keeps the latest dictation in memory for recovery, rather than saving a transcript history.
 
 ## Develop
 

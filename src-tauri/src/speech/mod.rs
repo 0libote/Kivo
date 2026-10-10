@@ -137,7 +137,7 @@ pub enum SpeechError {
     NoSpeechDetected,
     LocalModelUnavailable,
     VozUnavailable,
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(windows)]
     VozRuntime(String),
     VozLanguageUncertain,
     VozDetectedUnsupported(String),
@@ -151,7 +151,7 @@ pub enum SpeechError {
 
 impl fmt::Display for SpeechError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(windows)]
         if let Self::VozRuntime(message) = self {
             return formatter.write_str(message);
         }
@@ -175,7 +175,7 @@ impl fmt::Display for SpeechError {
                 "Download a local speech model in Settings → Dictation, then try again."
             }
             Self::VozUnavailable => "Voz is unavailable on this platform. Choose System or another on-device engine.",
-            #[cfg(any(windows, target_os = "macos"))]
+            #[cfg(windows)]
             Self::VozRuntime(_) => "Voz could not complete the local speech operation. Retry or choose another engine.",
             Self::UnsupportedVozLanguage => "Voz does not support the selected language. Choose one of its supported languages in Settings → Dictation.",
             Self::VozLanguageUncertain => "Kivo could not reliably identify the spoken language.",

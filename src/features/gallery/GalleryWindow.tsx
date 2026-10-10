@@ -127,7 +127,7 @@ export function GalleryWindow({
           <h1 {...stylex.props(styles.title)}>Test bench</h1>
           <p {...stylex.props(styles.lead)}>
             One screen over the active bridge. Green here means the shared AppCore path works; only
-            the thin per-OS adapter differs on macOS and Windows.
+            Windows uses native integration; Linux uses a simulated test adapter.
           </p>
           {error ? <Banner status="error" title={error} xstyle={styles.errorBanner} /> : null}
 

@@ -110,7 +110,7 @@ pub fn validate_detected_language(
     }
 }
 
-/// Runtime seam implemented by the macOS Swift SDK bridge and Windows web
+/// Runtime seam implemented by the Windows web
 /// worker adapter. Model downloads and preparation happen before capture.
 pub trait VozRuntime: Send + Sync {
     fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>>;
@@ -167,13 +167,13 @@ impl WorkerReadiness {
 
 #[cfg(any(test, windows))]
 fn worker_not_ready_error() -> SpeechError {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(windows)]
     {
         SpeechError::VozRuntime(
             "The Voz worker in the flow bar did not start. Reopen Kivo and try again.".into(),
         )
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(windows))]
     {
         SpeechError::VozUnavailable
     }
@@ -182,10 +182,10 @@ fn worker_not_ready_error() -> SpeechError {
 /// Safe fallback used by platforms without an installed Voz adapter (including
 /// the Linux development harness). It never claims availability or redirects
 /// audio to another engine.
-#[cfg(any(test, not(any(windows, target_os = "macos"))))]
+#[cfg(any(test, not(windows)))]
 pub struct UnavailableVozRuntime;
 
-#[cfg(any(test, not(any(windows, target_os = "macos"))))]
+#[cfg(any(test, not(windows)))]
 impl VozRuntime for UnavailableVozRuntime {
     fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>> {
         Box::pin(async {
@@ -220,219 +220,6 @@ impl VozRuntime for UnavailableVozRuntime {
         Box::pin(async { Err(SpeechError::VozUnavailable) })
     }
 }
-
-#[cfg(target_os = "macos")]
-mod macos {
-    use std::{
-        ffi::{CStr, CString, c_char, c_void},
-        path::{Path, PathBuf},
-    };
-
-    use tauri::{AppHandle, Emitter};
-
-    use super::{
-        SpeechError, SpeechFuture, VozModelPhase, VozModelStatus, VozRuntime, VozTranscript,
-    };
-
-    unsafe extern "C" {
-        fn kivo_voz_status(root: *const c_char) -> bool;
-        fn kivo_voz_download(
-            root: *const c_char,
-            callback: Option<unsafe extern "C" fn(f64, *mut c_void)>,
-            context: *mut c_void,
-        ) -> *mut c_char;
-        fn kivo_voz_prepare(root: *const c_char) -> *mut c_char;
-        fn kivo_voz_transcribe(
-            samples: *const f32,
-            count: isize,
-            root: *const c_char,
-            language: *const c_char,
-        ) -> *mut c_char;
-        fn kivo_voz_remove(root: *const c_char) -> bool;
-        fn kivo_voz_free(pointer: *mut c_char);
-    }
-
-    fn root_cstring(root: &Path) -> Result<CString, SpeechError> {
-        CString::new(root.to_string_lossy().as_bytes()).map_err(|_| SpeechError::Backend)
-    }
-
-    unsafe fn response(pointer: *mut c_char) -> Result<String, SpeechError> {
-        if pointer.is_null() {
-            return Err(SpeechError::VozUnavailable);
-        }
-        let text = unsafe { CStr::from_ptr(pointer) }
-            .to_string_lossy()
-            .into_owned();
-        unsafe { kivo_voz_free(pointer) };
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&text)
-            && let Some(error) = value.get("error").and_then(serde_json::Value::as_str)
-        {
-            return Err(SpeechError::VozRuntime(error.to_owned()));
-        }
-        Ok(text)
-    }
-
-    unsafe extern "C" fn report_progress(fraction: f64, context: *mut c_void) {
-        if context.is_null() {
-            return;
-        }
-        let app = unsafe { &*(context.cast::<AppHandle>()) };
-        let _ = app.emit(
-            "voz-model-status",
-            VozModelProgressPayload {
-                phase: "downloading",
-                progress: Some(fraction.clamp(0.0, 1.0)),
-                error: None,
-            },
-        );
-    }
-
-    #[derive(Clone, serde::Serialize)]
-    #[serde(rename_all = "camelCase")]
-    struct VozModelProgressPayload {
-        phase: &'static str,
-        progress: Option<f64>,
-        error: Option<String>,
-    }
-
-    pub struct MacVozRuntime {
-        app: AppHandle,
-        root: PathBuf,
-    }
-
-    impl MacVozRuntime {
-        pub fn new(app: AppHandle, root: PathBuf) -> Self {
-            Self { app, root }
-        }
-    }
-
-    impl VozRuntime for MacVozRuntime {
-        fn model_status(&self) -> SpeechFuture<'_, Result<VozModelStatus, SpeechError>> {
-            let root = self.root.clone();
-            Box::pin(async move {
-                let root = root_cstring(&root)?;
-                let downloaded = unsafe { kivo_voz_status(root.as_ptr()) };
-                Ok(VozModelStatus {
-                    supported: true,
-                    downloaded,
-                    phase: if downloaded {
-                        VozModelPhase::Ready
-                    } else {
-                        VozModelPhase::NotDownloaded
-                    },
-                    progress: None,
-                    runtime: "Core ML · Apple Neural Engine".into(),
-                    error: None,
-                })
-            })
-        }
-
-        fn download(&self) -> SpeechFuture<'_, Result<(), SpeechError>> {
-            let root = self.root.clone();
-            let app = self.app.clone();
-            Box::pin(async move {
-                let _ = app.emit(
-                    "voz-model-status",
-                    VozModelProgressPayload {
-                        phase: "downloading",
-                        progress: None,
-                        error: None,
-                    },
-                );
-                tokio::task::spawn_blocking(move || {
-                    let root = root_cstring(&root)?;
-                    let context = (&app as *const AppHandle) as usize;
-                    let _downloaded = unsafe {
-                        response(kivo_voz_download(
-                            root.as_ptr(),
-                            Some(report_progress),
-                            context as *mut c_void,
-                        ))?
-                    };
-                    let _ = app.emit(
-                        "voz-model-status",
-                        VozModelProgressPayload {
-                            phase: "preparing",
-                            progress: None,
-                            error: None,
-                        },
-                    );
-                    unsafe { response(kivo_voz_prepare(root.as_ptr())) }.map(|_| ())
-                })
-                .await
-                .map_err(|_| SpeechError::Backend)??;
-                Ok(())
-            })
-        }
-
-        fn remove_model(&self) -> SpeechFuture<'_, Result<(), SpeechError>> {
-            let root = self.root.clone();
-            Box::pin(async move {
-                let root = root_cstring(&root)?;
-                if unsafe { kivo_voz_remove(root.as_ptr()) } {
-                    Ok(())
-                } else {
-                    Err(SpeechError::VozRuntime(
-                        "Could not remove the cached Voz model.".into(),
-                    ))
-                }
-            })
-        }
-
-        fn prepare(&self) -> SpeechFuture<'_, Result<(), SpeechError>> {
-            let root = self.root.clone();
-            let app = self.app.clone();
-            Box::pin(async move {
-                let _ = app.emit(
-                    "voz-model-status",
-                    VozModelProgressPayload {
-                        phase: "preparing",
-                        progress: None,
-                        error: None,
-                    },
-                );
-                tokio::task::spawn_blocking(move || {
-                    let root = root_cstring(&root)?;
-                    unsafe { response(kivo_voz_prepare(root.as_ptr())) }.map(|_| ())
-                })
-                .await
-                .map_err(|_| SpeechError::Backend)?
-            })
-        }
-
-        fn transcribe(
-            &self,
-            samples: Vec<f32>,
-            locale: String,
-        ) -> SpeechFuture<'_, Result<VozTranscript, SpeechError>> {
-            let root = self.root.clone();
-            Box::pin(async move {
-                tokio::task::spawn_blocking(move || {
-                    let root = root_cstring(&root)?;
-                    let locale = CString::new(locale).map_err(|_| SpeechError::Backend)?;
-                    let raw = unsafe {
-                        response(kivo_voz_transcribe(
-                            samples.as_ptr(),
-                            samples.len() as isize,
-                            root.as_ptr(),
-                            locale.as_ptr(),
-                        ))?
-                    };
-                    let value: serde_json::Value =
-                        serde_json::from_str(&raw).map_err(|_| SpeechError::Backend)?;
-                    serde_json::from_value::<VozTranscript>(value).map_err(|_| SpeechError::Backend)
-                })
-                .await
-                .map_err(|_| SpeechError::Backend)?
-            })
-        }
-    }
-
-    pub use MacVozRuntime as Runtime;
-}
-
-#[cfg(target_os = "macos")]
-pub use macos::Runtime as MacVozRuntime;
 
 /// Windows' tagged Voz release is the official ONNX Runtime Web build. The
 /// isolated worker lives in Kivo's persistent flow-bar WebView2; Rust sends
@@ -824,9 +611,9 @@ mod tests {
             .wait(std::time::Duration::from_millis(1))
             .await
             .unwrap_err();
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(windows)]
         assert!(matches!(error, SpeechError::VozRuntime(_)));
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(windows))]
         assert_eq!(error, SpeechError::VozUnavailable);
     }
 }

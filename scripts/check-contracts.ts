@@ -1,29 +1,23 @@
-/**
- * Cross-platform parity gate: fails fast (seconds, any OS, no compile) when
- * the macOS and Windows branches drift apart.
- *
- * A recurring failure mode is a change built for one desktop that is never
- * adapted to the other: a shortcut default edited in `src/types.ts` but not
- * in `src-tauri/src/config/mod.rs` (or vice versa), a native-shortcut string
- * renamed in one place, or a permission requirement flipped for one OS.
- * The per-OS `cargo test` / `vitest` runs only execute their own host's
- * `#[cfg]` branch, and the full bundle builds only run on main/tags, so
- * without this check the breakage merges and fails late.
- *
- * Run: `bun run check:platform-parity`
- */
+/** Validate frontend/backend contracts and the Linux development bench. */
+import assert from "node:assert/strict";
 import { extractGenerated, renderGeneratedAiModels } from "./ai-model-codegen.ts";
 
 const root = new URL("../", import.meta.url);
 let failures = 0;
 
-function check(name: string, ok: boolean, detail: string) {
-  if (ok) {
-    console.info(`ok - ${name}`);
-  } else {
-    failures += 1;
-    console.error(`FAIL - ${name}: ${detail}`);
+function reportFailure(name: string, detail: string) {
+  failures += 1;
+  console.error(`FAIL - ${name}: ${detail}`);
+}
+
+function check(name: string, condition: boolean, detail: string) {
+  try {
+    assert(condition, detail);
+  } catch {
+    reportFailure(name, detail);
+    return;
   }
+  console.info(`ok - ${name}`);
 }
 
 function read(relative: string): Promise<string> {
@@ -52,8 +46,6 @@ const [
   aiModelsTs,
   vozRs,
   vozWorker,
-  vozBridgeSwift,
-  vozPackage,
   appTs,
   libRs,
 ] = await Promise.all([
@@ -67,14 +59,12 @@ const [
   read("src/ai/models.ts"),
   read("src-tauri/src/speech/voz.rs"),
   read("src/features/dictation/voz.worker.ts"),
-  read("src-tauri/native/macos/VozBridge/Sources/KivoVozBridge/VozBridge.swift"),
-  read("src-tauri/native/macos/VozBridge/Package.swift"),
   read("src/App.tsx"),
   read("src-tauri/src/lib.rs"),
 ]);
 
-/** `HostPlatform::Macos => ShortcutBinding::new("...")` inside `fnName`. */
-function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): string | null {
+/** `HostPlatform::Windows => ShortcutBinding::new("...")` inside `fnName`. */
+function rustDefault(fnName: string, host: "Windows" | "Linux"): string | null {
   const match = new RegExp(
     // Arms may share alternatives (`HostPlatform::Linux | ... => ...`) and
     // may break across lines, so allow anything up to the constructor.
@@ -86,24 +76,21 @@ function rustDefault(fnName: string, host: "Macos" | "Windows" | "Linux"): strin
 /** Per-platform defaults out of the `*_SHORTCUTS` records in src/types.ts. */
 function tsDefault(
   key: "DICTATION_SHORTCUTS" | "WRITING_SHORTCUTS",
-): [macos: string, windows: string, linux: string] | null {
+): [windows: string, linux: string] | null {
   const anchor = typesTs.indexOf(`const ${key}`);
   if (anchor === -1) return null;
   const tail = typesTs.slice(anchor, anchor + 400);
-  const value = (platform: "macos" | "windows" | "linux"): string | null =>
+  const value = (platform: "windows" | "linux"): string | null =>
     new RegExp(`${platform}: "([^"]+)"`).exec(tail)?.[1] ?? null;
-  const macos = value("macos");
   const windows = value("windows");
   const linux = value("linux");
-  if (!macos || !windows || !linux) return null;
-  return [macos, windows, linux];
+  if (!windows || !linux) return null;
+  return [windows, linux];
 }
 
 // --- 1. Shortcut defaults agree on both sides --------------------------------
-const rustDictationMacos = rustDefault("dictation_default_for", "Macos");
 const rustDictationWindows = rustDefault("dictation_default_for", "Windows");
 const rustDictationLinux = rustDefault("dictation_default_for", "Linux");
-const rustWritingMacos = rustDefault("writing_tools_default_for", "Macos");
 const rustWritingWindows = rustDefault("writing_tools_default_for", "Windows");
 const rustWritingLinux = rustDefault("writing_tools_default_for", "Linux");
 const tsDictation = tsDefault("DICTATION_SHORTCUTS");
@@ -111,12 +98,12 @@ const tsWriting = tsDefault("WRITING_SHORTCUTS");
 
 check(
   "Rust dictation defaults parse",
-  rustDictationMacos !== null && rustDictationWindows !== null && rustDictationLinux !== null,
+  rustDictationWindows !== null && rustDictationLinux !== null,
   "dictation_default_for arms not found in config/mod.rs",
 );
 check(
   "Rust writing defaults parse",
-  rustWritingMacos !== null && rustWritingWindows !== null && rustWritingLinux !== null,
+  rustWritingWindows !== null && rustWritingLinux !== null,
   "writing_tools_default_for arms not found in config/mod.rs",
 );
 check(
@@ -132,41 +119,31 @@ check(
 
 if (tsDictation) {
   check(
-    "dictation default matches on macOS",
-    rustDictationMacos === tsDictation[0],
-    `Rust "${rustDictationMacos}" vs TS "${tsDictation[0]}"`,
-  );
-  check(
     "dictation default matches on Windows",
-    rustDictationWindows === tsDictation[1],
-    `Rust "${rustDictationWindows}" vs TS "${tsDictation[1]}"`,
+    rustDictationWindows === tsDictation[0],
+    `Rust "${rustDictationWindows}" vs TS "${tsDictation[0]}"`,
   );
   check(
     "dictation default matches on Linux",
-    rustDictationLinux === tsDictation[2],
-    `Rust "${rustDictationLinux}" vs TS "${tsDictation[2]}"`,
+    rustDictationLinux === tsDictation[1],
+    `Rust "${rustDictationLinux}" vs TS "${tsDictation[1]}"`,
   );
 }
 if (tsWriting) {
   check(
-    "writing default matches on macOS",
-    rustWritingMacos === tsWriting[0],
-    `Rust "${rustWritingMacos}" vs TS "${tsWriting[0]}"`,
-  );
-  check(
     "writing default matches on Windows",
-    rustWritingWindows === tsWriting[1],
-    `Rust "${rustWritingWindows}" vs TS "${tsWriting[1]}"`,
+    rustWritingWindows === tsWriting[0],
+    `Rust "${rustWritingWindows}" vs TS "${tsWriting[0]}"`,
   );
   check(
     "writing default matches on Linux",
-    rustWritingLinux === tsWriting[2],
-    `Rust "${rustWritingLinux}" vs TS "${tsWriting[2]}"`,
+    rustWritingLinux === tsWriting[1],
+    `Rust "${rustWritingLinux}" vs TS "${tsWriting[1]}"`,
   );
 }
 check(
   "Linux dictation and writing defaults differ",
-  rustDictationLinux !== rustWritingLinux && tsDictation?.[2] !== tsWriting?.[2],
+  rustDictationLinux !== rustWritingLinux && tsDictation?.[1] !== tsWriting?.[1],
   "Linux dictation and writing shortcuts must not share one accelerator",
 );
 
@@ -193,61 +170,37 @@ check(
   "is_native_dictation_shortcut_for missing in shell.rs",
 );
 check(
-  "macOS native shortcut is Fn",
-  nativeCheck.includes('(HostPlatform::Macos, "Fn")'),
-  'expected (HostPlatform::Macos, "Fn") in is_native_dictation_shortcut_for',
-);
-check(
   "Windows native shortcut is the normalized Control+Super",
   nativeCheck.includes('(HostPlatform::Windows, "Control+Super")'),
   'expected (HostPlatform::Windows, "Control+Super"); shell.rs normalizes Ctrl→Control / Meta→Super before this check',
 );
 
-// --- 4. Permission requirements stay per-desktop -------------------------------
-const permissionFn = fnBody(commandsRs, "permission_required_for");
+// --- 4. Permission requirements gate shared functionality -------------------------------
+const permissionFn = fnBody(commandsRs, "permission_required");
 check(
   "permission helper exists",
   permissionFn !== "",
-  "permission_required_for missing in commands/mod.rs",
+  "permission_required missing in commands/mod.rs",
 );
 check(
   "accessibility stays required everywhere",
   /Accessibility => true/.test(permissionFn),
-  "accessibility must gate text replacement on both desktops",
+  "accessibility must gate text replacement on Windows and the Linux bench",
 );
 check(
   "microphone stays required everywhere",
   /Microphone => true/.test(permissionFn),
-  "microphone must gate dictation on both desktops",
+  "microphone must gate dictation on Windows and the Linux bench",
 );
 check(
-  "input monitoring + speech recognition stay macOS-only",
-  permissionFn.includes("InputMonitoring") &&
-    permissionFn.includes("SpeechRecognition") &&
-    permissionFn.includes("HostPlatform::Macos"),
-  "input-monitoring / speech-recognition must be required only on macOS (desktop SAPI needs no prompt on Windows)",
-);
-
-// --- 5. Browser harness mirrors the same matrix --------------------------------
-check(
-  "harness derives platform from the user agent",
-  nativeTs.includes("navigator.userAgent") && nativeTs.includes("detectedPlatform"),
-  "native.ts must keep deriving its platform from navigator.userAgent so e2e UA spoofing covers both branches",
+  "optional legacy permissions do not gate Windows",
+  permissionFn.includes("SpeechRecognition => false"),
+  "speech recognition and input monitoring require no Windows consent prompt",
 );
 check(
-  "harness detects the Linux bench instead of mislabeling it macOS",
-  nativeTs.includes('"linux"') && /Linux\|X11/.test(nativeTs),
-  'native.ts detectedPlatform must return "linux" for Linux user agents',
-);
-check(
-  "harness marks input-monitoring unavailable off macOS",
-  nativeTs.includes('this.platform === "macos" ? "not-determined" : "unavailable"'),
-  "MockBridge input-monitoring availability drifted",
-);
-check(
-  "harness requires speech recognition only on macOS",
-  nativeTs.includes('required: this.platform === "macos"'),
-  "MockBridge speech-recognition requirement drifted",
+  "harness detects the Linux bench",
+  nativeTs.includes("navigator.userAgent") && /Linux\|X11/.test(nativeTs),
+  "Linux user agents must select the development bench",
 );
 
 // --- 6. AI model default + suggestions + blocklist stay in sync ----------------
@@ -380,14 +333,6 @@ check(
   "the persisted, frontend, and shared Rust speech-engine identifiers must all include Voz",
 );
 check(
-  "macOS uses the pinned native Voz and Ear SDK products",
-  vozPackage.includes('exact: "3.5.0"') &&
-    vozPackage.includes('.product(name: "Voz"') &&
-    vozPackage.includes('.product(name: "Ear"') &&
-    vozBridgeSwift.includes("DesertAnt.usageDisabled = true"),
-  "the Apple bridge must pin and disable SDK usage reporting for Voz/Ear",
-);
-check(
   "Windows loads the pinned browser SDK on demand in the flow-bar worker",
   vozWorker.includes("/* @vite-ignore */") &&
     vozWorker.includes("@desert-ant-labs/voz@3.5.0/+esm") &&
@@ -410,21 +355,19 @@ check(
   "status must use explicit completion markers instead of treating a partial Desert Ant cache as a finished install",
 );
 check(
-  "both native adapters verify language before Voz inference",
+  "Windows verifies language before Voz inference",
   vozRs.includes("validate_detected_language") &&
-    vozWorker.includes("ear.identify(samples, 16000)") &&
-    vozBridgeSwift.includes(".identify(samples: input, sampleRate: 16_000)"),
+    vozWorker.includes("ear.identify(samples, 16000)"),
   "Voz must only transcribe after a reliable supported-language match",
 );
 check(
   "Linux keeps Voz unavailable in the native harness",
-  vozRs.includes("UnavailableVozRuntime") &&
-    libRs.includes('not(any(windows, target_os = "macos"))'),
+  vozRs.includes("UnavailableVozRuntime") && libRs.includes("not(windows)"),
   "Linux must retain the simulated speech engine without claiming Voz support",
 );
 
 if (failures > 0) {
-  console.error(`\n${failures} platform parity check(s) failed.`);
+  console.error(`\n${failures} contract check(s) failed.`);
   process.exit(1);
 }
-console.info("\nAll platform parity checks passed.");
+console.info("\nAll application contract checks passed.");

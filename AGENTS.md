@@ -66,7 +66,7 @@ the StyleX compiler and defines its own Astryx theme.
 Run the whole gate before finishing a change:
 
 ```sh
-bun run check       # typecheck, Biome, Oxlint, Knip, theme:check, bun test, bridge/packaging/parity gates
+bun run check       # typecheck, Biome, Oxlint, Knip, theme:check, bun test, bridge/packaging/contract gates
 bun test:ui         # Playwright browser harness
 bun run build
 bun run check:rust

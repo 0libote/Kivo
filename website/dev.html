@@ -90,7 +90,7 @@
 │   ├── speech/             # session management over platform engines
 │   ├── text/               # selection capture + replacement
 │   ├── ai/                 # Gemini client (mod.rs), link_summary.rs
-│   ├── platform/           # macos.rs, windows.rs, adapters.rs, mod.rs
+│   ├── platform/           # windows.rs, linux.rs, adapters.rs, mod.rs
 │   ├── config/             # settings.json repository
 │   ├── security/           # SecretString + redaction helpers
 │   └── shell.rs            # windows, tray, shortcuts, placement
@@ -111,12 +111,12 @@
       <h2 id="platform-boundary">Platform boundary</h2>
       <p>All OS code is isolated under <code>src-tauri/src/platform/</code> behind the adapter traits in <code>adapters.rs</code> (<code>PlatformSpeechEngine</code>, <code>PlatformTextService</code>, <code>PlatformCredentialStore</code>). The rest of Rust never touches an OS API directly.</p>
       <table>
-        <thead><tr><th>Concern</th><th>macOS 26</th><th>Windows 11 24H2+</th></tr></thead>
+        <thead><tr><th>Concern</th><th>Windows 11 24H2+</th><th>Linux test bench</th></tr></thead>
         <tbody>
-          <tr><td>Speech</td><td>SpeechAnalyzer + DictationTranscriber</td><td>Desktop SAPI (installed speech languages)</td></tr>
-          <tr><td>Text access</td><td>Accessibility / Core Graphics / AppKit</td><td>UI Automation + Win32 window/input</td></tr>
-          <tr><td>Secrets</td><td>Keychain</td><td>Credential Manager</td></tr>
-          <tr><td>Dictation key</td><td>Fn/Globe via Input Monitoring (best-effort)</td><td>Ctrl+Meta with Win-key suppression</td></tr>
+          <tr><td>Text access</td><td>UI Automation and guarded clipboard fallback</td><td>Simulated text buffer</td></tr>
+          <tr><td>Speech</td><td>Desktop SAPI, local transcription, optional Voz</td><td>Simulated system speech</td></tr>
+          <tr><td>Secrets</td><td>Credential Manager</td><td>Development-only file vault</td></tr>
+          <tr><td>Distribution</td><td>Per-user NSIS installer</td><td>No supported release</td></tr>
         </tbody>
       </table>
       <p>The boundary reserves application-specific <em>and</em> clipboard-fallback replacement strategies — but V1 fails safely when native Accessibility / UI Automation can’t preserve the selection, rather than risk mangling user text.</p>
@@ -141,7 +141,6 @@ store      = false                  // always — retention off</code></pre>
 
       <h2 id="why">Why it’s built this way</h2>
       <p><strong>Native AI routing.</strong> Gemini, OpenCode, and custom endpoints share an ordered model queue in the Rust process. Provider keys remain in the operating-system credential store.</p>
-      <p><strong>No App Sandbox on macOS.</strong> System-wide Accessibility integration is incompatible with it, so Kivo ships direct (signed + notarized) instead of via the Mac App Store.</p>
       <p><strong>A direct Windows download.</strong> Kivo uses desktop SAPI speech with installed language packs and ships as a per-user .exe. Downloads need no account; unsigned builds may show a SmartScreen warning.</p>
       <p><strong>Audio never touches Gemini.</strong> The OS engine is good and already privileged; routing voice to a cloud model would add latency, cost, and a privacy liability for no quality win.</p>
       <p><strong>Short, vague user errors; rich-in-kind internal codes.</strong> User-facing strings stay concise; diagnostics record operation names, error categories, and non-sensitive OS codes only.</p>
@@ -162,7 +161,7 @@ store      = false                  // always — retention off</code></pre>
 
       <h2 id="workflow">Dev workflow</h2>
       <pre><code>bun install
-bun tauri dev     # full app (needs Xcode / VS Build Tools + OS perms)
+bun tauri dev     # full app (VS Build Tools on Windows + OS perms)
 
 bun dev           # Vite-only UI harness, no OS integration
 bun typecheck && bun lint && bun run test   # tsc, Oxlint, bun test
@@ -170,10 +169,10 @@ bun run format:check                        # Biome; `bun run format` applies
 bun run knip && bun run theme:check         # dead-code + Astryx theme drift
 bun test:ui       # Playwright; isolated port: KIVO_UI_TEST_PORT=1437 bun run test:ui
 bun check:rust && cargo test --manifest-path src-tauri/Cargo.toml</code></pre>
-      <p>Physical testing on <strong>both</strong> systems is required before a release: Fn/Globe handling, Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party apps, and signing.</p>
+      <p>Physical testing on Windows is required before a release: Windows-key suppression, speech model availability, multi-monitor placement, accessibility behavior in third-party apps, and signing.</p>
 
       <h2 id="releases">Releases &amp; updates</h2>
-      <p>Pushing an <code>app-v*</code> tag runs <code>.github/workflows/release.yml</code> (macOS + Windows artifacts, drafted GitHub Release). <code>bun run prepare:release</code> generates the ignored release-only Tauri config and injects the updater public key — normal local builds have no trusted updater key on purpose. Configure <code>TAURI_UPDATER_PUBKEY</code>, <code>TAURI_SIGNING_PRIVATE_KEY (+_PASSWORD)</code>, Apple signing/notarization secrets, and <code>WINDOWS_CERTIFICATE_BASE64 / _PASSWORD / WINDOWS_PUBLISHER</code> before tagging. Never commit updater private keys or certificates.</p>
+      <p>Pushing an <code>app-v*</code> tag runs <code>.github/workflows/release.yml</code> (Windows artifacts, drafted GitHub Release). <code>bun run prepare:release</code> generates the ignored release-only Tauri config and injects the updater public key — normal local builds have no trusted updater key on purpose. Configure <code>TAURI_UPDATER_PUBKEY</code>, <code>TAURI_SIGNING_PRIVATE_KEY (+_PASSWORD)</code>, <code>WINDOWS_CERTIFICATE_BASE64 / _PASSWORD</code> before tagging. Never commit updater private keys or certificates.</p>
 
       <div class="pager">
         <a href="docs.html"><small>← Back to</small><strong>User guide</strong></a>

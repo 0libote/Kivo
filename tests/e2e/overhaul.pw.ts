@@ -1,12 +1,12 @@
 import { expect, test } from "@playwright/test";
 
-for (const platform of ["windows", "macos"] as const) {
+for (const platform of ["windows", "linux"] as const) {
   test(`${platform}: Home, recovery and every settings section work in both themes`, async ({
     browser,
   }, testInfo) => {
     const context = await browser.newContext({
       viewport: { width: 900, height: 650 },
-      userAgent: platform === "windows" ? "Windows" : "Macintosh",
+      userAgent: platform === "windows" ? "Windows" : "Linux",
     });
     const page = await context.newPage();
     const errors: string[] = [];

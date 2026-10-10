@@ -259,8 +259,6 @@ impl PlatformImpl {
         }
     }
 
-    pub(super) fn reset_permission_prompts(&self) {}
-
     pub(super) fn register_dictation_shortcut(
         &self,
         shortcut: HoldShortcut,
@@ -972,7 +970,68 @@ fn os_error(operation: &'static str, message: impl Into<String>) -> PlatformErro
 
 #[cfg(test)]
 mod tests {
-    use super::text_identity;
+    use super::*;
+
+    #[test]
+    fn ui_automation_can_connect_to_the_desktop() {
+        // No focus changes or text capture: exercise the real COM integration.
+        let _apartment = AutomationApartment::new();
+        unsafe {
+            let automation: IUIAutomation =
+                CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
+                    .expect("Windows UI Automation must initialize");
+            automation
+                .GetRootElement()
+                .expect("desktop accessibility root");
+        }
+    }
+
+    #[test]
+    fn credential_manager_isolates_accounts_and_clears_secrets() {
+        // Unique test slots never touch configured provider keys. Drop cleanup
+        // also runs after an assertion failure.
+        struct TestAccounts(Vec<String>);
+        impl Drop for TestAccounts {
+            fn drop(&mut self) {
+                for account in &self.0 {
+                    let _ = WindowsCredentialStore.clear_api_key(account);
+                }
+            }
+        }
+        let id = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let accounts = TestAccounts(vec![
+            format!("test/{}/{id}/primary", std::process::id()),
+            format!("test/{}/{id}/backup", std::process::id()),
+        ]);
+        let primary = &accounts.0[0];
+        let backup = &accounts.0[1];
+        let store = WindowsCredentialStore;
+        assert!(store.load_api_key(primary).unwrap().is_none());
+        store
+            .save_api_key(primary, &SecretString::new("test-primary".into()).unwrap())
+            .unwrap();
+        store
+            .save_api_key(backup, &SecretString::new("test-backup".into()).unwrap())
+            .unwrap();
+        store
+            .save_api_key(primary, &SecretString::new("test-replaced".into()).unwrap())
+            .unwrap();
+        assert_eq!(
+            store.load_api_key(primary).unwrap().unwrap().expose(),
+            "test-replaced"
+        );
+        assert_eq!(
+            store.load_api_key(backup).unwrap().unwrap().expose(),
+            "test-backup"
+        );
+        store.clear_api_key(primary).unwrap();
+        store.clear_api_key(primary).unwrap();
+        assert!(store.load_api_key(primary).unwrap().is_none());
+        assert!(store.load_api_key(backup).unwrap().is_some());
+    }
 
     #[test]
     fn text_identity_distinguishes_same_length_edits() {

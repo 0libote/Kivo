@@ -20,7 +20,7 @@ export default defineConfig({
   resolve: windowsVozWorker
     ? undefined
     : {
-        // The Windows WebView2 owns the Voz loader worker. macOS/Linux use a
+        // The Windows WebView2 owns the Voz loader worker. Linux uses a
         // stub so they do not ship even that loader; the heavy SDK/ML runtime
         // is fetched by the Windows worker on demand and is never in dist.
         alias: [

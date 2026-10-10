@@ -787,65 +787,13 @@ async fn dismiss_cancels_network_work_immediately_and_reopen_ignores_late_respon
 }
 
 #[test]
-fn permission_requirements_match_each_desktop() {
-    // Host-parameterized: runs identically on macOS and Windows CI, so a
-    // requirement flipped for one desktop fails on both.
-    use crate::{config::HostPlatform, platform::PermissionKind};
+fn permission_requirements_gate_shared_core_functionality() {
+    use crate::platform::PermissionKind;
 
-    // macOS: input monitoring (Fn-hold) and OS speech recognition gate the app.
-    assert!(permission_required_for(
-        PermissionKind::Accessibility,
-        HostPlatform::Macos
-    ));
-    assert!(permission_required_for(
-        PermissionKind::InputMonitoring,
-        HostPlatform::Macos
-    ));
-    assert!(permission_required_for(
-        PermissionKind::Microphone,
-        HostPlatform::Macos
-    ));
-    assert!(permission_required_for(
-        PermissionKind::SpeechRecognition,
-        HostPlatform::Macos
-    ));
-    // Windows: desktop SAPI + microphone need no OS permission prompt;
-    // only accessibility (text replacement) and microphone stay required.
-    assert!(permission_required_for(
-        PermissionKind::Accessibility,
-        HostPlatform::Windows
-    ));
-    assert!(!permission_required_for(
-        PermissionKind::InputMonitoring,
-        HostPlatform::Windows
-    ));
-    assert!(permission_required_for(
-        PermissionKind::Microphone,
-        HostPlatform::Windows
-    ));
-    assert!(!permission_required_for(
-        PermissionKind::SpeechRecognition,
-        HostPlatform::Windows
-    ));
-    // Linux test bench: same matrix as Windows. The simulated speech engine
-    // needs no consent prompt and input monitoring does not exist, so only
-    // accessibility and microphone gate the shared AppCore paths.
-    assert!(permission_required_for(
-        PermissionKind::Accessibility,
-        HostPlatform::Linux
-    ));
-    assert!(!permission_required_for(
-        PermissionKind::InputMonitoring,
-        HostPlatform::Linux
-    ));
-    assert!(permission_required_for(
-        PermissionKind::Microphone,
-        HostPlatform::Linux
-    ));
-    assert!(!permission_required_for(
-        PermissionKind::SpeechRecognition,
-        HostPlatform::Linux
-    ));
+    assert!(permission_required(PermissionKind::Accessibility));
+    assert!(permission_required(PermissionKind::Microphone));
+    assert!(!permission_required(PermissionKind::InputMonitoring));
+    assert!(!permission_required(PermissionKind::SpeechRecognition));
 }
 
 #[cfg(target_os = "windows")]

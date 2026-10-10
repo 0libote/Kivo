@@ -11,7 +11,6 @@ src-tauri/target/
 .env.*
 !.env.example
 src-tauri/gen/
-src-tauri/native/macos/VozBridge/libKivoVozBridge.dylib
 src-tauri/keys/
 *.pfx
 *.p12

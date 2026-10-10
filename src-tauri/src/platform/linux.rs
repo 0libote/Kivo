@@ -1,7 +1,7 @@
 //! Linux test-bench adapter.
 //!
 //! One shared `AppCore` runs on every OS; this file is the entire Linux
-//! difference. macOS owns Accessibility/SpeechAnalyzer, Windows owns
+//! difference. Windows owns
 //! UIA/SAPI — Linux owns *testability*: a file-backed credential vault, an
 //! in-process text buffer, and a fake speech session that still travels the
 //! real `PlatformSpeechEngine` path (oneshot startup, `Final` on stop,
@@ -11,7 +11,7 @@
 //! stock Ubuntu box with only the Tauri system prerequisites. Real clipboard
 //! audio (PipeWire/Portal) is a future upgrade; the contract surface stays
 //! identical, so swapping the inside of any method here cannot break
-//! macOS/Windows.
+//! Windows.
 //!
 //! Environment overrides for deterministic tests:
 //! - `KIVO_LINUX_TEST_TEXT`: text returned by `get_selected_text`.
@@ -148,12 +148,10 @@ impl PlatformImpl {
             | PermissionKind::SpeechRecognition => Ok(()),
             PermissionKind::InputMonitoring => Err(PlatformError::unsupported(
                 "request_permission",
-                "Input monitoring is only available on macOS.",
+                "The Linux bench uses portable global shortcuts.",
             )),
         }
     }
-
-    pub(super) fn reset_permission_prompts(&self) {}
 
     pub(super) fn register_dictation_shortcut(
         &self,

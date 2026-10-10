@@ -74,7 +74,7 @@ pub enum CredentialError {
     #[allow(dead_code)]
     AccessDenied,
     InvalidSecret,
-    // Constructed only by the cfg-gated Keychain/Credential-Manager backends;
+    // Constructed only by the cfg-gated Credential-Manager backend;
     // allowed dead on other hosts for the same reason as above.
     #[allow(dead_code)]
     Backend,
@@ -94,7 +94,7 @@ impl fmt::Display for CredentialError {
 
 impl std::error::Error for CredentialError {}
 
-/// Implemented by the macOS Keychain and Windows Credential Manager adapters.
+/// Implemented by the Windows Credential Manager and Linux test adapters.
 ///
 /// Implementations must never persist the value anywhere except the operating
 /// system's credential vault and must not include it in backend error messages.

@@ -4,7 +4,7 @@
 
 ## AI setup
 
-Pick a provider under Settings → AI (or during onboarding), save its key, then arrange your models in order. Switching providers starts a new model queue with that provider's default model. Each provider keeps its own key in macOS Keychain or Windows Credential Manager; keys are never returned to the webview or written to settings files. The model queue lists the models available to your key and shows each model's cost when known, so you can compare before anything is sent. Add up to 5 models, remove them, and reorder with the arrow buttons — requests try the queue top to bottom until one succeeds. A failure moves to the next model; key or balance problems stop immediately without burning further quota. Then use Test connection to verify generation with the first model. Backup entries are checked against the provider model list; their presence does not guarantee generation will succeed.
+Pick a provider under Settings → AI (or during onboarding), save its key, then arrange your models in order. Switching providers starts a new model queue with that provider's default model. Each provider keeps its own key in Windows Credential Manager; keys are never returned to the webview or written to settings files. The model queue lists the models available to your key and shows each model's cost when known, so you can compare before anything is sent. Add up to 5 models, remove them, and reorder with the arrow buttons — requests try the queue top to bottom until one succeeds. A failure moves to the next model; key or balance problems stop immediately without burning further quota. Then use Test connection to verify generation with the first model. Backup entries are checked against the provider model list; their presence does not guarantee generation will succeed.
 
 - **Gemini** (default): create a key in [Google AI Studio](https://aistudio.google.com/app/apikey). The picker lists the text models available to your key via Google's ListModels API (blocklist only — speech/audio, image, video, music, computer-use, and agent families are hidden), falling back to curated suggestions offline or without a key. Test connection sends a short generation request to the first queued model, consuming API quota, then checks backup models against the listing. Slow generation can fall through to the next queued model after the request timeout. Costs are billed by Google.
 - **OpenCode Zen**: pay-as-you-go credits from [opencode.ai/auth](https://opencode.ai/auth) at cost (see [Zen pricing](https://opencode.ai/docs/zen#pricing)). The picker pulls the live model list from `https://opencode.ai/zen/v1/models` and prices every entry from a curated table (`src-tauri/src/ai/providers.rs`), so free trial models show `Free` and paid ones show `$X in / $Y out per 1M`. Test connection sends a tiny generation request, so it costs a fraction of a cent.
@@ -23,15 +23,15 @@ Without a key, native dictation still works and inserts the raw operating-system
 
 Dictation can run either on the operating-system speech engine or entirely on this computer. Choose the engine under Settings → Dictation → Transcription engine:
 
-- **System** (default) uses the OS engine. On macOS that is Apple's on-device `SpeechAnalyzer`; on Windows it is the installed desktop SAPI engine.
+- **System** (default) uses the OS engine. On Windows it is the installed desktop SAPI engine.
 - **On-device** records the default microphone, resamples it to 16 kHz, and transcribes with a downloaded model. Audio never leaves the machine.
-- **Voz · Recommended** is an optional add-on for Apple Silicon macOS and Windows. Install it from Settings → Dictation before selecting it. Kivo downloads Voz (about 467 MB on macOS or 390 MB on Windows) and the Ear spoken-language checker as a separate model; it does not add either model to the app installer. On Windows, a lazy Web Worker downloads the pinned SDK and ONNX/WebAssembly runtimes on demand; those runtimes are not bundled in the installer. Windows may use about 1.2 GB of memory while Voz is loaded. The first macOS preparation can take about 20 seconds.
+- **Voz · Recommended** is an optional add-on for Windows. Install it from Settings → Dictation before selecting it. Kivo downloads Voz (about 390 MB on Windows) and the Ear spoken-language checker as a separate model; it does not add either model to the app installer. On Windows, a lazy Web Worker downloads the pinned SDK and ONNX/WebAssembly runtimes on demand; those runtimes are not bundled in the installer. Windows may use about 1.2 GB of memory while Voz is loaded.
 
 Voz returns a final transcript after recording stops; it does not provide live partial text. Kivo keeps its word timestamps and checks the audio language locally with Ear before transcription. Automatic accepts only a reliable match among Voz's 25 languages; a selected language must match the detected language. Uncertain, unsupported, or mismatched audio produces an error so you can choose another engine. Kivo never changes to System or another engine without your choice. The model downloads during setup, so first dictation does not initiate a large download or Core ML preparation.
 
 On-device models are GGML/GGUF conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0 and model-specific licenses), the same files the `transcribe-cpp` runtime is built for. The catalog spans Whisper plus Parakeet, Canary, Moonshine, SenseVoice, Qwen3-ASR, Cohere Transcribe, Nemotron, Granite, Voxtral, GigaAM, and Fun-ASR, so you can trade accuracy, speed, language coverage, and size. Each card shows a family, parameter count, language coverage, and relative accuracy/speed bars. Every model is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
 
-Kivo's existing local runtime is compiled into Kivo, not shipped as a separate server, and links statically on every platform (no extra DLLs to ship): Metal on macOS, Vulkan on Windows x86_64, CPU on Windows-on-ARM and Linux. On Windows the GPU backend is used when a Vulkan-capable driver is present and falls back to CPU otherwise. Building the Windows Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on the build machine; the SDK installer sets `VULKAN_SDK`, which the build script reads to find `vulkan-1.lib`. End users do not need the SDK. Voz is a separate engine and uses the platform runtimes described above.
+Kivo's existing local runtime is compiled into Kivo, not shipped as a separate server, and links statically on every platform (no extra DLLs to ship): Vulkan on Windows x86_64, CPU on Windows-on-ARM and Linux. On Windows the GPU backend is used when a Vulkan-capable driver is present and falls back to CPU otherwise. Building the Windows Vulkan backend needs the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#windows) on the build machine; the SDK installer sets `VULKAN_SDK`, which the build script reads to find `vulkan-1.lib`. End users do not need the SDK. Voz is a separate engine and uses the platform runtimes described above.
 
 A pure-Rust voice-activity detector (`earshot`) trims silence around speech before transcription, so a quiet recording reports "no speech" instead of inventing words; it needs no model file and runs identically on every platform.
 
@@ -59,7 +59,7 @@ For isolated browser verification while another worktree is running:
 KIVO_UI_TEST_PORT=1437 bun run test:ui
 ```
 
-The browser harness uses illustrative responses and never calls Gemini. Release verification must also exercise a real public article and public video with a configured key, along with native selection, focus, clipboard, and placement checks on macOS and Windows.
+The browser harness uses illustrative responses and never calls Gemini. Release verification must also exercise a real public article and public video with a configured key, along with native selection, focus, clipboard, and placement checks on Windows.
 
 ## Permissions
 
@@ -75,55 +75,3 @@ granted (capture problems surface when dictation starts, pointing back at
 the microphone privacy settings), and Speech Recognition reflects the
 installed desktop speech languages — an empty engine list shows guidance
 to install one instead of an Allow button that could never resolve.
-
-### macOS beta: repeated prompts and "Settings shows on, app shows off"
-
-Without Apple signing credentials, the rolling `continuous` beta is ad-hoc
-signed (`signingIdentity: "-"`, free). macOS TCC checks the code signature,
-not just the bundle id, so rebuilt/updated betas can require renewed
-Accessibility and Input Monitoring grants. System Settings may still list
-an old build as enabled while the new copy is not trusted. Keychain may
-also ask again after an update. Both beta and stable workflows use the
-same Developer ID credentials when configured, providing a consistent
-signing identity across updates.
-
-A restart alone does not change the app signature and should not invalidate
-approval. If the same build needs approval on every launch, quit Kivo,
-eject its installer disk, and open the installed copy from Applications.
-Check for duplicate copies in Downloads, Dock shortcuts and Login Items.
-Gatekeeper's **Open Anyway** approval is separate from Accessibility,
-Input Monitoring, microphone and Speech Recognition permissions.
-
-What to check on the Mac:
-
-- `codesign -dv --verbose=4 /Applications/Kivo.app` — `Signature=adhoc`
-  means grants will not survive updates; a Developer ID line means they should.
-- If an old build's entry is stuck and the new one can't be enabled, use
-  Settings → Permissions → Clear stale entries (runs
-  `tccutil reset All com.kivo.desktop` for Kivo only, no sudo needed),
-  then re-allow each permission in turn. Manual equivalent:
-  `tccutil reset All com.kivo.desktop`, then re-add Kivo in
-  System Settings → Privacy & Security → Accessibility and Input Monitoring.
-- If Kivo never appears in the Accessibility / Input Monitoring lists at
-  all, no system prompt ever fired for that copy — and without a prompt
-  there is no entry to toggle. Click Allow on the matching in-app row
-  (Settings → Permissions, or onboarding) and watch for the system
-  prompt; no prompt means no entry. Dev checkouts (`cargo run`,
-  `tauri dev`) register under the debug binary path and every rebuild
-  invalidates the entry, so verify permission behavior with the
-  installed `/Applications/Kivo.app` copy and look for the full binary
-  path in the list, not just "Kivo". On managed Macs an MDM profile can
-  block these two services entirely: microphone and Speech Recognition
-  working while Accessibility / Input Monitoring can never be enabled
-  points there.
-- `log show --last 10m --predicate 'process == "Kivo"'` and Console.app
-  show the prompt / TCC denial lines; Kivo never logs text, transcripts,
-  or keys.
-- In-app, Settings → Permissions now refreshes automatically (poll +
-  window focus) after you grant in System Settings; the first Allow click
-  shows the system prompt, a still-off state afterwards means open System
-  Settings and toggle Kivo there.
-
-## Privacy and diagnostics
-
-Do not add logs containing selected text, transcripts, Gemini responses, clipboard contents, or credentials. User-facing errors are deliberately short; local diagnostics should record only operation names, error categories, and non-sensitive OS codes.

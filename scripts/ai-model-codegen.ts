@@ -5,7 +5,7 @@
  * out of the Rust source and renders the TypeScript mirror used by
  * `src/ai/models.ts` (offline fallback + harness list). Run
  * `bun run generate:models` after editing the Rust table; CI fails the
- * platform-parity gate when the generated section is stale.
+ * contract gate when the generated section is stale.
  *
  * Zen/Go/Custom priced fallbacks stay hand-curated per side: their TS rows
  * carry precomputed cost strings while Rust composes them from price tables

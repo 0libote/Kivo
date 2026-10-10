@@ -27,7 +27,7 @@ Knip is not a complete repository inventory: the static website is outside its p
 - Writing Tools ignores animation-only style mutations and deduplicates native height reports. Content resizes and text changes remain observed.
 - The writing menu moves actual keyboard focus with its selection and uses one tab stop. Copy feedback replaces its previous timer and clears it on unmount.
 - The root README is a short entry point. Detailed user, development, and release material lives in separate guides. Summary instructions and Windows Voz runtime descriptions now match the implementation.
-- Beta release notes are readable Markdown maintained in `packaging/beta-release-notes.md`. CI appends version/build metadata. The missing `install-macos.sh` reference was removed. Stable draft notes identify installers and updater files.
+- Beta release notes are readable Markdown maintained in `packaging/beta-release-notes.md`. CI appends version/build metadata. Stable draft notes identify installers and updater files.
 - Removed the duplicate Cargo-output ignore entry and corrected Rust verification commands to use the actual manifest location.
 - Tightened Knip's script entry points so future unused helpers are not automatically exempt from the audit.
 
@@ -39,7 +39,7 @@ The frontend build retains its existing chunk-size warning. The vendored GLib de
 
 ## Release checks still requiring real desktops
 
-Browser tests simulate the bridge. They cannot certify native permission prompts, global shortcut suppression, capture/insertion in third-party editors, clipboard restoration, microphone selection, multi-monitor placement, or signed installation and updates. Exercise these on supported macOS and Windows hardware before publishing a stable release.
+Browser tests simulate the bridge. They cannot certify native permission prompts, global shortcut suppression, capture/insertion in third-party editors, clipboard restoration, microphone selection, multi-monitor placement, or signed installation and updates. Exercise these on supported Windows hardware before publishing a stable release.
 
 The production frontend build also reports a chunk-size warning. Profile startup and inspect bundle composition before splitting eager overlays: their event listeners intentionally mount early, so indiscriminate lazy loading can lose native events.
 

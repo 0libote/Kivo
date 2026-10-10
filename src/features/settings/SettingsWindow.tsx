@@ -358,7 +358,7 @@ function SystemSettingsSection({
   return (
     <SettingsContent title="Settings" subtitle="Appearance, startup, permissions, and updates.">
       <GeneralPreferences settings={settings} save={save} />
-      <PermissionsPreferences context={context} settings={settings} setNotice={setNotice} />
+      <PermissionsPreferences context={context} setNotice={setNotice} />
       <AboutPreferences
         busy={busy}
         context={context}
@@ -373,17 +373,13 @@ function SystemSettingsSection({
 
 function PermissionsPreferences({
   context,
-  settings,
   setNotice,
 }: {
   readonly context: AppContext;
-  readonly settings: AppSettings;
   readonly setNotice: (value: string | null) => void;
 }) {
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
   const [busy, setBusy] = useState<PermissionKind | null>(null);
-  const [resetting, setResetting] = useState(false);
-  const [relaunching, setRelaunching] = useState(false);
   const [loaded, setLoaded] = useState(false);
   useNativeEvent<PermissionStatus[]>("permission-status-changed", setPermissions);
 
@@ -399,14 +395,7 @@ function PermissionsPreferences({
 
   useEffect(refresh, [refresh]);
 
-  // macOS grants happen in System Settings / system prompts outside the app:
-  // the native request returns before the user answers (mic/speech are
-  // async), and Accessibility can only be toggled in Settings. Re-read on
-  // window focus and poll while open so mic/speech flip to Allowed without
-  // requiring the manual Refresh button. Accessibility and Input Monitoring
-  // are cached per process by macOS: a grant made in System Settings only
-  // reports Granted after Kivo is relaunched, so polling alone can never
-  // turn those two rows green.
+  // Re-read microphone access when returning from Windows Settings.
   useEffect(() => {
     const poll = () => {
       void nativeBridge
@@ -428,7 +417,6 @@ function PermissionsPreferences({
     try {
       // Windows has no in-app prompt: open the Settings page, then re-read
       // the (possibly changed) state instead of firing a no-op request.
-      // macOS shows the native prompt directly.
       if (context.platform === "windows") {
         await nativeBridge.openPermissionSettings(kind);
         setPermissions(await nativeBridge.getPermissions());
@@ -458,47 +446,8 @@ function PermissionsPreferences({
     }
   }
 
-  // Clears Kivo's own TCC entries when a stale entry from a previous build
-  // blocks the new one from being enabled. Re-asks for every permission,
-  // including ones already working — that is the point: only a clean slate
-  // lets macOS bind the grant to the current build.
-  async function resetGrants() {
-    setResetting(true);
-    setNotice(null);
-    try {
-      setPermissions(await nativeBridge.resetPermissionGrants());
-      setNotice(
-        "Old entries cleared. Click Allow for each permission to re-create its entry, then relaunch Kivo.",
-      );
-    } catch (error) {
-      setNotice(
-        error instanceof NativeError ? error.message : "The old entries couldn’t be cleared.",
-      );
-    } finally {
-      setResetting(false);
-    }
-  }
-
-  async function relaunch() {
-    setRelaunching(true);
-    setNotice(null);
-    try {
-      await nativeBridge.restartApp();
-    } catch (error) {
-      setNotice(
-        error instanceof NativeError
-          ? error.message
-          : "Kivo couldn’t relaunch. Quit and reopen it manually.",
-      );
-      setRelaunching(false);
-    }
-  }
-
   let subtitle: string;
-  if (context.platform === "macos") {
-    subtitle =
-      "Allow access so Kivo can work with selected text and dictate. If a permission was denied, open Settings to allow it.";
-  } else if (context.platform === "windows") {
+  if (context.platform === "windows") {
     subtitle =
       "Microphone access is managed in Windows Settings. Text access needs no extra prompt on Windows.";
   } else {
@@ -512,15 +461,6 @@ function PermissionsPreferences({
     "speech-recognition",
   ];
   const byKind = new Map(permissions.map((permission) => [permission.kind, permission]));
-  // macOS caches Accessibility / Input Monitoring trust per process: after the
-  // user toggles either in System Settings the rows stay red until relaunch,
-  // which is why those two look "stuck" while Microphone / Speech Recognition
-  // flip green on their own.
-  const needsRelaunch =
-    context.platform === "macos" &&
-    (byKind.get("accessibility")?.state === "denied" ||
-      byKind.get("input-monitoring")?.state === "denied");
-
   return (
     <>
       <p {...stylex.props(styles.note)}>{subtitle}</p>
@@ -532,7 +472,7 @@ function PermissionsPreferences({
             return (
               <SettingRow
                 key={kind}
-                label={permissionLabel(kind, settings.dictationShortcut)}
+                label={permissionLabel(kind)}
                 description={status?.explanation ?? "Not required on this system."}
               >
                 <span {...stylex.props(styles.granted)}>Not required</span>
@@ -544,14 +484,11 @@ function PermissionsPreferences({
           return (
             <SettingRow
               key={kind}
-              label={permissionLabel(kind, settings.dictationShortcut)}
-              description={status?.explanation ?? permissionBlurb(kind, context.platform)}
+              label={permissionLabel(kind)}
+              description={status?.explanation ?? permissionBlurb(kind)}
             >
               <span {...stylex.props(styles.permissionControl)}>
-                <StatusIndicator
-                  label={permissionLabel(kind, settings.dictationShortcut)}
-                  state={state}
-                />
+                <StatusIndicator label={permissionLabel(kind)} state={state} />
                 {granted ? (
                   <span {...stylex.props(styles.granted)}>
                     <Icon name="check" size={15} />
@@ -559,7 +496,7 @@ function PermissionsPreferences({
                   </span>
                 ) : (
                   <Button
-                    isDisabled={busy !== null || resetting || relaunching || !loaded}
+                    isDisabled={busy !== null || !loaded}
                     label={permissionActionLabel(busy === kind, denied)}
                     onClick={() => void (denied ? openSettings(kind) : request(kind))}
                     size="sm"
@@ -572,43 +509,14 @@ function PermissionsPreferences({
         })}
         <div {...stylex.props(styles.groupFooter, styles.groupFooterSplit)}>
           <Button
-            isDisabled={busy !== null || resetting || relaunching}
+            isDisabled={busy !== null}
             label="Refresh status"
             onClick={refresh}
             size="sm"
             variant="secondary"
           />
-          {context.platform === "macos" ? (
-            <Button
-              isDisabled={busy !== null || resetting || relaunching || !loaded}
-              label={resetting ? "Clearing…" : "Clear stale entries"}
-              onClick={() => void resetGrants()}
-              size="sm"
-              variant="secondary"
-            />
-          ) : null}
-          {needsRelaunch ? (
-            <Button
-              isDisabled={busy !== null || resetting || relaunching}
-              label={relaunching ? "Relaunching…" : "Relaunch Kivo"}
-              onClick={() => void relaunch()}
-              size="sm"
-              variant="secondary"
-            />
-          ) : null}
         </div>
       </SettingsGroup>
-      {context.platform === "macos" ? (
-        <p {...stylex.props(styles.note)}>
-          Microphone and Speech Recognition refresh automatically. Accessibility and Fn-shortcut
-          grants only take effect after a relaunch — allow them in System Settings, then Relaunch
-          Kivo. Beta builds are ad-hoc signed, so macOS forgets those two grants on every update —
-          re-allow after updating, or use a Developer-ID signed stable release for grants that
-          persist. If an old build's entry is stuck and the new one can't be enabled, Clear stale
-          entries removes Kivo's old grants so you can Allow from scratch. Unlocking Privacy &amp;
-          Security and Keychain prompts each ask for a password by design.
-        </p>
-      ) : null}
     </>
   );
 }
@@ -619,12 +527,12 @@ function permissionActionLabel(waiting: boolean, denied: boolean): string {
   return "Allow";
 }
 
-function permissionLabel(kind: PermissionKind, dictationShortcut: string): string {
+function permissionLabel(kind: PermissionKind): string {
   switch (kind) {
     case "accessibility":
       return "Accessibility";
     case "input-monitoring":
-      return dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring";
+      return "Shortcut monitoring";
     case "microphone":
       return "Microphone";
     case "speech-recognition":
@@ -632,12 +540,10 @@ function permissionLabel(kind: PermissionKind, dictationShortcut: string): strin
   }
 }
 
-function permissionBlurb(kind: PermissionKind, platform: AppContext["platform"]): string {
+function permissionBlurb(kind: PermissionKind): string {
   switch (kind) {
     case "accessibility":
-      return platform === "macos"
-        ? "Read only the text you select and insert text where your cursor is."
-        : "Work with the selected text and cursor in your active app.";
+      return "Work with the selected text and cursor in your active app.";
     case "input-monitoring":
       return "Detect the dictation hold shortcut.";
     case "microphone":
@@ -726,10 +632,6 @@ function DictationSection({
   const vozLanguageSupported =
     settings.dictationLanguage === "auto" || VOZ_LANGUAGE_CODES.has(selectedLanguage);
   const languageOptions = settings.speechEngine === "voz" ? VOZ_LANGUAGES : languages;
-  const shortcutNote =
-    context.platform === "macos" && settings.dictationShortcut === "Fn"
-      ? "Fn is best-effort when macOS assigns the Globe key to another action. Holding Fn suppresses its system Globe action while Kivo runs."
-      : undefined;
   const languageDescription = dictationLanguageDescription(settings.speechEngine, context.platform);
   const engineDescription =
     settings.speechEngine === "local" || settings.speechEngine === "voz"
@@ -798,7 +700,7 @@ function DictationSection({
         </SettingRow>
       </SettingsGroup>
       <SettingsGroup>
-        <SettingRow label="Shortcut" description={shortcutNote}>
+        <SettingRow label="Shortcut">
           <ShortcutRecorder
             label="Dictation shortcut"
             onChange={(dictationShortcut) => save({ dictationShortcut })}

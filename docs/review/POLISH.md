@@ -1,5 +1,8 @@
 # Native inspection and polish — 13 September 2026
 
+> Historical review: predates the Windows-only migration. macOS findings and release gates below no longer apply.
+
+
 The earlier overhaul passed GitHub CI at `a43a3b1`, including macOS. The changes below are local and require a new CI run before release.
 
 ## Changed after inspecting the installed Windows app
