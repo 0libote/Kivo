@@ -3,9 +3,9 @@ import type { IconName } from "./components/Icon";
 /**
  * Every OS runs one shared AppCore; only a thin adapter differs per host.
  * `linux` is the dev/test bench (simulated speech + file vault) so the full
- * app is exercisable on Linux even though only Windows ships. If a flow
- * works on one platform it works on all three unless the adapter says
- * otherwise — and the adapter surface is ~6 methods, all unit-tested.
+ * app is exercisable on Linux even though only Windows ships. The
+ * shared frontend and AppCore behavior is tested on both hosts; native
+ * Windows integration needs its own validation.
  */
 export type Platform = "windows" | "linux";
 /**

@@ -175,22 +175,22 @@ check(
   'expected (HostPlatform::Windows, "Control+Super"); shell.rs normalizes Ctrl→Control / Meta→Super before this check',
 );
 
-// --- 4. Permission requirements stay per-desktop -------------------------------
-const permissionFn = fnBody(commandsRs, "permission_required_for");
+// --- 4. Permission requirements gate shared functionality -------------------------------
+const permissionFn = fnBody(commandsRs, "permission_required");
 check(
   "permission helper exists",
   permissionFn !== "",
-  "permission_required_for missing in commands/mod.rs",
+  "permission_required missing in commands/mod.rs",
 );
 check(
   "accessibility stays required everywhere",
   /Accessibility => true/.test(permissionFn),
-  "accessibility must gate text replacement on both desktops",
+  "accessibility must gate text replacement on Windows and the Linux bench",
 );
 check(
   "microphone stays required everywhere",
   /Microphone => true/.test(permissionFn),
-  "microphone must gate dictation on both desktops",
+  "microphone must gate dictation on Windows and the Linux bench",
 );
 check(
   "optional legacy permissions do not gate Windows",

@@ -2073,10 +2073,7 @@ fn selection_context(context: WritingPopupContext) -> SelectionContext {
 
 /// Accessibility and microphone gate core functionality. Windows desktop
 /// speech requires installed engines, not a separate consent prompt.
-pub(crate) fn permission_required_for(
-    permission: crate::platform::PermissionKind,
-    _host: crate::config::HostPlatform,
-) -> bool {
+pub(crate) fn permission_required(permission: crate::platform::PermissionKind) -> bool {
     match permission {
         crate::platform::PermissionKind::Accessibility => true,
         crate::platform::PermissionKind::Microphone => true,
@@ -2094,37 +2091,32 @@ fn permission_statuses(
     // Linux runs the simulated test-bench engine: always present, no prompt.
     let speech_explanation = if matches!(host, crate::config::HostPlatform::Windows) {
         "Needs an installed Windows desktop speech language."
-    } else if matches!(
-        host,
-        crate::config::HostPlatform::Linux | crate::config::HostPlatform::Other
-    ) {
-        "Simulated speech engine for development and testing."
     } else {
-        "Transcribe speech using the operating system."
+        "Simulated speech engine for development and testing."
     };
     [
         (
             crate::platform::PermissionKind::Accessibility,
             "accessibility",
-            permission_required_for(crate::platform::PermissionKind::Accessibility, host),
+            permission_required(crate::platform::PermissionKind::Accessibility),
             "Read and replace selected text.",
         ),
         (
             crate::platform::PermissionKind::InputMonitoring,
             "input-monitoring",
-            permission_required_for(crate::platform::PermissionKind::InputMonitoring, host),
+            permission_required(crate::platform::PermissionKind::InputMonitoring),
             "No input-monitoring permission is required.",
         ),
         (
             crate::platform::PermissionKind::Microphone,
             "microphone",
-            permission_required_for(crate::platform::PermissionKind::Microphone, host),
+            permission_required(crate::platform::PermissionKind::Microphone),
             "Listen while dictation is active.",
         ),
         (
             crate::platform::PermissionKind::SpeechRecognition,
             "speech-recognition",
-            permission_required_for(crate::platform::PermissionKind::SpeechRecognition, host),
+            permission_required(crate::platform::PermissionKind::SpeechRecognition),
             speech_explanation,
         ),
     ]

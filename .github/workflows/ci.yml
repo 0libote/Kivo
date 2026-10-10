@@ -17,14 +17,14 @@ name: CI & Build
 #   ~30min on `native` before even starting).
 # - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
 #   the `native` matrix (Windows + Linux bench) owns clippy + tests, so each
-#   desktop's `#[cfg(target_os)]` sources still compile on every PR. The
+#   host's `#[cfg(target_os)]` sources still compile on every PR. The
 #   PRs also exercise installer bundling after the native checks.
-# - Foreign-desktop *logic* (shortcut defaults, cross-OS settings migration,
-#   native-shortcut checks, permission requirements) is tested
-#   host-parameterized: every runner executes both directions (see
+# - Host-specific *logic* (shortcut defaults, cross-OS settings migration,
+#   native-shortcut checks) is tested with explicit host parameters on every
+#   runner, covering Windows and the Linux bench (see
 #   `HostPlatform` in src-tauri/src/config plus `check:contracts`),
 #   instead of `#[cfg]`-gated tests that only ever exercise their own host
-#   and let the other desktop drift silently.
+#   and let the other adapter drift silently.
 # - Concurrency is job-level, never workflow-level: superseded PR pushes
 #   cancel in-flight CI jobs, while main pushes/dispatches never cancel, so
 #   beta builds cannot starve (a workflow-level group starved them before).
@@ -119,15 +119,15 @@ jobs:
     name: Rust static (fmt, lockfile)
     # Cheap ubuntu job for everything that needs no compilation: rustfmt
     # parses every file including the `#[cfg(target_os)]` sources that only
-    # compile on the other desktop, and `cargo metadata --locked` fails fast
+    # compile on another host, and `cargo metadata --locked` fails fast
     # on a Cargo.toml/Cargo.lock drift that would otherwise only surface
     # inside the Windows/Linux bench native builds below.
     # NOTE: full `cargo check/clippy --target <foreign desktop>` was tried
     # here and deliberately dropped: third-party C build scripts (aws-lc-sys
     # for Windows) need that desktop's C toolchain,
     # which no ubuntu runner has. Foreign-target compilation stays covered
-    # by the per-OS `native` matrix (every PR compiles both desktops), and
-    # foreign-target *logic* is covered without compiling by the
+    # by the per-OS `native` matrix (Windows and the Linux bench on every PR).
+    # Foreign-target *logic* is covered without compiling by the
     # host-parameterized unit tests (config/shell/commands) plus
     # `check:contracts` in the `packaging` job.
     runs-on: ubuntu-latest
@@ -223,7 +223,7 @@ jobs:
   # must pass before beta artifacts are published.
   # NOTE: CodeQL only scans javascript-typescript (it has no Rust support);
   # Rust review is clippy -D warnings (per-OS in `native`) plus cargo-audit
-  # in the `audit` job, enforced for both desktop targets.
+  # in the `audit` job, enforced for Windows and the Linux bench.
   e2e:
     name: UI tests (Playwright)
     # Ubuntu + Chromium only (cheap). Both platform branches are still

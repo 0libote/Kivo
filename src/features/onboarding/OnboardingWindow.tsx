@@ -54,9 +54,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
       .getApiKeyStatus()
       .then((nextApi) => active && setApiStatus(nextApi))
       .catch(() => active && setMessage("Saved key status isn’t available right now."));
-    // Grants happen outside the app (system prompt / System Settings) and
-    // the native request returns before the user answers, so re-read on
-    // focus and poll while onboarding is open.
+    // Re-read microphone access when returning from Windows Settings.
     const interval = window.setInterval(pollPermissions, 2500);
     window.addEventListener("focus", pollPermissions);
     return () => {
@@ -114,17 +112,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
             the new one animates, which reads as a flicker. */}
         <AnimatePresence initial={false} mode="wait">
           {step === 0 ? <WelcomeStep key={step} onStart={() => setStep(1)} /> : null}
-          {step === 1 ? (
-            <PermissionsStep
-              busyPermission={busyPermission}
-              dictationShortcut={settings.dictationShortcut}
-              key={step}
-              platform={context.platform}
-              request={(kind) => void request(kind)}
-              setMessage={setMessage}
-              statusByKind={statusByKind}
-            />
-          ) : null}
+          {step === 1 ? <PermissionsStep key={step} platform={context.platform} /> : null}
           {step === 2 ? (
             <DictationStep
               dictationShortcut={settings.dictationShortcut}
@@ -215,7 +203,7 @@ function WelcomeStep({ onStart }: { readonly onStart: () => void }) {
   );
 }
 
-interface StepPermissionsProps {
+interface DictationStepProps {
   readonly busyPermission: PermissionKind | null;
   readonly dictationShortcut: string;
   readonly platform: AppContext["platform"];
@@ -224,7 +212,7 @@ interface StepPermissionsProps {
   readonly statusByKind: Partial<Record<PermissionKind, PermissionStatus>>;
 }
 
-function PermissionsStep({ platform }: StepPermissionsProps) {
+function PermissionsStep({ platform }: { readonly platform: AppContext["platform"] }) {
   return (
     <StepFrame>
       <div {...stylex.props(styles.stepIcon)}>
@@ -254,7 +242,7 @@ function DictationStep({
   setMessage,
   statusByKind,
   dictationShortcut,
-}: StepPermissionsProps) {
+}: DictationStepProps) {
   const openSettings = (kind: PermissionKind) => {
     void nativeBridge
       .openPermissionSettings(kind)
