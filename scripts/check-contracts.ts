@@ -1,16 +1,23 @@
 /** Validate frontend/backend contracts and the Linux development bench. */
+import assert from "node:assert/strict";
 import { extractGenerated, renderGeneratedAiModels } from "./ai-model-codegen.ts";
 
 const root = new URL("../", import.meta.url);
 let failures = 0;
 
-function check(name: string, ok: boolean, detail: string) {
-  if (ok) {
-    console.info(`ok - ${name}`);
-  } else {
-    failures += 1;
-    console.error(`FAIL - ${name}: ${detail}`);
+function reportFailure(name: string, detail: string) {
+  failures += 1;
+  console.error(`FAIL - ${name}: ${detail}`);
+}
+
+function check(name: string, condition: boolean, detail: string) {
+  try {
+    assert(condition, detail);
+  } catch {
+    reportFailure(name, detail);
+    return;
   }
+  console.info(`ok - ${name}`);
 }
 
 function read(relative: string): Promise<string> {
