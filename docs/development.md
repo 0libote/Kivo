@@ -104,3 +104,5 @@ Platform code is isolated under `src-tauri/src/platform/`. Windows uses UI Autom
 Windows x86_64 on Windows 11 24H2+ is the release target. macOS desktop support has been removed; browser-only frontend development remains possible on other hosts. Linux is retained solely for the simulated native bench and shared tests, not distribution. Do not add cross-desktop parity requirements.
 
 CI compiles, lints, and tests the Windows backend on every PR and builds a review NSIS installer. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.
+
+Theme scripts run the installed Astryx CLI explicitly on Bun so generated declarations use the same runtime locally and in CI. Knip does not resolve this CLI dependency through `bun --bun`, so `@astryxdesign/cli` is listed in `ignoreDependencies`; it is required by `theme:build` and `theme:check`.
