@@ -1620,8 +1620,6 @@ pub fn open_permission_settings(kind: String) -> Result<(), CommandError> {
     crate::shell::open_permission_settings(parse_permission(&kind)?).map_err(platform_command_error)
 }
 
-/// Clears Kivo's own TCC entries so a new build can be enabled when a stale
-/// entry from a previous (ad-hoc signed) build is stuck in System Settings.
 #[tauri::command]
 pub async fn list_microphones(
     core: State<'_, AppCore>,

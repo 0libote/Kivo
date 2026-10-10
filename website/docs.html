@@ -69,7 +69,7 @@
         <thead><tr><th>Permission</th><th>Why</th></tr></thead>
         <tbody>
           <tr><td>Accessibility</td><td>Reads your current selection and inserts or replaces text.</td></tr>
-          <tr><td>Input Monitoring</td><td>Sees the modifier-only dictation gesture (e.g. holding <kbd>Fn</kbd>).</td></tr>
+          <tr><td>Input Monitoring</td><td>Sees the modifier-only dictation gesture (holding <kbd>Ctrl</kbd> + <kbd>Win</kbd>).</td></tr>
           <tr><td>Microphone</td><td>Records only while dictation is active — never in the background.</td></tr>
           <tr><td>Speech Recognition</td><td>Sends audio to the operating system’s speech engine. Audio is never sent to Gemini.</td></tr>
         </tbody>
@@ -101,7 +101,7 @@
       <p>Pick a microphone (or System Default) and a dictation language in Settings → Dictation. <strong>Automatic</strong> follows the system speech language on Windows — where only installed languages can start dictation.</p>
 
       <h2 id="writing-tools">Writing Tools</h2>
-      <p>Select text in any app, hit your Writing Tools shortcut (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd> on Mac, <kbd>Ctrl</kbd> + <kbd>Space</kbd> on Windows). A compact popup opens next to your cursor or selection.</p>
+      <p>Select text in any app, hit your Writing Tools shortcut (<kbd>Ctrl</kbd> + <kbd>Space</kbd>). A compact popup opens next to your cursor or selection.</p>
       <table>
         <thead><tr><th>Action</th><th>Does</th><th>Result</th></tr></thead>
         <tbody>
@@ -147,7 +147,7 @@
       <table>
         <thead><tr><th>Where</th><th>Keys</th><th>Does</th></tr></thead>
         <tbody>
-          <tr><td>Anywhere</td><td><kbd>Fn</kbd> hold (Mac)</td><td>Dictate; release to insert</td></tr>
+          <tr><td>Anywhere</td><td><kbd>Ctrl</kbd> + <kbd>Win</kbd> hold</td><td>Dictate; release to insert</td></tr>
           <tr><td>Anywhere</td><td>Your writing shortcut</td><td>Open Writing Tools</td></tr>
           <tr><td>Flow Bar</td><td><kbd>esc</kbd></td><td>Cancel dictation</td></tr>
           <tr><td>Popup menu</td><td>Arrows · <kbd>Enter</kbd></td><td>Move · run action</td></tr>
@@ -173,7 +173,7 @@
       <h3>Writing actions show a configuration error</h3>
       <p>You need a valid Gemini key: Settings → AI → save, then <strong>Test connection</strong>. A “rate limited” status means Gemini is throttling — wait and retry.</p>
       <h3>Replace doesn’t work in an app</h3>
-      <p>Replacement needs native Accessibility (Mac) / UI Automation (Windows) access to the target app. If the OS can’t preserve the selection there, Kivo fails safely instead of mangling your text — use <strong>Copy</strong> and paste manually.</p>
+      <p>Replacement needs native UI Automation access to the target app. If the OS can’t preserve the selection there, Kivo fails safely instead of mangling your text — use <strong>Copy</strong> and paste manually.</p>
       <h3>Link summary failed</h3>
       <p>Confirm the page or video is public. If retrieval fails, select its text or transcript and invoke Summarize again.</p>
 

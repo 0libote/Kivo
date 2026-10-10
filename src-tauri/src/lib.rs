@@ -74,12 +74,10 @@ pub fn run() {
             shell::create_windows(&handle)?;
             shell::create_tray(&handle)?;
             shell::apply_theme(&handle, &settings.theme);
-            // Input Monitoring (Fn-hold detection) can only be granted in
-            // System Settings and only takes effect after a relaunch, so a
-            // denied grant fails here on every start until then. Log the
-            // reason: otherwise the tray looks alive while the Fn shortcut
-            // is silently inert, which is indistinguishable from a dead
-            // event tap in Console.app.
+            // Global-shortcut registration can fail when another app has
+            // already claimed the accelerator, so a denied grant fails here
+            // on every start until then. Log the reason: otherwise the tray
+            // looks alive while dictation is silently inert.
             if let Err(error) = shell::register_shortcuts(&handle, &settings) {
                 eprintln!("Kivo shortcuts unavailable at startup: {}", error.message);
             }

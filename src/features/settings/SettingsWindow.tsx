@@ -358,7 +358,7 @@ function SystemSettingsSection({
   return (
     <SettingsContent title="Settings" subtitle="Appearance, startup, permissions, and updates.">
       <GeneralPreferences settings={settings} save={save} />
-      <PermissionsPreferences context={context} settings={settings} setNotice={setNotice} />
+      <PermissionsPreferences context={context} setNotice={setNotice} />
       <AboutPreferences
         busy={busy}
         context={context}
@@ -373,11 +373,9 @@ function SystemSettingsSection({
 
 function PermissionsPreferences({
   context,
-  settings,
   setNotice,
 }: {
   readonly context: AppContext;
-  readonly settings: AppSettings;
   readonly setNotice: (value: string | null) => void;
 }) {
   const [permissions, setPermissions] = useState<PermissionStatus[]>([]);
@@ -474,7 +472,7 @@ function PermissionsPreferences({
             return (
               <SettingRow
                 key={kind}
-                label={permissionLabel(kind, settings.dictationShortcut)}
+                label={permissionLabel(kind)}
                 description={status?.explanation ?? "Not required on this system."}
               >
                 <span {...stylex.props(styles.granted)}>Not required</span>
@@ -486,14 +484,11 @@ function PermissionsPreferences({
           return (
             <SettingRow
               key={kind}
-              label={permissionLabel(kind, settings.dictationShortcut)}
+              label={permissionLabel(kind)}
               description={status?.explanation ?? permissionBlurb(kind)}
             >
               <span {...stylex.props(styles.permissionControl)}>
-                <StatusIndicator
-                  label={permissionLabel(kind, settings.dictationShortcut)}
-                  state={state}
-                />
+                <StatusIndicator label={permissionLabel(kind)} state={state} />
                 {granted ? (
                   <span {...stylex.props(styles.granted)}>
                     <Icon name="check" size={15} />
@@ -532,12 +527,12 @@ function permissionActionLabel(waiting: boolean, denied: boolean): string {
   return "Allow";
 }
 
-function permissionLabel(kind: PermissionKind, dictationShortcut: string): string {
+function permissionLabel(kind: PermissionKind): string {
   switch (kind) {
     case "accessibility":
       return "Accessibility";
     case "input-monitoring":
-      return dictationShortcut === "Fn" ? "Fn shortcut monitoring" : "Shortcut monitoring";
+      return "Shortcut monitoring";
     case "microphone":
       return "Microphone";
     case "speech-recognition":

@@ -331,7 +331,7 @@ export const DEFAULT_AI_PROVIDER: AiProviderId = "gemini";
 /**
  * Per-platform defaults. Mirrors `dictation_default_for` /
  * `writing_tools_default_for` in `src-tauri/src/config/mod.rs` (checked by
- * `scripts/check-platform-parity.ts`). Linux uses the portable
+ * `scripts/check-contracts.ts`). Linux uses the portable
  * Control+Alt+Space dictation hold (no native Fn / Ctrl+Win monitor there)
  * and shares the Windows writing shortcut so writing behavior matches the
  * bench. Kept as data, not branches, so adding a platform is a compiler
