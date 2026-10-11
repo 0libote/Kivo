@@ -1,3 +1,5 @@
+> Voz/Ear remains optional, with explicit acknowledgement of required Desert Ant device-usage telemetry. See docs/user-guide.md for the current data collection notice.
+
 # Voz integration plan
 
 ## Verified upstream contract

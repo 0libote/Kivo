@@ -1,386 +1,82 @@
 name: CI & Build
-
-# Unified pipeline: checks and unsigned beta builds -> gated publication.
-#
-# - pull_request: runs CI + review only.
-# - push to main / workflow_dispatch: runs CI and builds the unsigned beta
-#   in parallel, then publishes it only after every required check passes.
-#
-# The tag-based `Release` workflow remains the separate signed path for
-# stable `app-v*` releases.
-#
-# Speed shape (deliberate):
-# - `packaging`, `rust-static`, `frontend`, `frontend-windows`, `native`,
-#   `e2e`, `codeql`, `audit` and `dep-review` all start immediately. There
-#   are no `needs` chains between independent checks, so the slow native
-#   builds never gate the fast static gates (previously audit/codeql waited
-#   ~30min on `native` before even starting).
-# - `rust-static` (cheap ubuntu, seconds) owns rustfmt + the lockfile check;
-#   the `native` matrix (Windows + Linux bench) owns clippy + tests, so each
-#   host's `#[cfg(target_os)]` sources still compile on every PR. The
-#   PRs also exercise installer bundling after the native checks.
-# - Host-specific *logic* (shortcut defaults, cross-OS settings migration,
-#   native-shortcut checks) is tested with explicit host parameters on every
-#   runner, covering Windows and the Linux bench (see
-#   `HostPlatform` in src-tauri/src/config plus `check:contracts`),
-#   instead of `#[cfg]`-gated tests that only ever exercise their own host
-#   and let the other adapter drift silently.
-# - Concurrency is job-level, never workflow-level: superseded PR pushes
-#   cancel in-flight CI jobs, while main pushes/dispatches never cancel, so
-#   beta builds cannot starve (a workflow-level group starved them before).
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  frontend:
+  changes:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: ci-frontend-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.scope.outputs.frontend }}
+      native: ${{ steps.scope.outputs.native }}
+      desktop: ${{ steps.scope.outputs.desktop }}
+      website: ${{ steps.scope.outputs.website }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun typecheck
-      - run: bun run format:check
-      - run: bun lint
-      - run: bun run knip
-      - run: bun run theme:check
-      - run: bun run test
-      - run: bun run check:bridge
-      - run: bun run build
-
-  frontend-windows:
-    name: Frontend checks (Windows)
-    # JavaScript is portable, but paths, line endings, and toolchain behavior
-    # still differ on Windows. Run unit and browser tests here; lint and the web
-    # build stay on the ubuntu `frontend` job so they are not paid for twice.
-    # The static gates also run here (seconds, no extra install) to prove the
-    # gate scripts themselves work with Windows paths/line endings.
-    runs-on: windows-latest
-    timeout-minutes: 15
-    concurrency:
-      group: ci-frontend-windows-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun typecheck
-      - run: bun run test
-      - run: bun run check:packaging
-      - run: bun run check:contracts
-      - run: bun run check:bridge
-      - run: bun --bun playwright install chromium
-      - run: bun run test:ui
-      - name: Upload browser failure evidence
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: kivo-windows-browser-failures
-          path: test-results/
-          retention-days: 7
-
-  packaging:
-    name: Packaging + application contracts
-    # Fast static checks (seconds, no compile): packaging metadata agreement
-    # plus Windows/Linux bench branch parity (shortcut defaults, native-shortcut
-    # strings, permission requirements, harness matrix). The real bundle
-    # builds only run on main/tags, so these gates are what stop packaging
-    # or single-OS breakage from merging in a PR.
-    # No install step: both scripts use node builtins only.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: ci-packaging-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun run check:packaging
-      - run: bun run check:contracts
-      - run: bun run check:bridge
-
-  rust-static:
-    name: Rust static (fmt, lockfile)
-    # Cheap ubuntu job for everything that needs no compilation: rustfmt
-    # parses every file including the `#[cfg(target_os)]` sources that only
-    # compile on another host, and `cargo metadata --locked` fails fast
-    # on a Cargo.toml/Cargo.lock drift that would otherwise only surface
-    # inside the Windows/Linux bench native builds below.
-    # NOTE: full `cargo check/clippy --target <foreign desktop>` was tried
-    # here and deliberately dropped: third-party C build scripts (aws-lc-sys
-    # for Windows) need that desktop's C toolchain,
-    # which no ubuntu runner has. Foreign-target compilation stays covered
-    # by the per-OS `native` matrix (Windows and the Linux bench on every PR).
-    # Foreign-target *logic* is covered without compiling by the
-    # host-parameterized unit tests (config/shell/commands) plus
-    # `check:contracts` in the `packaging` job.
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    concurrency:
-      group: ci-rust-static-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
-
-  native:
-    # Per-OS compile + execution (`cargo clippy`, `cargo test`), so each
-    # desktop's `#[cfg(target_os)]` sources build on every PR. PRs also build
-    # debug installers to validate packaging without release credentials.
-    # Format and lockfile checks live in `rust-static`.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      # CI never debugs these binaries. Full debug info made the Windows
-      # dependency cache 1.77 GB and took five minutes just to save.
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
-      CARGO_INCREMENTAL: "0"
-    concurrency:
-      group: ci-native-${{ matrix.os }}-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: clippy
-      # The Windows x86_64 build compiles the on-device speech runtime with its
-      # Vulkan backend, which needs the SDK's glslc + headers at build time.
-      # Uses the official LunarG installer in silent mode (the installer sets
-      # no env for this process, so VULKAN_SDK is exported for CMake and the
-      # build script's link search).
-      - name: Install Vulkan SDK (Windows x64)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
-      - name: Install Linux test-bench build dependencies
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake build-essential
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: src-tauri
-      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-
-      # PRs must exercise the actual bundlers without release credentials or
-      # publishing. Debug packages keep this check cheaper than release builds.
-      - if: github.event_name == 'pull_request'
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - if: github.event_name == 'pull_request'
-        run: bun install --frozen-lockfile --ignore-scripts
-      - name: Build Windows installer for review
-        if: github.event_name == 'pull_request' && runner.os == 'Windows'
-        run: bun tauri build --debug --bundles nsis
-      - name: Upload Windows installer for testing
-        if: github.event_name == 'pull_request' && runner.os == 'Windows'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: kivo-windows-review-installer
-          retention-days: 7
-          if-no-files-found: error
-          path: src-tauri/target/debug/bundle/nsis/*-setup.exe
-
-
-  # Automated code review / security gates. Each gate runs independently and
-  # starts immediately (no `needs` on the CI jobs above) so one slow suite
-  # never hides the signal from the others. The `security-gate` aggregator
-  # must pass before beta artifacts are published.
-  # NOTE: CodeQL only scans javascript-typescript (it has no Rust support);
-  # Rust review is clippy -D warnings (per-OS in `native`) plus cargo-audit
-  # in the `audit` job, enforced for Windows and the Linux bench.
-  e2e:
-    name: UI tests (Playwright)
-    # Ubuntu + Chromium only (cheap). Both platform branches are still
-    # covered: the browser harness derives its platform from
-    # navigator.userAgent, and the suite spoofs Windows and Linux agents
-    # (see windows-branches.pw.ts, overhaul.pw.ts, summaries.pw.ts).
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    concurrency:
-      group: ci-e2e-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - name: Install Playwright browser
-        # Local binary (locked via bun.lock), not bunx, so the install
-        # always uses exactly the pinned @playwright/test release.
-        run: ./node_modules/.bin/playwright install --with-deps chromium
-      - name: Run UI tests
-        run: bun run test:ui
-      - name: Upload failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: playwright-report
-          retention-days: 7
-          path: |
-            playwright-report/
-            test-results/
-
-  codeql:
-    name: Code review (CodeQL)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    concurrency:
-      group: ci-codeql-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+      - id: scope
+        env:
+          CHANGE_BASE: ${{ github.event.pull_request.base.sha || github.sha }}
+          CHANGE_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bun scripts/classify-changes.ts
+  verify:
+    needs: changes
+    uses: ./.github/workflows/verify.yml
     permissions:
       contents: read
       actions: read
       security-events: write
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
-        with:
-          languages: javascript-typescript
-      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
-
-  audit:
-    name: Dependency audit (bun + cargo)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
     concurrency:
-      group: ci-audit-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - name: Audit frontend dependencies (bun)
-        run: bun audit
-      # Prebuilt cargo-audit binary (~10s). Replaces rustsec/audit-check,
-      # which compiled cargo-audit from source (~3min), runs on deprecated
-      # Node 20, and needs `checks: write` to post its Check Run (that
-      # missing permission failed main as "Resource not accessible by
-      # integration"). Plain `cargo audit` fails on vulnerabilities but
-      # exits 0 on informational warnings (6x unmaintained unic/
-      # proc-macro-error, 1x unsound glib RUSTSEC-2024-0429, transitive via
-      # Tauri's Linux tray stack -> gtk 0.18, unfixable short of a GTK 0.20
-      # / Tauri upgrade; tracked separately).
-      - name: Install cargo-audit (prebuilt)
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
-        with:
-          tool: cargo-audit
-      - name: Audit Rust dependencies (cargo-audit)
-        run: cargo audit --file src-tauri/Cargo.lock
-
+      group: ci-verify-${{ github.ref }}
+      cancel-in-progress: true
+    with:
+      frontend: ${{ needs.changes.outputs.frontend == 'true' }}
+      native: ${{ needs.changes.outputs.native == 'true' }}
+      desktop: ${{ needs.changes.outputs.desktop == 'true' }}
+      website: ${{ needs.changes.outputs.website == 'true' }}
   dep-review:
-    name: Review PR dependency changes
-    # Deliberately almost no job-level `if`: this job must complete on
-    # every workflow event. When it skipped off-PR, downstream
-    # `needs.security-gate.outputs.*` comparisons evaluated false at
-    # schedule time even after the gate succeeded with correct outputs
-    # (verified empirically), starving the beta jobs. The action itself
-    # stays PR-only via the step guard; off-PR the job is checkout + no-op.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency:
-      group: ci-dep-review-${{ github.ref }}
-      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-    permissions:
-      contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - if: github.event_name == 'pull_request'
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-
-  # Aggregator: the sole branch-protection check must cover every required
-  # build and test job, as well as the security jobs. A green review must
-  # never allow a PR with failing frontend or native checks to merge.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
   security-gate:
+    # Preserve this external name: it is required by branch protection.
     name: Code review / security gate
-    needs: [frontend, frontend-windows, rust-static, native, codeql, audit, e2e, dep-review, packaging]
+    needs: [changes, verify, dep-review]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       beta_ready: ${{ steps.decide.outputs.beta_ready }}
     steps:
-      - name: Verify all gates passed
+      - env:
+          CHANGES: ${{ needs.changes.result }}
+          VERIFY: ${{ needs.verify.result }}
+          DEP_REVIEW: ${{ needs.dep-review.result }}
+          EVENT: ${{ github.event_name }}
         run: |
-          fail=0
-          for gate in "frontend:${{ needs.frontend.result }}" "frontend-windows:${{ needs.frontend-windows.result }}" "rust-static:${{ needs.rust-static.result }}" "native:${{ needs.native.result }}" "codeql:${{ needs.codeql.result }}" "audit:${{ needs.audit.result }}" "e2e:${{ needs.e2e.result }}" "packaging:${{ needs.packaging.result }}"; do
-            echo "$gate"
-            result="${gate##*:}"
-            if [ "$result" != "success" ]; then
-              fail=1
-            fi
-          done
-          echo "dep-review:${{ needs.dep-review.result }}"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            if [ "${{ needs.dep-review.result }}" != "success" ]; then
-              fail=1
-            fi
-          elif [ "${{ needs.dep-review.result }}" != "success" ] && [ "${{ needs.dep-review.result }}" != "skipped" ]; then
-            fail=1
-          fi
-          exit $fail
-      # Beta eligibility is recorded here for the publisher. Builders run on
-      # manual dispatch (any branch) and main pushes, but never on PRs.
+          test "$CHANGES" = success
+          test "$VERIFY" = success
+          if [ "$EVENT" = pull_request ]; then test "$DEP_REVIEW" = success; else test "$DEP_REVIEW" = skipped; fi
       - id: decide
-        if: always()
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "beta_ready=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "beta_ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "beta_ready=false" >> "$GITHUB_OUTPUT"
-          fi
-          cat "$GITHUB_OUTPUT"
-
-  # Beta delivery. The two desktop builds run alongside the checks on main
-  # and hand off via short-lived, run-scoped artifacts. Publication waits for
-  # the full security-gate, which also covers frontend and native checks.
-  # A failed check can waste build minutes, but cannot publish a red SHA.
+        if: success() && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: echo 'beta_ready=true' >> "$GITHUB_OUTPUT"
   windows-beta:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    concurrency:
+      group: continuous-build
+      cancel-in-progress: true
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -391,7 +87,9 @@ jobs:
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-      CARGO_PROFILE_RELEASE_STRIP: "false"
+      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
       # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so the
       # in-app updater can tell same-version betas apart by commit.
       KIVO_BUILD_SHA: ${{ github.sha }}
@@ -400,23 +98,9 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: ./.github/actions/setup-native
         with:
-          workspaces: src-tauri
-      - name: Install Vulkan SDK (Windows x64)
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
+          profile: beta
       - run: bun install --frozen-lockfile --ignore-scripts
       # The updater archive is signed with Tauri's key; the manual .exe
       # remains unsigned and may display a SmartScreen warning.
@@ -424,7 +108,14 @@ jobs:
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
       - name: Build unsigned NSIS installer (beta, untrusted)
-        run: bun tauri build --bundles nsis --config src-tauri/target/release-tauri.conf.json
+        shell: pwsh
+        run: |
+          $timer = [System.Diagnostics.Stopwatch]::StartNew()
+          bun tauri build --bundles nsis --config src-tauri/target/release-tauri.conf.json
+          if ($LASTEXITCODE -ne 0) { throw 'Beta installer build failed.' }
+          $timer.Stop()
+          "Beta build: $($timer.Elapsed.TotalSeconds.ToString('F1')) seconds" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | ForEach-Object { "Installer: $($_.Length) bytes" | Out-File $env:GITHUB_STEP_SUMMARY -Append }
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -445,9 +136,14 @@ jobs:
           if (-not $exe) { throw 'Windows updater archive not found for re-sign.' }
           bun tauri signer sign --app-version $betaVersion $exe.FullName
           if ($LASTEXITCODE -ne 0) { throw 'Updater re-sign failed.' }
+      - name: Native cache footprint
+        if: always()
+        shell: bash
+        run: du -sh src-tauri/target >> "$GITHUB_STEP_SUMMARY"
       - name: Upload installer for the publish job
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          if-no-files-found: error
           name: kivo-beta-windows
           # Consumed minutes later by `publish-continuous`; not for humans.
           retention-days: 1
@@ -463,10 +159,9 @@ jobs:
     name: Publish the continuous pre-release
     # Owns every mutation of the `continuous` release (asset uploads and
     # notes) so overlapping main pushes serialize here
-    # while the builders above overlap. Asset names match what the old
-    # tauri-action/gh flow shipped (setup exe).
+    # while superseded builders cancel. Installers/signatures are immutable.
     needs: [windows-beta, security-gate]
-    if: needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
+    if: github.ref == 'refs/heads/main' && needs.windows-beta.result == 'success' && needs.security-gate.result == 'success' && needs.security-gate.outputs.beta_ready == 'true'
     concurrency:
       group: continuous-prerelease
       cancel-in-progress: false
@@ -483,47 +178,17 @@ jobs:
         with:
           name: kivo-beta-windows
           path: beta/windows
-      - name: Publish assets to the continuous pre-release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Stage immutable installer and manifest
+        shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
-          # upload-artifact preserves the matched parents (nsis/…),
-          # so locate by name instead of assuming a flat layout.
-          # Tauri v2 signs the NSIS installer in place and re-uses it as the
-          # Windows update bundle, so the installer is the archive.
-          win_installer="$(find beta/windows -name '*-setup.exe' | head -n 1)"
-          test -n "$win_installer" || { echo "Windows installer not found in artifact"; exit 1; }
-          test -f "$win_installer.sig" || { echo "Windows updater signature not found in artifact"; exit 1; }
-          # Publishers serialize, but they may arrive out of commit order.
-          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
-            latest_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq '.sha')"
-            if [ "$latest_sha" != "$GITHUB_SHA" ]; then
-              echo "Skipping stale beta $GITHUB_SHA; main is $latest_sha."
-              exit 0
-            fi
-          fi
-          KIVO_VERSION="$version" bun scripts/build-continuous-manifest.ts "$win_installer"
-          notes_file="${RUNNER_TEMP}/kivo-beta-notes.md"
-          cp packaging/beta-release-notes.md "$notes_file"
-          printf '\nBuild: `%s` · Version: `%s` · Built: %s\n' "$GITHUB_SHA" "$version" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$notes_file"
-          # Keep the old release available if an upload fails. Publish the
-          # manifest last, after its corresponding assets have arrived.
-          if ! gh release view continuous > /dev/null 2>&1; then
-            gh release create continuous \
-              --target "$GITHUB_SHA" \
-              --prerelease \
-              --title "Kivo — latest beta" \
-              --notes-file "$notes_file"
-          fi
-          gh release upload continuous "$win_installer" "$win_installer.sig" --clobber
-          gh release upload continuous beta/continuous.json --clobber
-          gh release edit continuous \
-            --prerelease \
-            --title "Kivo — latest beta" \
-            --notes-file "$notes_file"
-          # Keep the tag behind the release page's Source code links aligned
-          # with the binary SHA after every asset has been published.
-          gh api "repos/${GITHUB_REPOSITORY}/git/refs/tags/continuous" \
-            -X PATCH -f sha="$GITHUB_SHA" -F force=true > /dev/null
+          installer="$(find beta/windows -name '*-setup.exe' -print -quit)"
+          test -n "$installer"
+          KIVO_VERSION="$(bun -e 'console.log((await Bun.file("package.json").json()).version)')"
+          export KIVO_VERSION
+          immutable="$(bun scripts/build-continuous-manifest.ts "$installer")"
+          printf 'KIVO_BETA_INSTALLER=%s\n' "$immutable" >> "$GITHUB_ENV"
+      - name: Promote current main build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun scripts/publish-continuous.ts "$KIVO_BETA_INSTALLER"

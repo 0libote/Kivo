@@ -63,11 +63,13 @@ the StyleX compiler and defines its own Astryx theme.
 
 ## Verification
 
-Run the whole gate before finishing a change:
+Run `bun run ai-check:full` as the canonical full gate. The individual checks are:
 
 ```sh
 bun run check       # typecheck, Biome, Oxlint, Knip, theme:check, bun test, bridge/packaging/contract gates
-bun test:ui         # Playwright browser harness
+bun run test:ui     # complete Playwright browser harness
+bun run test:ui:production # built Windows frontend harness
+bun run check:website
 bun run build
 bun run check:rust
 bun run lint:rust

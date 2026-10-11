@@ -147,11 +147,6 @@ export interface LocalAiServerInfo {
   models: string[];
 }
 
-export interface LocalAiInstallProgress {
-  downloaded: number;
-  total: number;
-}
-
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
@@ -178,6 +173,7 @@ export interface AppSettings {
   dictationHoldEnabled: boolean;
   dictationHoldThresholdMs: number;
   speechEngine: SpeechEngineId;
+  desertAntUsageAccepted: boolean;
   /** On-device model id; null means the recommended model. */
   localSpeechModel: string | null;
   /** Model used to clean up dictated text; null follows the Writing Tools queue. */
@@ -364,6 +360,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationHoldEnabled: true,
     dictationHoldThresholdMs: 350,
     speechEngine: "system",
+    desertAntUsageAccepted: false,
     localSpeechModel: null,
     dictationCleanupModel: null,
     dictationVocabulary: [],

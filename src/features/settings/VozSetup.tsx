@@ -3,11 +3,16 @@ import { Button } from "@astryxdesign/core/Button";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import * as stylex from "@stylexjs/stylex";
 import { type ReactNode, useEffect, useState } from "react";
+import { Switch } from "../../components/Switch";
 import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import type { AppContext, VozModelProgress, VozModelStatus } from "../../types";
+import type { AppContext, AppSettings, VozModelProgress, VozModelStatus } from "../../types";
+
+import { type SaveSettings, SettingRow } from "./settings-layout";
 
 interface VozSetupProps {
+  readonly settings: AppSettings;
+  readonly save: SaveSettings;
   readonly context: AppContext;
   readonly onStatus?: (status: VozModelStatus) => void;
 }
@@ -21,7 +26,7 @@ const initialStatus: VozModelStatus = {
   error: null,
 };
 
-export function VozSetup({ context, onStatus }: VozSetupProps) {
+export function VozSetup({ context, onStatus, settings, save }: VozSetupProps) {
   const [status, setStatus] = useState(() => {
     const supported = !nativeBridge.isNative || context.platform !== "linux";
     return {
@@ -32,6 +37,10 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
   });
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    onStatus?.(status);
+  }, [status, onStatus]);
+
   useNativeEvent<VozModelProgress>("voz-model-status", (update) => {
     setStatus((current) => {
       const next = {
@@ -41,7 +50,6 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
         error: update.error,
         downloaded: update.phase === "ready" || current.downloaded,
       };
-      onStatus?.(next);
       return next;
     });
     if (update.phase === "ready" || update.phase === "failed") setBusy(false);
@@ -54,7 +62,6 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
       .then((next) => {
         if (active) {
           setStatus(next);
-          onStatus?.(next);
         }
       })
       .catch((cause) => {
@@ -78,7 +85,7 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
     return () => {
       active = false;
     };
-  }, [context.platform, onStatus]);
+  }, [context.platform]);
 
   async function install() {
     setBusy(true);
@@ -87,7 +94,6 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
       await nativeBridge.downloadVozModel();
       const next = await nativeBridge.getVozModelStatus();
       setStatus(next);
-      onStatus?.(next);
     } catch (cause) {
       const error = cause instanceof Error ? cause.message : "Voz could not be installed.";
       setStatus((current) => ({ ...current, phase: "failed", error, progress: null }));
@@ -97,10 +103,31 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
   }
 
   async function remove() {
-    await nativeBridge.deleteVozModel();
-    const next = await nativeBridge.getVozModelStatus();
-    setStatus(next);
-    onStatus?.(next);
+    if (busy) return;
+    setBusy(true);
+    try {
+      await nativeBridge.deleteVozModel();
+      const next = await nativeBridge.getVozModelStatus();
+      setStatus(next);
+    } catch (cause) {
+      setStatus((current) => ({
+        ...current,
+        error: cause instanceof Error ? cause.message : "Voz could not be removed.",
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openCredits(url = "https://desertant.com") {
+    try {
+      await nativeBridge.openExternal(url);
+    } catch (cause) {
+      setStatus((current) => ({
+        ...current,
+        error: cause instanceof Error ? cause.message : "Could not open model credits.",
+      }));
+    }
   }
 
   const isWorking = status.phase === "downloading" || status.phase === "preparing";
@@ -134,13 +161,19 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
     modelAction = (
       <div {...stylex.props(styles.actions)}>
         <span {...stylex.props(styles.ready)}>Downloaded and prepared</span>
-        <Button label="Remove model" onClick={() => void remove()} variant="ghost" />
+        <Button
+          isDisabled={busy}
+          isLoading={busy}
+          label="Remove model"
+          onClick={() => void remove()}
+          variant="ghost"
+        />
       </div>
     );
   } else {
     modelAction = (
       <Button
-        isDisabled={!status.supported || busy}
+        isDisabled={!status.supported || busy || !settings.desertAntUsageAccepted}
         isLoading={busy}
         label="Download and prepare Voz"
         onClick={() => void install()}
@@ -165,7 +198,40 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
         <Banner status="warning" title="Voz is unavailable on this platform." />
       ) : null}
       {status.error ? <Banner status="error" title={status.error} /> : null}
+      <Banner
+        status="info"
+        title="Optional model with required usage reporting"
+        description="Voz and Ear process audio on this computer. Their SDKs send device-usage telemetry to Desert Ant Labs to count monthly active devices. Desert Ant says this uses an SDK-generated identifier and excludes audio, transcripts and other user content. Desert Ant controls this telemetry; it cannot be disabled while using these models. Download and reporting servers also receive your IP address."
+      />
+      <Button
+        label="Read Desert Ant license and data collection terms"
+        onClick={() => void openCredits("https://license.desertant.com/1.0")}
+        variant="ghost"
+      />
+      <SettingRow
+        label="Allow Desert Ant usage reporting"
+        description="Required to download or use Voz/Ear. Turn this off to stop using these SDKs; System and native On-device models remain available."
+      >
+        <Switch
+          label="Allow Desert Ant usage reporting"
+          checked={settings.desertAntUsageAccepted}
+          disabled={busy}
+          onChange={(accepted) =>
+            void save({
+              desertAntUsageAccepted: accepted,
+              ...(!accepted && settings.speechEngine === "voz"
+                ? { speechEngine: "system" as const }
+                : {}),
+            })
+          }
+        />
+      </SettingRow>
       {modelAction}
+      <Button
+        label="Voz and Ear by Desert Ant Labs · model credits"
+        onClick={() => void openCredits()}
+        variant="ghost"
+      />
     </div>
   );
 }

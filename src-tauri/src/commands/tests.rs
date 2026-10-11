@@ -1157,3 +1157,28 @@ fn switching_ai_provider_resets_implicit_queue_but_preserves_explicit_models() {
     .apply(current.clone());
     assert_eq!(unrelated.ai_models, current.ai_models);
 }
+
+#[tokio::test]
+async fn legacy_voz_cannot_start_without_usage_acknowledgement() {
+    let (core, _, _) = dictation_core("http://127.0.0.1:1", false, false);
+    core.settings.write().unwrap().dictation.speech_engine =
+        crate::config::SpeechEnginePreference::Voz;
+    assert!(matches!(
+        core.begin_dictation(Arc::new(|_| {})).await,
+        Err(AppCoreError::Speech(SpeechError::DesertAntUsageNotAccepted))
+    ));
+    assert!(!matches!(
+        core.dictation_phase().unwrap(),
+        DictationPhase::Starting | DictationPhase::Listening
+    ));
+    core.settings
+        .write()
+        .unwrap()
+        .dictation
+        .desert_ant_usage_accepted = true;
+    assert_eq!(
+        core.begin_dictation(Arc::new(|_| {})).await.unwrap(),
+        DictationPhase::Listening
+    );
+    core.cancel_dictation().await.unwrap();
+}

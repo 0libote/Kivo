@@ -1,4 +1,5 @@
-import { basename } from "node:path";
+import { copyFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 
 const [windowsArchive] = process.argv.slice(2);
 const version = process.env.KIVO_VERSION;
@@ -41,12 +42,30 @@ async function platform(archive: string) {
   return { url: `${base}${encodeURIComponent(basename(archive))}`, signature };
 }
 
+// Bind the asset pair to its exact contents, not just the commit: rebuilds
+// can produce different binaries/signatures for the same SHA.
+const signature = await platform(windowsArchive);
+const hasher = new Bun.CryptoHasher("sha256");
+for await (const chunk of Bun.file(windowsArchive).stream()) hasher.update(chunk);
+hasher.update(signature.signature);
+const immutableArchive = join(
+  dirname(windowsArchive),
+  `Kivo_${version}_${sha}_${hasher.digest("hex")}_x64-setup.exe`,
+);
+await copyFile(windowsArchive, immutableArchive);
+await copyFile(`${windowsArchive}.sig`, `${immutableArchive}.sig`);
+
 const manifest = {
   version: expectedVersion,
   sha,
   builtAt: new Date().toISOString(),
   platforms: {
-    "windows-x86_64": await platform(windowsArchive),
+    "windows-x86_64": {
+      ...signature,
+      url: `${base}${encodeURIComponent(basename(immutableArchive))}`,
+    },
   },
 };
 await Bun.write("beta/continuous.json", `${JSON.stringify(manifest, null, 2)}\n`);
+
+console.info(immutableArchive);

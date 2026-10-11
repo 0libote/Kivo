@@ -1,0 +1,219 @@
+name: Verify
+on:
+  workflow_call:
+    inputs:
+      frontend:
+        type: boolean
+        default: true
+      native:
+        type: boolean
+        default: true
+      desktop:
+        type: boolean
+        default: true
+      website:
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  workflows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install checksum-pinned workflow tools
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p workflow-tools
+          curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum --check
+          tar -xzf actionlint.tar.gz -C workflow-tools
+          curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum --check
+          tar -xJf shellcheck.tar.xz -C workflow-tools --strip-components=1
+          echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
+      - run: actionlint
+  frontend:
+    if: inputs.frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check
+      - run: bun run build:frontend
+      - run: bun run check:bundle
+  website:
+    if: inputs.website
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run check:website
+  rust-static:
+    if: inputs.native
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.99.0
+          components: rustfmt
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo metadata --locked --manifest-path src-tauri/Cargo.toml --format-version 1 > /dev/null
+  native:
+    if: inputs.desktop
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.native && '["windows-latest", "ubuntu-latest"]' || '["windows-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: ./.github/actions/setup-native
+        with:
+          profile: checks
+      - if: inputs.native
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - if: inputs.native
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+      - if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Build and exercise Windows review installer
+        if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $timer = [System.Diagnostics.Stopwatch]::StartNew()
+          bun tauri build --debug --bundles nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed.' }
+          $timer.Stop()
+          "Review installer build: $($timer.Elapsed.TotalSeconds.ToString('F1')) seconds" | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          Get-ChildItem 'src-tauri/target/debug/bundle/nsis/*-setup.exe' | ForEach-Object { "Installer: $($_.Length) bytes" | Out-File $env:GITHUB_STEP_SUMMARY -Append }
+          ./scripts/smoke-windows.ps1 -InstallerDirectory src-tauri/target/debug/bundle/nsis
+      - if: github.event_name == 'pull_request' && runner.os == 'Windows'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: kivo-windows-review-installer
+          retention-days: 7
+          if-no-files-found: error
+          path: src-tauri/target/debug/bundle/nsis/*-setup.exe
+      - name: Native cache footprint
+        if: always()
+        shell: bash
+        run: du -sh src-tauri/target >> "$GITHUB_STEP_SUMMARY"
+  e2e:
+    if: inputs.frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bun run test:ui:install
+      - run: bun run test:ui
+      - run: bun run test:ui:production
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: kivo-browser-failures
+          retention-days: 7
+          path: test-results/
+  codeql:
+    name: Code review (CodeQL)
+    if: inputs.frontend || inputs.native
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: ci-codeql-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+        with:
+          languages: javascript-typescript
+      - uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4
+
+  audit:
+    name: Dependency audit (bun + cargo)
+    if: inputs.frontend || inputs.native
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: ci-audit-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile --ignore-scripts
+      - name: Audit frontend dependencies (bun)
+        run: bun audit
+      # Prebuilt cargo-audit binary (~10s). Replaces rustsec/audit-check,
+      # which compiled cargo-audit from source (~3min), runs on deprecated
+      # Node 20, and needs `checks: write` to post its Check Run (that
+      # missing permission failed main as "Resource not accessible by
+      # integration"). Plain `cargo audit` fails on vulnerabilities but
+      # exits 0 on informational warnings (6x unmaintained unic/
+      # proc-macro-error, 1x unsound glib RUSTSEC-2024-0429, transitive via
+      # Tauri's Linux tray stack -> gtk 0.18, unfixable short of a GTK 0.20
+      # / Tauri upgrade; tracked separately).
+      - name: Install cargo-audit (prebuilt)
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
+        with:
+          tool: cargo-audit
+      - name: Audit Rust dependencies (cargo-audit)
+        run: cargo audit --file src-tauri/Cargo.lock
+
+  verified:
+    if: always()
+    needs: [workflows, frontend, website, rust-static, native, e2e, codeql, audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+          FRONTEND: ${{ inputs.frontend }}
+          NATIVE: ${{ inputs.native }}
+          DESKTOP: ${{ inputs.desktop }}
+          WEBSITE: ${{ inputs.website }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          needs = json.loads(os.environ['RESULTS'])
+          required = {'workflows': 'true', 'frontend': os.environ['FRONTEND'], 'website': os.environ['WEBSITE'], 'rust-static': os.environ['NATIVE'], 'native': os.environ['DESKTOP'], 'e2e': os.environ['FRONTEND']}
+          security = 'true' if os.environ['FRONTEND'] == 'true' or os.environ['NATIVE'] == 'true' else 'false'
+          required.update(codeql=security, audit=security)
+          for job, enabled in required.items():
+              expected = 'success' if enabled == 'true' else 'skipped'
+              result = needs[job]['result']
+              print(f'{job}: {result} (expected {expected})')
+              if result != expected: raise SystemExit(1)
+          PY

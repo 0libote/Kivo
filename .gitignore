@@ -20,3 +20,5 @@ src-tauri/keys/
 .playwright-mcp/
 
 .tools/
+
+/dist-browser/

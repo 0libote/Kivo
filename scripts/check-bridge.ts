@@ -36,7 +36,9 @@ function byName(a: string, b: string): number {
 
 const [nativeTs, typesTs, commandsRs, shellRs, modelStoreRs, vozRs, localAiRs, libRs] =
   await Promise.all([
-    read("src/platform/native.ts"),
+    Promise.all([read("src/platform/native.ts"), read("src/platform/bridge.ts")]).then((sources) =>
+      sources.join("\n"),
+    ),
     read("src/types.ts"),
     read("src-tauri/src/commands/mod.rs"),
     read("src-tauri/src/shell.rs"),

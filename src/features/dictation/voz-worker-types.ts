@@ -12,7 +12,7 @@ export interface VozTranscript {
 
 export interface VozWorkerRequest {
   requestId: string;
-  operation: "status" | "download" | "prepare" | "remove" | "transcribe";
+  operation: "status" | "download" | "prepare" | "remove" | "transcribe" | "cancel";
   samples?: number[];
   language?: string;
 }

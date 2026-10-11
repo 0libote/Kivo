@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { nativeBridge } from "./native";
 
 afterEach(() => {
+  void nativeBridge.updateSettings({ speechEngine: "system", desertAntUsageAccepted: false });
   window.localStorage.removeItem("kivo-dev-settings");
 });
 
@@ -14,6 +15,7 @@ describe("Voz bridge simulation", () => {
   it("simulates optional model install, progress, ready, and removal without SDK downloads", async () => {
     const phases: string[] = [];
     const stop = await nativeBridge.on("voz-model-status", (event) => phases.push(event.phase));
+    await nativeBridge.updateSettings({ desertAntUsageAccepted: true });
     await nativeBridge.downloadVozModel();
     expect((await nativeBridge.getVozModelStatus()).phase).toBe("ready");
     expect(phases).toContain("downloading");
@@ -22,4 +24,10 @@ describe("Voz bridge simulation", () => {
     expect((await nativeBridge.getVozModelStatus()).phase).toBe("notDownloaded");
     stop();
   });
+});
+
+it("blocks download and dictation until the usage disclosure is acknowledged", async () => {
+  await nativeBridge.updateSettings({ speechEngine: "voz", desertAntUsageAccepted: false });
+  await expect(nativeBridge.downloadVozModel()).rejects.toThrow("Acknowledge");
+  await expect(nativeBridge.startDictation()).rejects.toThrow("Acknowledge");
 });

@@ -148,6 +148,11 @@ check(
     cspDirectives.get("connect-src")?.has("https://cdn.jsdelivr.net") === true,
   "the on-demand Windows runtime cannot load unless jsDelivr is allowed for scripts and fetches",
 );
+check(
+  "Desert Ant required usage reporting is permitted by CSP",
+  cspDirectives.get("connect-src")?.has("https://events.desertant.com") === true,
+  "the optional SDK's required reporting must not be blocked or altered",
+);
 // --- Capability windows match the windows the shell creates -------------------
 // The bundler allows any label, so a renamed window label merges fine and
 // then fails at runtime when show_surface cannot find the window.

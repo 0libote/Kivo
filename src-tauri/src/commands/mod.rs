@@ -401,6 +401,12 @@ impl AppCore {
             .map_err(|_| AppCoreError::Unavailable)?
             .prepare()?;
         let settings = self.settings()?.dictation;
+        if settings.speech_engine == SpeechEnginePreference::Voz
+            && let Err(error) = require_desert_ant_usage(settings.desert_ant_usage_accepted)
+        {
+            self.fail_dictation(generation);
+            return Err(error.into());
+        }
         let locale = match settings.language {
             LanguagePreference::Auto => None,
             LanguagePreference::Locale { tag } => Some(tag),
@@ -1219,6 +1225,8 @@ pub struct FrontendSettings {
     #[serde(default = "default_speech_engine")]
     pub speech_engine: String,
     #[serde(default)]
+    pub desert_ant_usage_accepted: bool,
+    #[serde(default)]
     pub local_speech_model: Option<String>,
     #[serde(default)]
     pub dictation_cleanup_model: Option<String>,
@@ -1282,6 +1290,7 @@ impl From<AppSettings> for FrontendSettings {
             dictation_hold_enabled: settings.dictation.hold_enabled,
             dictation_hold_threshold_ms: settings.dictation.hold_threshold_ms,
             speech_engine: speech_engine_id(settings.dictation.speech_engine).into(),
+            desert_ant_usage_accepted: settings.dictation.desert_ant_usage_accepted,
             local_speech_model: settings.dictation.local_speech_model,
             dictation_cleanup_model: settings.dictation.cleanup_model,
             dictation_vocabulary: settings.dictation.vocabulary,
@@ -1361,6 +1370,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 hold_enabled: settings.dictation_hold_enabled,
                 hold_threshold_ms: settings.dictation_hold_threshold_ms,
                 speech_engine: parse_speech_engine(&settings.speech_engine),
+                desert_ant_usage_accepted: settings.desert_ant_usage_accepted,
                 local_speech_model: settings.local_speech_model,
                 cleanup_model: settings.dictation_cleanup_model,
                 vocabulary: settings.dictation_vocabulary,
@@ -1396,6 +1406,7 @@ pub struct SettingsPatch {
     dictation_hold_enabled: Option<bool>,
     dictation_hold_threshold_ms: Option<u64>,
     speech_engine: Option<String>,
+    desert_ant_usage_accepted: Option<bool>,
     local_speech_model: Option<Option<String>>,
     dictation_cleanup_model: Option<Option<String>>,
     dictation_vocabulary: Option<Vec<crate::config::VocabularyEntry>>,
@@ -1440,6 +1451,7 @@ impl SettingsPatch {
         assign!(dictation_hold_enabled);
         assign!(dictation_hold_threshold_ms);
         assign!(speech_engine);
+        assign!(desert_ant_usage_accepted);
         assign!(local_speech_model);
         assign!(dictation_cleanup_model);
         assign!(dictation_vocabulary);
@@ -1694,8 +1706,24 @@ pub async fn get_voz_model_status(
         .map_err(|error| error.to_string())
 }
 
+fn require_desert_ant_usage(accepted: bool) -> Result<(), SpeechError> {
+    if accepted {
+        return Ok(());
+    }
+    Err(SpeechError::DesertAntUsageNotAccepted)
+}
+
 #[tauri::command]
-pub async fn download_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result<(), String> {
+pub async fn download_voz_model(
+    core: State<'_, Arc<AppCore>>,
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+) -> Result<(), String> {
+    let accepted = core
+        .settings()
+        .map_err(|error| error.to_string())?
+        .dictation
+        .desert_ant_usage_accepted;
+    require_desert_ant_usage(accepted).map_err(|error| error.to_string())?;
     runtime.download().await.map_err(|error| error.to_string())
 }
 
@@ -1709,9 +1737,11 @@ pub async fn delete_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result
 
 #[tauri::command]
 pub fn complete_voz_worker_request(
+    window: tauri::WebviewWindow,
     runtime: State<'_, Arc<dyn VozRuntime>>,
     reply: VozWorkerReply,
 ) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
     runtime
         .complete_worker_request(reply)
         .map_err(|error| error.to_string())
@@ -1719,9 +1749,11 @@ pub fn complete_voz_worker_request(
 
 #[tauri::command]
 pub fn set_voz_worker_ready(
+    window: tauri::WebviewWindow,
     runtime: State<'_, Arc<dyn VozRuntime>>,
     ready: bool,
 ) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
     runtime
         .set_worker_ready(ready)
         .map_err(|error| error.to_string())
@@ -1762,17 +1794,6 @@ pub fn delete_local_speech_model(
 #[tauri::command]
 pub async fn detect_local_ai_servers() -> Vec<crate::ai::LocalAiServer> {
     crate::ai::detect_local_servers().await
-}
-
-#[tauri::command]
-pub async fn install_local_ai_runtime(app: AppHandle) -> Result<(), CommandError> {
-    crate::ai::install_runtime(&app)
-        .await
-        .map_err(|message| CommandError {
-            code: "local_ai_install".into(),
-            message,
-            recoverable: true,
-        })
 }
 
 #[tauri::command]
@@ -2181,3 +2202,35 @@ fn invalid_settings_json() -> serde_json::Error {
 
 #[cfg(test)]
 mod tests;
+
+/// The review-installer harness waits for real WebViews to hydrate and render.
+/// Release builds ignore the harness entirely; no path comes from IPC.
+#[tauri::command]
+pub fn frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    if let Some(directory) = std::env::var_os("KIVO_SMOKE_DIRECTORY") {
+        let label = window.label();
+        if !matches!(
+            label,
+            "settings" | "onboarding" | "flow-bar" | "writing-tools"
+        ) {
+            return Err("Unknown frontend surface.".into());
+        }
+        let path = std::path::PathBuf::from(directory).join(format!("{label}.json"));
+        let report = serde_json::json!({ "surface": label, "version": env!("CARGO_PKG_VERSION") });
+        std::fs::write(path, report.to_string()).map_err(|error| error.to_string())?;
+    }
+    let _ = window;
+    Ok(())
+}
+
+#[cfg(test)]
+mod contracts;
+
+fn validate_worker_surface(label: &str) -> Result<(), String> {
+    if label == "flow-bar" {
+        Ok(())
+    } else {
+        Err("Only the flow bar may answer speech worker requests.".into())
+    }
+}

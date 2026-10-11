@@ -28,6 +28,7 @@ const emptySelection = {
 
 async function installHarness(page: Page, context: SelectionContext) {
   await page.goto("/?surface=writing-tools");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.evaluate(
     async ({ context }) => {
       const path = "/src/platform/native.ts";
@@ -167,4 +168,16 @@ test("disabling Summarize leaves highlighted links in the normal preset menu", a
   await installHarness(page, linkSelection);
   await expect(page.getByRole("menuitem", { name: "Proofread", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Summarize", exact: true })).toHaveCount(0);
+});
+
+test("settings hydration changes cannot overwrite the active writing context", async ({ page }) => {
+  await installHarness(page, emptySelection);
+  await expect(page.getByText("Select some text first.", { exact: true })).toBeVisible();
+  await page.evaluate(async () => {
+    const path = "/src/platform/native.ts";
+    const { nativeBridge } = (await import(path)) as { nativeBridge: NativeBridge };
+    await nativeBridge.updateSettings({ soundFeedback: false });
+  });
+  await expect(page.getByText("Select some text first.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem")).toHaveCount(0);
 });

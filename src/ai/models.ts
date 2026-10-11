@@ -1,3 +1,4 @@
+import { NATIVE_MODELS, NATIVE_PROVIDERS } from "../platform/contracts.generated";
 import type { AiModelInfo, AiProviderId } from "../types";
 import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER } from "../types";
 
@@ -210,18 +211,9 @@ export function migrateAiModels(stored: {
   return legacyModelList(primary, backup);
 }
 
-/** Mirrors `AiProvider::default_model` in Rust. */
+/** Read the default from the native serialization contract. */
 export function providerDefaultModel(provider: AiProviderId): string {
-  switch (provider) {
-    case "zen":
-      return DEFAULT_AI_MODEL;
-    case "go":
-      return "glm-5.3-flash";
-    case "custom":
-      return "llama3.1";
-    default:
-      return DEFAULT_AI_MODEL;
-  }
+  return NATIVE_PROVIDERS.find((info) => info.id === provider)?.defaultModel ?? DEFAULT_AI_MODEL;
 }
 
 /** Mirrors `normalize_base_url` (None = Ollama default applies). */
@@ -235,200 +227,10 @@ export function normalizeAiBaseUrl(raw: string | null | undefined): string | nul
   return null;
 }
 
-// --- Curated Zen / Go / Custom fallbacks -----------------------------------
-// Mirrors `ZEN_CURATED` / `GO_CURATED` / `CUSTOM_CURATED` in
-// `src-tauri/src/ai/providers.rs` (id, label, blurb, cost, billing). The
-// native `list_ai_models` command prices the live gateway listing from the
-// same tables; these rows are only the offline fallback, so the selector
-// never appears empty and the cost of each choice stays visible.
-
-type PricedRow = [id: string, label: string, blurb: string, cost: string, billing: string];
-
-const ZEN_FALLBACK_ROWS: PricedRow[] = [
-  [
-    "gemini-3.8-flash",
-    "Gemini 3.8 Flash",
-    "Default. Same fast model as the Gemini provider.",
-    "$1.50 in / $7.50 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "glm-5.3-flash",
-    "GLM 5.3 Flash",
-    "Cheapest pay-as-you-go coding model.",
-    "$0.15 in / $0.50 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "kimi-k2.7-code",
-    "Kimi K2.7 Code",
-    "Strong open coding model, good default for Zen.",
-    "$0.95 in / $4.00 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "deepseek-v4-flash",
-    "DeepSeek V4 Flash",
-    "Fast budget reasoning for everyday edits.",
-    "$0.14 in / $0.28 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "qwen3.7-plus",
-    "Qwen 3.7 Plus",
-    "Balanced quality for longer rewrites.",
-    "$0.40 in / $1.60 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "minimax-m3",
-    "MiniMax M3",
-    "Capable all-rounder for writing tasks.",
-    "$0.30 in / $1.20 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "gpt-5.4-nano",
-    "GPT 5.4 Nano",
-    "Tiny OpenAI model for quick cleanup.",
-    "$0.20 in / $1.25 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "gpt-5.6-luna",
-    "GPT 5.6 Luna",
-    "Efficient OpenAI model with low rates.",
-    "$0.20 in / $1.20 out per 1M",
-    "zen_credits",
-  ],
-  [
-    "claude-haiku-4-5",
-    "Claude Haiku 4.5",
-    "Fast Anthropic model for short tasks.",
-    "$1.00 in / $5.00 out per 1M",
-    "zen_credits",
-  ],
-  ["big-pickle", "Big Pickle", "Free stealth model, limited time.", "Free", "free"],
-];
-
-const GO_FALLBACK_ROWS: PricedRow[] = [
-  [
-    "glm-5.3-flash",
-    "GLM 5.3 Flash",
-    "Recommended. Fast, high-throughput model for short writing tasks.",
-    "$0.15 in / $0.50 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "qwen3.8-flash",
-    "Qwen 3.8 Flash",
-    "Fast alternative with a low monthly usage cost.",
-    "$0.15 in / $0.47 out per 1M · $30/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "deepseek-v4.1-flash",
-    "DeepSeek V4.1 Flash",
-    "Fast budget alternative for everyday edits.",
-    "$0.15 in / $0.60 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "kimi-k2.7-code",
-    "Kimi K2.7 Code",
-    "Strong coding model; prose edits may take longer.",
-    "$0.95 in / $4.00 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "deepseek-v4-flash",
-    "DeepSeek V4 Flash",
-    "Fast budget reasoning for everyday edits.",
-    "$0.15 in / $0.60 out per 1M · $30/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "qwen3.7-plus",
-    "Qwen 3.7 Plus",
-    "Balanced quality for longer rewrites.",
-    "$0.40 in / $1.60 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "minimax-m3",
-    "MiniMax M3",
-    "Capable all-rounder for writing tasks.",
-    "$0.30 in / $1.20 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "mimo-v2.5",
-    "MiMo V2.5",
-    "Very high request allowance per dollar.",
-    "$0.14 in / $0.28 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "muse-spark-1.3-contributor",
-    "Muse Spark 1.3",
-    "Meta contributor tier; trains on prompts.",
-    "$0.10 in / $0.20 out per 1M · $60/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "gpt-5.6-luna",
-    "GPT 5.6 Luna",
-    "Efficient OpenAI model on Go.",
-    "$0.20 in / $1.20 out per 1M · $15/mo incl.",
-    "go_subscription",
-  ],
-  [
-    "grok-4.6",
-    "Grok 4.6",
-    "xAI flagship, smaller allowance.",
-    "$2.00 in / $6.00 out per 1M · $15/mo incl.",
-    "go_subscription",
-  ],
-  ["union-alpha", "Union Alpha", "Free stealth model, limited time.", "Free", "free"],
-];
-
-const CUSTOM_FALLBACK_ROWS: PricedRow[] = [
-  [
-    "llama3.1",
-    "Llama 3.1",
-    "Ollama default example — `ollama pull llama3.1` first.",
-    "Local · free",
-    "local",
-  ],
-  [
-    "qwen2.5-coder:7b",
-    "Qwen 2.5 Coder 7B",
-    "Good local coding model — `ollama pull qwen2.5-coder:7b`.",
-    "Local · free",
-    "local",
-  ],
-  [
-    "gemma-3n-e4b",
-    "Gemma 3n E4B",
-    "Small local model, e.g. via LM Studio.",
-    "Local · free",
-    "local",
-  ],
-];
-
-function pricedRows(rows: PricedRow[]): AiModelInfo[] {
-  return rows.map(([id, label, description, cost, billing]) => ({
-    id,
-    label,
-    description,
-    cost,
-    billing,
-  }));
-}
-
-export const ZEN_FALLBACK_MODELS: AiModelInfo[] = pricedRows(ZEN_FALLBACK_ROWS);
-export const GO_FALLBACK_MODELS: AiModelInfo[] = pricedRows(GO_FALLBACK_ROWS);
-export const CUSTOM_FALLBACK_MODELS: AiModelInfo[] = pricedRows(CUSTOM_FALLBACK_ROWS);
+// Native-generated offline catalogues retain numeric prices and billing metadata.
+export const ZEN_FALLBACK_MODELS: AiModelInfo[] = structuredClone([...NATIVE_MODELS.zen]);
+export const GO_FALLBACK_MODELS: AiModelInfo[] = structuredClone([...NATIVE_MODELS.go]);
+export const CUSTOM_FALLBACK_MODELS: AiModelInfo[] = structuredClone([...NATIVE_MODELS.custom]);
 
 export function fallbackAiModels(provider: AiProviderId): AiModelInfo[] {
   switch (provider) {

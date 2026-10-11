@@ -21,6 +21,7 @@ test("bench surface probes every bit over the harness bridge", async ({ page }) 
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 900, height: 700 });
   await page.goto("/?surface=gallery&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   // The first cold Vite request compiles the lazy Gallery surface and its
   // StyleX/Astryx dependencies; allow that one initial development render to
   // finish before exercising the harness bridge.
@@ -45,6 +46,7 @@ test("settings shows the Linux bench permission copy", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(
     page.getByText("Linux test bench: microphone and speech are simulated"),

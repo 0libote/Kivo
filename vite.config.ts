@@ -33,16 +33,11 @@ export default defineConfig({
         ],
       },
   build: {
+    outDir: process.env.KIVO_DIST ?? "dist",
     target: "esnext",
     // Production source maps add several megabytes of generated output and
     // are not shipped to a crash service. Opt in only when debugging a bundle.
     sourcemap: process.env.KIVO_SOURCEMAP === "1",
   },
   worker: { format: "es" },
-  optimizeDeps: {
-    // The production Voz worker imports version-pinned CDN modules at runtime.
-    // These packages remain installed for typechecking, but Vite must not
-    // prebundle them into dev or production frontend output.
-    exclude: ["@desert-ant-labs/voz", "@desert-ant-labs/ear", "onnxruntime-web", "@litertjs/core"],
-  },
 });

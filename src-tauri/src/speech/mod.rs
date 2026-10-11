@@ -137,6 +137,7 @@ pub enum SpeechError {
     NoSpeechDetected,
     LocalModelUnavailable,
     VozUnavailable,
+    DesertAntUsageNotAccepted,
     #[cfg(windows)]
     VozRuntime(String),
     VozLanguageUncertain,
@@ -174,6 +175,7 @@ impl fmt::Display for SpeechError {
             Self::LocalModelUnavailable => {
                 "Download a local speech model in Settings → Dictation, then try again."
             }
+            Self::DesertAntUsageNotAccepted => "Review and acknowledge Desert Ant usage reporting in Settings → Dictation before using Voz.",
             Self::VozUnavailable => "Voz is unavailable on this platform. Choose System or another on-device engine.",
             #[cfg(windows)]
             Self::VozRuntime(_) => "Voz could not complete the local speech operation. Retry or choose another engine.",

@@ -53,9 +53,14 @@ const [
   read("src/types.ts"),
   read("src-tauri/src/shell.rs"),
   read("src-tauri/src/commands/mod.rs"),
-  read("src/platform/native.ts"),
+  Promise.all([read("src/platform/native.ts"), read("src/platform/bridge.ts")]).then((sources) =>
+    sources.join("\n"),
+  ),
   read("src-tauri/src/ai/mod.rs"),
-  read("src-tauri/src/ai/providers.rs"),
+  Promise.all([
+    read("src-tauri/src/ai/providers.rs"),
+    read("src-tauri/src/ai/providers/catalog.rs"),
+  ]).then((sources) => sources.join("\n")),
   read("src/ai/models.ts"),
   read("src-tauri/src/speech/voz.rs"),
   read("src/features/dictation/voz.worker.ts"),
@@ -321,7 +326,7 @@ check(
 check(
   "model costs reach the picker",
   aiProvidersRs.includes("cost_label_for") &&
-    aiModelsTs.includes("per 1M") &&
+    aiModelsTs.includes("NATIVE_MODELS") &&
     nativeTs.includes("AiModelInfo"),
   "pricing (cost_label_for / per-1M fallbacks) missing from the model pipeline",
 );
@@ -350,7 +355,7 @@ check(
   "Windows Voz readiness requires completed model loads",
   vozWorker.includes('const vozModelReadyPath = "/voz-model-ready"') &&
     vozWorker.includes('const languageCheckReadyPath = "/voz-language-check-ready"') &&
-    vozWorker.includes("await setVozModelReady(true)") &&
+    vozWorker.includes("publishReadiness(assertCurrent, setVozModelReady)") &&
     vozWorker.includes("vozInstalled !== undefined && languageCheckInstalled !== undefined"),
   "status must use explicit completion markers instead of treating a partial Desert Ant cache as a finished install",
 );

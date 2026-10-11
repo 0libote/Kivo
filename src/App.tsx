@@ -22,11 +22,14 @@ function isVozWorkerReadyMessage(
 
 // Settings and onboarding load on demand. The event-driven overlays stay
 // eager so their native events cannot arrive before their listeners mount.
-const GalleryWindow = lazy(() =>
-  import("./features/gallery/GalleryWindow").then((module) => ({
-    default: module.GalleryWindow,
-  })),
-);
+const browserHarness = import.meta.env.DEV || import.meta.env.VITE_KIVO_HARNESS === "1";
+const GalleryWindow = browserHarness
+  ? lazy(() =>
+      import("./features/gallery/GalleryWindow").then((module) => ({
+        default: module.GalleryWindow,
+      })),
+    )
+  : undefined;
 const OnboardingWindow = lazy(() =>
   import("./features/onboarding/OnboardingWindow").then((module) => ({
     default: module.OnboardingWindow,
@@ -40,6 +43,7 @@ const SettingsWindow = lazy(() =>
 export function App() {
   // Render the window-label surface immediately; context hydrates async.
   const [context, setContext] = useState<AppContext>(() => initialAppContext());
+  const [contextLoaded, setContextLoaded] = useState(false);
   const [contextError, setContextError] = useState<string | null>(null);
   useNativeEvent<boolean>("pause-changed", (paused) =>
     setContext((current) => ({ ...current, paused })),
@@ -54,6 +58,7 @@ export function App() {
       .then((next) => {
         if (active) {
           setContext(next);
+          setContextLoaded(true);
           setContextError(null);
         }
       })
@@ -84,12 +89,13 @@ export function App() {
     let workerLoaded = false;
     let unlisten: (() => void) | undefined;
     const markReadyIfInitialized = () => {
-      if (subscribed && workerLoaded)
+      if (!disposed && subscribed && workerLoaded)
         void nativeBridge.setVozWorkerReady(true).catch(() => undefined);
     };
     worker.addEventListener(
       "message",
       (event: MessageEvent<VozWorkerReply | { type: "ready" }>) => {
+        if (disposed) return;
         if (isVozWorkerReadyMessage(event.data)) {
           workerLoaded = true;
           markReadyIfInitialized();
@@ -108,6 +114,19 @@ export function App() {
       .setVozWorkerReady(false)
       .then(() =>
         nativeBridge.on("voz-worker-request", (request) => {
+          if (disposed) return;
+          if (
+            !settings.desertAntUsageAccepted &&
+            ["download", "prepare", "transcribe"].includes(request.operation)
+          ) {
+            void nativeBridge.completeVozWorkerRequest({
+              requestId: request.requestId,
+              complete: true,
+              error:
+                "Acknowledge Desert Ant usage reporting in Dictation settings before using Voz.",
+            });
+            return;
+          }
           // Web Worker postMessage has no targetOrigin argument.
           // oxlint-disable-next-line unicorn/require-post-message-target-origin
           worker.postMessage(request);
@@ -132,7 +151,7 @@ export function App() {
       void nativeBridge.setVozWorkerReady(false).catch(() => undefined);
       worker.terminate();
     };
-  }, [context.platform, context.surface]);
+  }, [context.platform, context.surface, settings.desertAntUsageAccepted]);
 
   useEffect(() => {
     document.documentElement.dataset.platform = context.platform;
@@ -182,7 +201,7 @@ export function App() {
       );
       break;
     case "gallery":
-      surface = <GalleryWindow context={context} settings={settings} />;
+      surface = GalleryWindow ? <GalleryWindow context={context} settings={settings} /> : null;
       break;
   }
 
@@ -212,11 +231,24 @@ export function App() {
           }
         >
           {surface}
+          <FrontendReady ready={contextLoaded && !loading && !error && !contextError} />
         </Suspense>
-        <DeveloperSurfaceMenu current={context.surface} />
+        {import.meta.env.DEV ? <DeveloperSurfaceMenu current={context.surface} /> : null}
       </MotionConfig>
     </Theme>
   );
+}
+
+function FrontendReady({ ready }: { readonly ready: boolean }) {
+  useEffect(() => {
+    if (!ready) return;
+    document.documentElement.dataset.ready = "true";
+    void nativeBridge.frontendReady().catch(() => undefined);
+    return () => {
+      delete document.documentElement.dataset.ready;
+    };
+  }, [ready]);
+  return null;
 }
 
 const styles = stylex.create({

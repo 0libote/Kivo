@@ -9,6 +9,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useReducer,
@@ -180,12 +181,16 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     [],
   );
 
+  const openInitialContext = useEffectEvent(openWithContext);
   useEffect(() => {
     if (nativeBridge.isNative) return;
+    const generation = requestGeneration.current;
     let active = true;
     void nativeBridge
       .getWritingContext()
-      .then((context) => active && openWithContext(context))
+      .then((context) => {
+        if (active && requestGeneration.current === generation) openInitialContext(context);
+      })
       .catch((error: unknown) => {
         if (!active) return;
         dispatch({ type: "FAIL", message: messageForError(error) });
@@ -193,7 +198,7 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
     return () => {
       active = false;
     };
-  }, [openWithContext]);
+  }, []);
 
   useLayoutEffect(() => {
     const element = popup.current;
