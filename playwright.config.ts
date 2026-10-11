@@ -1,11 +1,13 @@
 import { defineConfig } from "@playwright/test";
 
-const port = process.env.KIVO_UI_TEST_PORT ?? "1420";
+const production = process.env.KIVO_UI_PRODUCTION === "1";
+const port = process.env.KIVO_UI_TEST_PORT ?? "1427";
 
 export default defineConfig({
-  testDir: "tests/e2e",
+  testDir: production ? "tests/production" : "tests/e2e",
   testMatch: "**/*.pw.ts",
   fullyParallel: true,
+  workers: process.env.CI ? 2 : undefined,
   // One retry on CI only: shared runners flake, but a real platform-branch
   // regression fails twice and still blocks the pipeline.
   retries: process.env.CI ? 1 : 0,
@@ -16,8 +18,8 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: `bun run dev --host 127.0.0.1 --port ${port}`,
+    command: `bun run ${production ? "preview" : "dev"} --host 127.0.0.1 --port ${port}`,
     url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: !process.env.CI && !process.env.KIVO_UI_TEST_PORT,
+    reuseExistingServer: false,
   },
 });

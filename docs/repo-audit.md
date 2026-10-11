@@ -1,3 +1,5 @@
+> Historical snapshot from 2 October 2026. See [repository health](repository-health-plan.md) for current remediation and verification.
+
 # Repository audit
 
 Audit date: 2026-10-02. This records evidence and cleanup decisions, rather than treating unfamiliar files as unused.

@@ -18,21 +18,29 @@
     "coverage/**",
     "src-tauri/**",
     "src/theme/built/**",
-    "website/**"
+    "src/platform/contracts.generated.ts"
   ],
   "rules": {
     "typescript/consistent-type-imports": "error",
     "typescript/no-explicit-any": "error",
     "typescript/no-unused-vars": [
       "error",
-      { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
     ],
     "react/react-in-jsx-scope": "off",
     "import/no-unassigned-import": "off",
     "unicorn/require-module-specifiers": "off",
     "unicorn/no-array-sort": "off",
     "no-console": "off",
-    "no-underscore-dangle": ["error", { "allow": ["__TAURI_INTERNALS__"] }],
+    "no-underscore-dangle": [
+      "error",
+      {
+        "allow": ["__TAURI_INTERNALS__"]
+      }
+    ],
     "promise/always-return": "off",
     "promise/no-callback-in-promise": "off",
     "react/set-state-in-effect": "off",

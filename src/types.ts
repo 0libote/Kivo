@@ -68,47 +68,7 @@ export interface WritingPreset {
 export type AiProviderId = "gemini" | "zen" | "go" | "custom";
 
 /** Which recognizer powers dictation (mirrors `SpeechEnginePreference`). */
-export type SpeechEngineId = "system" | "local" | "voz";
-
-export interface VozModelStatus {
-  supported: boolean;
-  downloaded: boolean;
-  phase: "unsupported" | "notDownloaded" | "downloading" | "preparing" | "ready" | "failed";
-  progress: number | null;
-  runtime: string;
-  error: string | null;
-}
-
-export interface VozModelProgress {
-  phase: "notDownloaded" | "downloading" | "preparing" | "ready" | "failed";
-  progress: number | null;
-  error: string | null;
-}
-
-export interface VozWorkerRequest {
-  requestId: string;
-  operation: "status" | "download" | "prepare" | "remove" | "transcribe";
-  samples?: number[];
-  language?: string;
-}
-
-export interface VozWorkerReply {
-  requestId: string;
-  complete: boolean;
-  phase?: VozModelStatus["phase"];
-  progress?: number | null;
-  downloaded?: boolean;
-  transcript?: {
-    text: string;
-    words: { text: string; start: number; end: number }[];
-    durationSeconds: number;
-    processingSeconds: number;
-    detectedLanguage: string | null;
-    languageReliable: boolean;
-    languageConfidence: number;
-  };
-  error?: string;
-}
+export type SpeechEngineId = "system" | "local";
 
 /** One downloadable on-device speech model. */
 export interface LocalSpeechModelInfo {
@@ -145,11 +105,6 @@ export interface LocalAiServerInfo {
   baseUrl: string;
   running: boolean;
   models: string[];
-}
-
-export interface LocalAiInstallProgress {
-  downloaded: number;
-  total: number;
 }
 
 export interface AiProviderInfo {

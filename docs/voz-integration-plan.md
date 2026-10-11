@@ -1,3 +1,5 @@
+> Archived experiment: removed in PR #78 because the SDK license requires usage telemetry, conflicting with Kivo's no-telemetry product promise. System speech and native on-device models remain. This document is historical, not an implementation plan.
+
 # Voz integration plan
 
 ## Verified upstream contract

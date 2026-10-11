@@ -64,7 +64,7 @@ bun tauri dev
 
 Linux behavior: dictation uses a simulated engine (override the transcript with `KIVO_LINUX_DICTATION_TEXT`, the captured text with `KIVO_LINUX_TEST_TEXT`), API keys persist to a dev-only file vault (`~/.config/kivo/linux-credentials.json`, override with `KIVO_LINUX_CREDENTIAL_FILE` in tests — never a shipping credential store), and Copy uses `wl-copy`/`xclip` when present. Dictation holds `Control+Alt+Space`; Writing Tools uses `Ctrl+Space`.
 
-Useful checks:
+Quick checks (use `bun run ai-check:full` for the authoritative application, Rust, full browser, built-frontend, bundle, and website gate):
 
 ```sh
 bun typecheck
@@ -76,7 +76,7 @@ bun run test          # bun test
 bun test:ui           # Playwright
 bun run build
 bun check:rust
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 bun run desktop:build  # fast local package
 bun tauri build        # full stable release profile
 ```
@@ -99,10 +99,18 @@ Presentation uses the Astryx design system (`@astryxdesign/core`) with StyleX fo
 
 The Bun patch for `@astryxdesign/cli@0.6.3` prevents name-only component references from erasing documented built-in variants. This keeps theme declarations independent of filesystem traversal order. `tests/theme-generation.test.ts` checks both scan orders; remove the patch when the upstream generator fixes this behavior.
 
-Platform code is isolated under `src-tauri/src/platform/`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Shared speech routing, capture, and session handling live under `src-tauri/src/speech/`; `local.rs` and `model_store.rs` retain Kivo's transcribe-cpp engine, and `voz.rs` adapts Voz behind the same engine contract. Windows hosts the pinned browser SDK in a lazy worker in the persistent flow-bar WebView2. `docs/voz-integration-plan.md` records the runtime choices and upstream constraints. Linux continues to use the simulated speech adapter and reports Voz as unavailable. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
+Platform code is isolated under `src-tauri/src/platform/`. Windows uses UI Automation, Win32 window/input APIs, desktop SAPI speech, and Credential Manager. Shared speech routing, capture, and session handling live under `src-tauri/src/speech/`; `local.rs` and `model_store.rs` retain Kivo's native transcribe-cpp engine. Linux continues to use the simulated system speech adapter. Speech uses the system default microphone. Only installed Windows desktop speech languages are offered; recognition quality and language coverage depend on those engines. Kivo prefers clipboard-free UIA capture, then uses a guarded Copy/Paste transaction for editors that do not expose usable text accessibility. The transaction snapshots every clipboard representation and restores it only while Kivo still owns the clipboard. Kivo validates the original application, field, and available selection/caret identity before insertion; changed targets keep the result available to copy instead of automatically pasting into another field.
 
 ## Support and verification policy
 
 Windows x86_64 on Windows 11 24H2+ is the release target. macOS desktop support has been removed; browser-only frontend development remains possible on other hosts. Linux is retained solely for the simulated native bench and shared tests, not distribution. Do not add cross-desktop parity requirements.
 
-CI compiles, lints, and tests the Windows backend on every PR and builds a review NSIS installer. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.
+CI uses fail-safe change classification: application changes build and exercise a Windows review NSIS installer; native/shared/build configuration changes additionally run Windows and Linux Clippy/tests. Documentation-only changes keep workflow validation and the required aggregate; website changes run website checks. Main and release verification run the complete shared gate. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.
+
+## Generated contracts and speech engines
+
+Run `bun run generate:models` after changing the Gemini catalogue/blocklist and `bun run generate:contracts` after changing Rust provider/catalogue/default-setting serialization. Cargo tests reject stale native snapshots; TypeScript checks their public shapes. This caught pricing-field naming mismatches that source-name checks could not catch.
+
+The experimental Voz/Ear browser integration was removed: its license requires SDK usage telemetry, incompatible with Kivo's no-telemetry promise. System speech and native downloaded models remain. Legacy persisted `voz` engine preferences migrate to System; the flow bar clears only known retired browser model caches. The shipping CSP permits no remote scripts, browser workers, or ML CDNs.
+
+Browser tests own ports 1427 (dev) and 1428 (production), refuse server reuse, and wait for rendered/settings-ready surfaces. `bun run test:ui:production` builds a separate `dist-browser` Windows harness with an explicit mock opt-in. Normal desktop builds exclude that harness. See [repository health](repository-health-plan.md) for baseline measurements, remediation, retained dependencies, and maintenance ownership.

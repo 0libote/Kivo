@@ -110,44 +110,6 @@ check(
   `Cargo.toml has "${cargoVersion}"; the app version is stamped from package.json/tauri.conf`,
 );
 
-// --- Voz runtime packaging ----------------------------------------------------
-const viteSource = readFileSync(join(root, "vite.config.ts"), "utf8");
-check(
-  "Windows-only Voz worker stays out of Linux bundles",
-  viteSource.includes('process.env.TAURI_ENV_PLATFORM === "windows"') &&
-    viteSource.includes("voz.worker.stub.ts"),
-  "the Windows worker should not enter Linux frontend output",
-);
-const vozWorkerSource = readFileSync(join(root, "src/features/dictation/voz.worker.ts"), "utf8");
-check(
-  "Windows Voz ML runtime is downloaded instead of bundled",
-  vozWorkerSource.includes("/* @vite-ignore */") &&
-    vozWorkerSource.includes("@desert-ant-labs/voz@3.5.0/+esm") &&
-    vozWorkerSource.includes("@desert-ant-labs/ear@3.5.0/+esm") &&
-    vozWorkerSource.includes("onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs") &&
-    vozWorkerSource.includes("@litertjs/core@2.5.3/+esm") &&
-    !vozWorkerSource.includes('await import("@desert-ant-labs/voz")') &&
-    !vozWorkerSource.includes('await import("@desert-ant-labs/ear")'),
-  "Voz/Ear/ONNX/LiteRT must remain version-pinned remote imports so they do not inflate the NSIS installer",
-);
-const csp = (
-  JSON.parse(readFileSync(join(root, "src-tauri/tauri.conf.json"), "utf8")) as {
-    app: { security: { csp: string } };
-  }
-).app.security.csp;
-const cspDirectives = new Map(
-  csp
-    .split(";")
-    .map((directive) => directive.trim().split(/\s+/))
-    .filter(([name]) => name)
-    .map(([name, ...sources]) => [name, new Set(sources)] as const),
-);
-check(
-  "Voz runtime CDN is allowed by the desktop CSP",
-  cspDirectives.get("script-src")?.has("https://cdn.jsdelivr.net") === true &&
-    cspDirectives.get("connect-src")?.has("https://cdn.jsdelivr.net") === true,
-  "the on-demand Windows runtime cannot load unless jsDelivr is allowed for scripts and fetches",
-);
 // --- Capability windows match the windows the shell creates -------------------
 // The bundler allows any label, so a renamed window label merges fine and
 // then fails at runtime when show_surface cannot find the window.

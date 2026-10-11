@@ -12,6 +12,7 @@ for (const platform of ["windows", "linux"] as const) {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto("/?surface=settings");
+    await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
     await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Change dictation shortcut", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Dictation", exact: true })).toBeVisible();
@@ -66,6 +67,7 @@ test("Every writing action is visible and recording can finish from its indicato
 }, testInfo) => {
   await page.setViewportSize({ width: 380, height: 460 });
   await page.goto("/?surface=writing-tools");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("menuitem", { name: "Proofread", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("writing-menu.png") });
   await expect(page.getByRole("menuitem", { name: "Summarize", exact: true })).toBeVisible();
@@ -77,12 +79,14 @@ test("Every writing action is visible and recording can finish from its indicato
   await expect(page.getByRole("button", { name: "Keep original", exact: true })).toBeVisible();
   await page.setViewportSize({ width: 164, height: 48 });
   await page.goto("/?surface=flow-bar&state=listening");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Finish dictation" })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("listening.png") });
   await page.getByRole("button", { name: "Finish dictation" }).click();
   await expect(page.locator('[data-testid="flow-bar"][data-state="processing"]')).toBeVisible();
   await page.setViewportSize({ width: 380, height: 96 });
   await page.goto("/?surface=flow-bar&state=error");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Dismiss dictation error" })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath("dictation-error.png") });
   await page.getByRole("button", { name: "Dismiss dictation error" }).click();
@@ -94,6 +98,7 @@ test("writing settings stay focused on actions and navigation resets scroll", as
 }, testInfo) => {
   await page.setViewportSize({ width: 900, height: 650 });
   await page.goto("/?surface=settings");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Reset all to defaults", exact: true }),

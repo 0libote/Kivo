@@ -6,35 +6,27 @@ on:
   workflow_dispatch:
 
 # Tags do not trigger the CI workflow (it listens on pull_request / main),
-# so stable releases carry their own audit gate instead of shipping
+# so stable releases use the complete shared verification gate instead of shipping
 # whatever a tag points at unchecked.
 permissions:
   contents: read
 
 jobs:
-  audit:
-    name: Dependency audit (bun + cargo)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  verify:
+    uses: ./.github/workflows/verify.yml
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
-        with:
-          bun-version: 1.4.2
-      - run: bun install --frozen-lockfile --ignore-scripts
-      - name: Audit frontend dependencies (bun)
-        run: bun audit
-      - name: Install cargo-audit (prebuilt)
-        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
-        with:
-          tool: cargo-audit
-      - name: Audit Rust dependencies (cargo-audit)
-        run: cargo audit --file src-tauri/Cargo.lock
+      actions: read
+      security-events: write
 
   windows:
-    needs: [audit]
+    needs: [verify]
+    concurrency:
+      group: stable-release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_INCREMENTAL: "0"
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -44,37 +36,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: 1.4.2
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: ./.github/actions/setup-native
         with:
-          workspaces: src-tauri
-      # The Windows x86_64 build compiles the on-device speech runtime with its
-      # Vulkan backend, which needs the SDK's glslc + headers at build time.
-      # Uses the official LunarG installer in silent mode (the installer sets
-      # no env for this process, so VULKAN_SDK is exported for CMake and the
-      # build script's link search).
-      - name: Install Vulkan SDK (Windows x64)
-        shell: pwsh
-        run: |
-          $version = "1.4.357.0"
-          $installer = Join-Path $env:RUNNER_TEMP "vulkan-sdk.exe"
-          curl.exe -sSL -o $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
-          Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait
-          $sdk = "C:\VulkanSDK\$version"
-          $header = "$sdk\Include\vulkan\vulkan.h"
-          for ($i = 0; $i -lt 60 -and -not (Test-Path $header); $i++) { Start-Sleep -Seconds 2 }
-          if (-not (Test-Path $header)) { throw "Vulkan SDK install did not produce $header" }
-          "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
-          Write-Host "Vulkan SDK ready at $sdk"
+          profile: stable
       - run: bun install --frozen-lockfile --ignore-scripts
-      - run: bun typecheck
-      - run: bun lint
-      - run: bun run theme:check
-      - run: bun run test
-      - run: bun run check:packaging
-      - run: bun run check:contracts
-      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+      - name: Validate tag version
+        shell: bash
+        run: |
+          version="$(bun -e 'console.log((await Bun.file("package.json").json()).version)')"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then test "$GITHUB_REF_NAME" = "app-v$version"; fi
       # NSIS needs no paid certificate or store account. Tauri v2
       # (`createUpdaterArtifacts: true`) re-uses the installer itself as the
       # update bundle and signs it in place, so the artifacts are

@@ -23,27 +23,20 @@ use super::{
 enum Engine {
     System,
     Local,
-    Voz,
 }
 
 pub struct SelectableSpeechEngine {
     system: Arc<dyn SpeechEngine>,
     local: Arc<dyn SpeechEngine>,
-    voz: Arc<dyn SpeechEngine>,
     next_session: AtomicU64,
     sessions: Mutex<HashMap<SpeechSessionId, (Engine, SpeechSessionId)>>,
 }
 
 impl SelectableSpeechEngine {
-    pub fn new(
-        system: Arc<dyn SpeechEngine>,
-        local: Arc<dyn SpeechEngine>,
-        voz: Arc<dyn SpeechEngine>,
-    ) -> Self {
+    pub fn new(system: Arc<dyn SpeechEngine>, local: Arc<dyn SpeechEngine>) -> Self {
         Self {
             system,
             local,
-            voz,
             next_session: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
         }
@@ -53,7 +46,6 @@ impl SelectableSpeechEngine {
         match engine {
             Engine::System => &self.system,
             Engine::Local => &self.local,
-            Engine::Voz => &self.voz,
         }
     }
 }
@@ -76,7 +68,6 @@ impl SpeechEngine for SelectableSpeechEngine {
             let (kind, engine) = match options.backend {
                 SpeechBackend::System => (Engine::System, self.system.as_ref()),
                 SpeechBackend::Local { .. } => (Engine::Local, self.local.as_ref()),
-                SpeechBackend::Voz => (Engine::Voz, self.voz.as_ref()),
             };
             let inner = engine.start(options, events).await?;
             let session = SpeechSessionId(self.next_session.fetch_add(1, Ordering::Relaxed));
@@ -155,28 +146,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn voz_preference_routes_to_the_voz_adapter() {
+    async fn local_preference_routes_to_the_local_adapter() {
         let starts = Arc::new(Mutex::new(Vec::new()));
         let engine = SelectableSpeechEngine::new(
             Arc::new(NamedEngine("system", Arc::clone(&starts))),
             Arc::new(NamedEngine("local", Arc::clone(&starts))),
-            Arc::new(NamedEngine("voz", Arc::clone(&starts))),
         );
         let session = engine
             .start(
                 SpeechStartOptions {
                     microphone_id: None,
                     locale: Some("en".into()),
-                    backend: SpeechBackend::Voz,
+                    backend: SpeechBackend::Local {
+                        model_id: "whisper-small".into(),
+                    },
                     vocabulary: Vec::new(),
                 },
                 Arc::new(|_| {}),
             )
             .await
             .unwrap();
-        assert_eq!(*starts.lock().unwrap(), vec!["voz"]);
-        let (transcript, alignment) = engine.stop(session).await.unwrap().into_parts();
-        assert_eq!(transcript, "voz");
-        assert!(alignment.is_none());
+        assert_eq!(*starts.lock().unwrap(), vec!["local"]);
+        assert_eq!(engine.stop(session).await.unwrap().into_text(), "local");
     }
 }

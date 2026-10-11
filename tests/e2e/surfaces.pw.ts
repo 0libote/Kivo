@@ -13,6 +13,7 @@ test("settings navigation and controls work", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
@@ -61,6 +62,7 @@ test("AI provider switch shows per-provider keys and model costs", async ({ page
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "AI", exact: true }).click();
   // Native settings persistence is slower than React's optimistic provider
   // switch. Recreate that timing so model discovery must use the provider
@@ -100,6 +102,7 @@ test("on-device dictation models and local AI setup work", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Dictation", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Dictation" })).toBeVisible();
   await page.getByRole("radio", { name: "On-device", exact: true }).click();
@@ -124,7 +127,7 @@ test("on-device dictation models and local AI setup work", async ({ page }) => {
   await page.getByRole("button", { name: "AI", exact: true }).click();
   await page.getByLabel("AI provider", { exact: true }).selectOption("custom");
   await expect(page.getByText("Local servers", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Install Ollama", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Download Ollama", exact: true })).toBeVisible();
   assertNoErrors();
 });
 
@@ -132,6 +135,7 @@ test("custom words can be added with meanings and removed", async ({ page }) => 
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Custom words", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Custom words" })).toBeVisible();
   // A word with a meaning renders both, and the count follows.
@@ -163,6 +167,7 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await page.evaluate(async () => {
@@ -190,6 +195,7 @@ test("about installs stable updates in-app with restart", async ({ page }) => {
 test("about installs rolling beta updates in-app", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.evaluate(async () => {
     const path = "/src/platform/native.ts";
@@ -216,6 +222,7 @@ test("onboarding completes the concise four-screen flow", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 640, height: 560 });
   await page.goto("/?surface=onboarding&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: /Write naturally/ })).toBeVisible();
   await page.getByRole("button", { name: "Get started" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
@@ -235,6 +242,7 @@ test("writing tools supports keyboard custom instructions and informational resu
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 344, height: 420 });
   await page.goto("/?surface=writing-tools&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("dialog", { name: "Writing Tools" })).toBeVisible();
   await page.keyboard.type("Translate to French");
   await expect(page.getByLabel("Custom writing instruction")).toHaveValue("Translate to French");
@@ -251,6 +259,7 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
   const assertNoErrors = failOnConsoleErrors(page);
   await page.setViewportSize({ width: 900, height: 720 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
 
   await page.getByRole("button", { name: "Add preset", exact: true }).click();
@@ -263,10 +272,12 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
 
   // The new preset reaches the popup menu in the harness.
   await page.goto("/?surface=writing-tools&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await expect(page.getByRole("menuitem", { name: "Pirate", exact: true })).toBeVisible();
 
   // Editing a built-in renames it in the menu.
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Writing Tools", exact: true }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).first().click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("Spellcheck");
@@ -281,17 +292,19 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
   assertNoErrors();
 });
 
-test("flow bar exposes calm listening, processing, and error states", async ({ page }) => {
-  const assertNoErrors = failOnConsoleErrors(page);
-  await page.setViewportSize({ width: 260, height: 72 });
-  for (const state of ["idle", "starting", "listening", "processing", "error"]) {
+for (const state of ["idle", "starting", "listening", "processing", "error"]) {
+  test(`flow bar renders the ${state} state`, async ({ page }) => {
+    const assertNoErrors = failOnConsoleErrors(page);
     await page.setViewportSize(
       state === "error" ? { width: 380, height: 96 } : { width: 164, height: 48 },
     );
     await page.goto(`/?surface=flow-bar&state=${state}`);
+    await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
     await expect(page.locator('[data-testid="flow-bar"]')).toBeVisible();
-  }
-  await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.locator('[data-testid="flow-bar"][data-state="listening"]')).toBeVisible();
-  assertNoErrors();
-});
+    if (state === "error") {
+      await page.getByRole("button", { name: "Retry" }).click();
+      await expect(page.locator('[data-testid="flow-bar"][data-state="listening"]')).toBeVisible();
+    }
+    assertNoErrors();
+  });
+}

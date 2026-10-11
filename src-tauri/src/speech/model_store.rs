@@ -583,6 +583,7 @@ pub struct LocalModelProgress {
 #[derive(Debug)]
 pub enum ModelStoreError {
     UnknownModel,
+    Busy,
     Unavailable,
     Download,
     /// SHA-256 mismatch: the file was removed and the download can be retried.
@@ -593,6 +594,7 @@ pub enum ModelStoreError {
 impl fmt::Display for ModelStoreError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
+            Self::Busy => "That model is busy. Wait for the current operation or cancel it first.",
             Self::UnknownModel => "That speech model is not available.",
             Self::Unavailable => "The speech models folder is unavailable.",
             Self::Download => {
@@ -630,12 +632,45 @@ pub struct ModelStore {
     cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
+/// Removes operation state even when its async future is dropped or panics.
+struct ModelOperation<'a> {
+    store: &'a ModelStore,
+    id: String,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for ModelOperation<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut operations) = self.store.cancels.lock() {
+            operations.remove(&self.id);
+        }
+    }
+}
+
 impl ModelStore {
     pub fn new(directory: impl Into<PathBuf>) -> Self {
         Self {
             directory: directory.into(),
             cancels: Mutex::new(HashMap::new()),
         }
+    }
+
+    fn begin_operation(&self, id: &str) -> Result<ModelOperation<'_>, ModelStoreError> {
+        catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
+        let mut operations = self
+            .cancels
+            .lock()
+            .map_err(|_| ModelStoreError::Unavailable)?;
+        if operations.contains_key(id) {
+            return Err(ModelStoreError::Busy);
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        operations.insert(id.to_owned(), Arc::clone(&cancel));
+        Ok(ModelOperation {
+            store: self,
+            id: id.to_owned(),
+            cancel,
+        })
     }
 
     /// Resolved path for a downloaded model, if the file is present.
@@ -686,6 +721,7 @@ impl ModelStore {
 
     pub async fn download(&self, app: &AppHandle, id: &str) -> Result<(), ModelStoreError> {
         let entry = catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
+        let operation = self.begin_operation(id)?;
         let target = self.directory.join(entry.filename);
         if target.is_file() {
             return Ok(());
@@ -699,13 +735,8 @@ impl ModelStore {
         // different file.
         let partial = self.directory.join(format!("{}.partial", entry.filename));
 
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.cancels
-            .lock()
-            .map_err(|_| ModelStoreError::Unavailable)?
-            .insert(id.to_owned(), Arc::clone(&cancel));
-        let result = self.stream_to_file(app, entry, &partial, &cancel).await;
-        self.cancels.lock().ok().map(|mut map| map.remove(id));
+        let cancel = &operation.cancel;
+        let result = self.stream_to_file(app, entry, &partial, cancel).await;
         if let Err(error) = result {
             // Keep an interrupted download for the next attempt; a cancel is
             // deliberate, so discard it.
@@ -726,9 +757,19 @@ impl ModelStore {
             let _ = tokio::fs::remove_file(&partial).await;
             return Err(ModelStoreError::Corrupt);
         }
-        tokio::fs::rename(&partial, &target)
-            .await
-            .map_err(|_| ModelStoreError::Unavailable)?;
+        // Serialize cancellation and publication: a successful cancel cannot
+        // race the final rename and unexpectedly install the model afterward.
+        {
+            let _operations = self
+                .cancels
+                .lock()
+                .map_err(|_| ModelStoreError::Unavailable)?;
+            if cancel.load(Ordering::SeqCst) {
+                let _ = fs::remove_file(&partial);
+                return Err(ModelStoreError::Download);
+            }
+            fs::rename(&partial, &target).map_err(|_| ModelStoreError::Unavailable)?;
+        }
         let _ = app.emit("local-models-changed", self.list());
         Ok(())
     }
@@ -744,6 +785,7 @@ impl ModelStore {
     /// Deletes an installed model. The file is removed even if it is currently
     /// selected; the next dictation reports the model as missing.
     pub fn delete(&self, id: &str) -> Result<(), ModelStoreError> {
+        let _operation = self.begin_operation(id)?;
         let entry = catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
         let path = self.directory.join(entry.filename);
         match fs::remove_file(&path) {
@@ -910,6 +952,38 @@ fn verify_sha256(path: &Path, expected: &str) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::{DownloadPlan, ModelStore, catalog_entry, plan_download, verify_sha256};
+
+    #[test]
+    fn duplicate_download_and_delete_are_blocked_until_operation_finishes() {
+        let store = ModelStore::new(std::env::temp_dir().join("kivo-operations"));
+        let operation = store.begin_operation("whisper-small").unwrap();
+        assert!(matches!(
+            store.begin_operation("whisper-small"),
+            Err(super::ModelStoreError::Busy)
+        ));
+        assert!(matches!(
+            store.delete("whisper-small"),
+            Err(super::ModelStoreError::Busy)
+        ));
+        store.cancel("whisper-small");
+        assert!(operation.cancel.load(super::Ordering::SeqCst));
+        // Cancellation requests do not unlock files while the writer is active.
+        assert!(store.begin_operation("whisper-small").is_err());
+        drop(operation);
+        assert!(store.begin_operation("whisper-small").is_ok());
+    }
+
+    #[test]
+    fn independent_models_can_download_and_dropped_work_releases_its_slot() {
+        let store = ModelStore::new(std::env::temp_dir().join("kivo-independent-operations"));
+        let first = store.begin_operation("whisper-small").unwrap();
+        let second = store.begin_operation("whisper-base").unwrap();
+        drop(first);
+        assert!(store.begin_operation("whisper-small").is_ok());
+        assert!(store.begin_operation("whisper-base").is_err());
+        drop(second);
+        assert!(store.begin_operation("whisper-base").is_ok());
+    }
 
     #[test]
     fn download_plan_resumes_and_restarts_correctly() {

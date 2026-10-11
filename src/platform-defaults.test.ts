@@ -20,6 +20,7 @@ import {
   ZEN_FALLBACK_MODELS,
 } from "./ai/models";
 import { formatShortcut } from "./components/shortcut";
+import { NATIVE_SETTINGS } from "./platform/contracts.generated";
 import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER, defaultSettings } from "./types";
 
 // Cross-platform default parity. The Rust side owns the same defaults
@@ -28,6 +29,11 @@ import { DEFAULT_AI_MODEL, DEFAULT_AI_PROVIDER, defaultSettings } from "./types"
 // These tests run on every OS in CI, so a default changed on one platform
 // without its counterpart fails fast instead of surfacing weeks later.
 describe("platform defaults parity", () => {
+  it("matches actual native serialized settings on both hosts", () => {
+    for (const platform of ["windows", "linux"] as const) {
+      expect<unknown>(NATIVE_SETTINGS[platform]).toEqual(defaultSettings(platform));
+    }
+  });
   it("uses the native hold shortcut per platform", () => {
     expect(defaultSettings("windows").dictationShortcut).toBe("Ctrl+Meta");
     expect(defaultSettings("linux").dictationShortcut).toBe("Control+Alt+Space");

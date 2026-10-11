@@ -63,14 +63,15 @@
     btn.className = "copy-btn";
     btn.type = "button";
     btn.textContent = "Copy";
+    // Each button owns its feedback timer and text.
+    var done = () => {
+      btn.textContent = "Copied";
+      setTimeout(function () {
+        btn.textContent = "Copy";
+      }, 1200);
+    };
     btn.addEventListener("click", function () {
       var text = pre.innerText.replace(/^Copy\n/, "");
-      function done() {
-        btn.textContent = "Copied";
-        setTimeout(function () {
-          btn.textContent = "Copy";
-        }, 1200);
-      }
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(done, done);
       } else {

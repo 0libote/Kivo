@@ -17,7 +17,8 @@
       "!docs/**",
       "!src/theme/built/**",
       "!bun.lock",
-      "!**/*.html"
+      "!**/*.html",
+      "!src/platform/contracts.generated.ts"
     ]
   },
   "formatter": {
