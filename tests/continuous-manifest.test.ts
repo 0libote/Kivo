@@ -13,11 +13,11 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
-async function publish(signedVersion: string) {
+async function publish(signedVersion: string, bytes = "installer bytes") {
   const directory = mkdtempSync(join(tmpdir(), "kivo-manifest-"));
   directories.push(directory);
   const installer = join(directory, "Kivo_0.1.0_x64-setup.exe");
-  await Bun.write(installer, "installer bytes");
+  await Bun.write(installer, bytes);
   await Bun.write(
     `${installer}.sig`,
     Buffer.from(`trusted comment: timestamp:1 version:${signedVersion}`).toString("base64"),
@@ -43,6 +43,18 @@ describe("Windows continuous updater manifest", () => {
     );
     expect(await Bun.file(result.stdout.toString().trim()).text()).toBe("installer bytes");
     expect(manifest.platforms["windows-x86_64"].signature).toBeTruthy();
+  });
+
+  it("rebuilds of the same commit keep the prior installer bytes available", async () => {
+    const first = await publish(`0.1.0+${sha}`, "first build");
+    const second = await publish(`0.1.0+${sha}`, "second build");
+    const firstManifest = await Bun.file(join(first.directory, "beta/continuous.json")).json();
+    const secondManifest = await Bun.file(join(second.directory, "beta/continuous.json")).json();
+    expect(firstManifest.platforms["windows-x86_64"].url).not.toBe(
+      secondManifest.platforms["windows-x86_64"].url,
+    );
+    expect(await Bun.file(first.result.stdout.toString().trim()).text()).toBe("first build");
+    expect(await Bun.file(second.result.stdout.toString().trim()).text()).toBe("second build");
   });
 
   it("rejects an installer signed for a different version before publishing", async () => {

@@ -22,9 +22,18 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad
-        with:
-          tool: actionlint@1.7.12, shellcheck@0.11.0
+      - name: Install checksum-pinned workflow tools
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p workflow-tools
+          curl --fail --silent --show-error --location --retry 3 -o actionlint.tar.gz https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  actionlint.tar.gz' | sha256sum --check
+          tar -xzf actionlint.tar.gz -C workflow-tools
+          curl --fail --silent --show-error --location --retry 3 -o shellcheck.tar.xz https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+          echo '8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198  shellcheck.tar.xz' | sha256sum --check
+          tar -xJf shellcheck.tar.xz -C workflow-tools --strip-components=1
+          echo "$RUNNER_TEMP/workflow-tools" >> "$GITHUB_PATH"
       - run: actionlint
   frontend:
     if: inputs.frontend

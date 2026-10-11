@@ -116,7 +116,7 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
 
   async function openCredits() {
     try {
-      await nativeBridge.openExternal("https://desertant.com/models/voz/");
+      await nativeBridge.openExternal("https://desertant.com");
     } catch (cause) {
       setStatus((current) => ({
         ...current,
@@ -195,7 +195,7 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
       {status.error ? <Banner status="error" title={status.error} /> : null}
       {modelAction}
       <Button
-        label="Voz and Ear by Desert Ant · model credits"
+        label="Voz and Ear by Desert Ant Labs · model credits"
         onClick={() => void openCredits()}
         variant="ghost"
       />

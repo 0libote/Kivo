@@ -46,3 +46,26 @@ describe("continuous release promotion", () => {
     expect(command.commands.flat()).not.toContain(options.manifest);
   });
 });
+
+it("removes only old asset pairs after successful promotion", async () => {
+  const command = fixture();
+  const originalRun = command.run;
+  const assets = Array.from({ length: 12 }, (_, index) => ({
+    name: `Kivo_0.1.0_${"a".repeat(40)}_${index.toString(16).padStart(64, "0")}_x64-setup.exe`,
+    createdAt: new Date(2026, 0, index + 1).toISOString(),
+  })).flatMap((asset) => [asset, { ...asset, name: `${asset.name}.sig` }]);
+  command.run = async (args) => {
+    const result = await originalRun(args);
+    return args[1] === "view" ? JSON.stringify(assets) : result;
+  };
+  expect(await promoteContinuous(command, options)).toBe(true);
+  const deletions = command.commands.filter((args) => args[1] === "delete-asset");
+  expect(deletions).toHaveLength(4);
+  expect(new Set(deletions.map((args) => args[3]))).toEqual(
+    new Set(assets.slice(0, 4).map((asset) => asset.name)),
+  );
+  const promotion = command.commands.findIndex((args) => args.includes(options.manifest));
+  expect(command.commands.findIndex((args) => args[1] === "delete-asset")).toBeGreaterThan(
+    promotion,
+  );
+});

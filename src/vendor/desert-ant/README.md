@@ -15,5 +15,5 @@ and the versioned cache together. Ordinary checks verify local hashes offline.
 The Windows worker fetches the runtime explicitly. These declarations do not
 make remote JavaScript part of Bun's installation integrity chain. jsDelivr,
 the SDK's WASM/model assets, WebView2, CSP, and offline behavior still need the
-Windows acceptance tests in docs/releasing.md. The SDK license notice is
-linked from the model setup UI.
+Windows acceptance tests in docs/releasing.md. License notices remain alongside the declarations; Desert Ant Labs credits
+are linked from the model setup UI.

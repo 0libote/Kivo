@@ -9,7 +9,9 @@ for (const asset of assets) {
   if (asset.endsWith(".js")) {
     jsBytes += file.size;
     if (
-      /MockBridge|kivo-mock-settings|Simulated test engine/.test(await file.text()) ||
+      /MockBridge|kivo-dev-settings|Simulated test engine|Development surfaces/.test(
+        await file.text(),
+      ) ||
       asset.includes("GalleryWindow")
     )
       throw new Error(`Development harness leaked into ${asset}`);
