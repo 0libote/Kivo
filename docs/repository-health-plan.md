@@ -12,9 +12,9 @@ The findings below describe the original baseline, not the current branch. Imple
 | CI cost | Shared verification for PRs and releases; fail-safe change classification; one full browser host; cheap frontend checks grouped; pinned Rust; profile caches saved only on main; release debug info disabled | Workflow/action lint; explicit success/skipped aggregate keeps the existing required check name. Cold/warm hosted timings must be compared after merge; no claimed speedup from unmeasured compiler caching. |
 | Native coverage | Windows PR installer is installed, launched, checked for four hydrated/rendered WebViews, and uninstalled | Automated CI smoke; real microphone, insertion, shortcuts, GPU, DPI, and signed-update checks stay explicit in docs/releasing.md. |
 | Installer execution | Ollama button opens the official download page; executable downloader/spawner and its bridge/events removed | Build/contracts/browser setup coverage. Local server probes run concurrently. |
-| Model lifecycle | Rust per-model operation guards survive cancellation/verification/publication; Voz queues operations, invalidates obsolete loads, cancels timed-out/dropped requests, ignores late replies, and restricts worker IPC to the flow bar | Operation, serialization, native guard, request cleanup, and browser tests. SDK downloads cannot be forcibly aborted through the current upstream API; obsolete results cannot publish readiness. |
-| Dependency bloat | Four root ML packages removed; full exact SDK declarations and license notices retained with tarball integrity and offline hashes | Two frozen clean installs: baseline 259 packages / 1,012 MB, branch 233 / 581 MB (about 43% less). These are installed disk sizes, not installer sizes. Weekly upstream provenance check. |
-| Production bundle | Native/shared/mock adapters split; mock bridge and gallery compiled out of desktop builds; worker remains demand-loaded | Bundle gate rejects simulation/runtime leakage; production Windows frontend browser smoke covers four surfaces. |
+| Model lifecycle | Rust per-model operation guards survive cancellation/verification/publication; obsolete browser speech integration removed | Duplicate download/delete guard tests; legacy engine migration and targeted retired-cache cleanup. |
+| Dependency bloat | Voz/Ear/ONNX/LiteRT root packages and the complete experimental browser speech integration removed | Two frozen clean installs: baseline 259 packages / 1,012 MB, branch 233 / 581 MB (about 43% less). These are installed disk sizes, not installer sizes. System speech and native local model functionality remain. |
+| Production bundle | Native/shared/mock adapters split; mock bridge and gallery compiled out of desktop builds; remote SDK/worker code removed; CSP tightened to local scripts and IPC | Bundle gate rejects simulation/runtime leakage; production Windows frontend browser smoke covers four surfaces. |
 | Contracts | Actual Rust serde snapshots typechecked by TypeScript; defaults compared on both hosts; priced fallbacks/provider metadata generated from Rust | Found and fixed inputPer1M/outputPer1M/monthlyLimitUsd IPC names. Cargo rejects stale snapshots; source-name checks retained only as supplemental guards. |
 | Architecture | Settings sections/layout extracted; provider catalogue/pricing and tests extracted; AI/config tests moved; updater orchestration extracted | Existing behavior coverage retained. Further module splitting is maintenance work, not a prerequisite for correctness; avoid a broad mechanical rewrite. |
 | Maintenance | Website local-link/anchor/HTML/JS gate; canonical full checks; dependency owner and patch removal criteria documented | Keep security/DOM/theme/audio dependencies that are used. Historical audit/design files retained and labeled. |
@@ -25,7 +25,12 @@ DOMPurify/marked/jsdom, StyleX/Astryx, Tauri, and active native speech/audio dep
 
 Repository maintainer **0libote** owns weekly dependency-health failures and a monthly frontend update review while Dependabot issue [#16071](https://github.com/dependabot/dependabot-core/issues/16071) blocks Bun v2 lockfile updates. Review on the first Monday each month; next review 2 November 2026. Re-enable automated Bun updates only after a test PR proves lockfile compatibility. Recheck both local patches with each relevant dependency upgrade.
 
-Remote speech runtime trust is explicit: exact top-level SDK/runtime versions, HTTPS jsDelivr delivery, recorded upstream tarball integrity for declarations, version-scoped completion markers, existing CSP, and native Windows acceptance. This does not provide a cryptographic lockfile for every CDN executable/model fetch. A fully offline/self-hosted SDK distribution should be a separate product/deployment decision with upstream licensing and runtime tests; vendoring declarations must not be presented as executable verification.
+The removed Voz/Ear experiment is archived in docs/voz-integration-plan.md. SDK source and [license sections 6–7](https://license.desertant.com/1.0) revealed mandatory device usage reporting, while Kivo promises no telemetry. Removal preserves that product promise and eliminates a separate CDN/runtime/license maintenance burden. Persisted `voz` engine settings migrate to System without discarding other preferences. Cleanup touches only known retired browser model cache names; native model files and unrelated storage remain.
+
+## Local verification
+
+The local gate passes 69 Bun unit tests and 129 Rust tests. The full gate covers typechecking, Biome/Oxlint, Knip, theme freshness, unit tests, bridge/packaging/contracts, Rust formatting/check/Clippy/tests, full browser tests, built Windows frontend smoke, production bundle inspection, website checks, and actionlint with ShellCheck. Final hosted native installer results are reported in PR #78; hardware-dependent acceptance remains in docs/releasing.md. No CI latency or installer-size improvement is claimed without hosted measurements.
+
 
 ## Assessment
 
@@ -137,7 +142,7 @@ The static website is outside Oxlint/Knip and the application build. It needs it
 
 Use --locked in check:rust; add a pinned rust-toolchain.toml. Consolidate AGENTS/README/ai-check/full commands: ai-check:full uses only a browser smoke subset, while the documented full gate asks for all browser tests and repeats Rust checking before Clippy/tests. Document quick checks versus authoritative gates explicitly. Keep dependency-health failures visible; frontend automated updates are currently disabled, so establish an owner and review date rather than relying solely on vulnerability audits.
 
-## Proposed implementation order
+## Original proposed implementation order
 
 1. Correct immutable beta assets/channel promotion, installer execution, and concurrent model operations. Add targeted regression tests.
 2. Record cache metrics, pin Rust, simplify cache saves, deduplicate frontend checks, introduce change classification and a shared release gate.

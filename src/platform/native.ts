@@ -18,8 +18,6 @@ import {
   type SelectionContext,
   type SpeechLanguage,
   type Surface,
-  type VozModelStatus,
-  type VozWorkerReply,
   type WritingRequest,
   type WritingResponse,
 } from "../types";
@@ -84,12 +82,6 @@ class TauriBridge implements NativeBridge {
     call<void>("cancel_local_speech_model_download", { modelId });
   deleteLocalSpeechModel = (modelId: string) =>
     call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
-  getVozModelStatus = () => call<VozModelStatus>("get_voz_model_status");
-  downloadVozModel = () => call<void>("download_voz_model");
-  deleteVozModel = () => call<void>("delete_voz_model");
-  completeVozWorkerRequest = (reply: VozWorkerReply) =>
-    call<void>("complete_voz_worker_request", { reply });
-  setVozWorkerReady = (ready: boolean) => call<void>("set_voz_worker_ready", { ready });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = (provider?: AiProviderId) =>
     call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });
@@ -132,13 +124,12 @@ class TauriBridge implements NativeBridge {
 // Production desktop output excludes the complete simulation graph. Explicit
 // browser builds keep it for previews and production frontend smoke tests.
 const browserHarness = import.meta.env?.PROD !== true || import.meta.env.VITE_KIVO_HARNESS === "1";
-export const nativeBridge: NativeBridge = window.__TAURI_INTERNALS__
-  ? new TauriBridge()
-  : browserHarness
-    ? new (await import("./mock")).MockBridge()
-    : (() => {
-        throw new Error("Kivo's desktop bridge is unavailable.");
-      })();
+async function selectBridge(): Promise<NativeBridge> {
+  if (window.__TAURI_INTERNALS__) return new TauriBridge();
+  if (browserHarness) return new (await import("./mock")).MockBridge();
+  throw new Error("Kivo's desktop bridge is unavailable.");
+}
+export const nativeBridge = await selectBridge();
 
 export function initialAppContext(): AppContext {
   // Synchronous guess so each window paints on load instead of waiting for

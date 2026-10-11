@@ -292,18 +292,19 @@ test("writing presets can be added, edited, and reset", async ({ page }) => {
   assertNoErrors();
 });
 
-test("flow bar exposes calm listening, processing, and error states", async ({ page }) => {
-  const assertNoErrors = failOnConsoleErrors(page);
-  await page.setViewportSize({ width: 260, height: 72 });
-  for (const state of ["idle", "starting", "listening", "processing", "error"]) {
+for (const state of ["idle", "starting", "listening", "processing", "error"]) {
+  test(`flow bar renders the ${state} state`, async ({ page }) => {
+    const assertNoErrors = failOnConsoleErrors(page);
     await page.setViewportSize(
       state === "error" ? { width: 380, height: 96 } : { width: 164, height: 48 },
     );
     await page.goto(`/?surface=flow-bar&state=${state}`);
     await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
     await expect(page.locator('[data-testid="flow-bar"]')).toBeVisible();
-  }
-  await page.getByRole("button", { name: "Retry" }).click();
-  await expect(page.locator('[data-testid="flow-bar"][data-state="listening"]')).toBeVisible();
-  assertNoErrors();
-});
+    if (state === "error") {
+      await page.getByRole("button", { name: "Retry" }).click();
+      await expect(page.locator('[data-testid="flow-bar"][data-state="listening"]')).toBeVisible();
+    }
+    assertNoErrors();
+  });
+}

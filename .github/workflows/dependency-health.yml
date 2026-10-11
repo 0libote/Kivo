@@ -22,8 +22,6 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile --ignore-scripts
-      - name: Verify pinned speech SDK type provenance
-        run: bun run vendor:voz-types --check
       - name: List frontend updates
         run: bun outdated
       - name: Audit frontend dependencies

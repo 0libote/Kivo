@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 
@@ -14,7 +14,7 @@ for (const [page, document] of documents) {
     if (!value || /^(?:https?:|mailto:|data:)/.test(value)) continue;
     const [file, anchor] = value.split("#");
     const target = resolve(dirname(resolve(root, page)), decodeURIComponent(file || page));
-    if (relative(root, target).startsWith("..") || !(await Bun.file(target).exists())) {
+    if (relative(root, target).startsWith("..") || !existsSync(target)) {
       console.error(`${page}: missing local resource ${value}`);
       failures++;
       continue;

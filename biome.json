@@ -18,7 +18,6 @@
       "!src/theme/built/**",
       "!bun.lock",
       "!**/*.html",
-      "!src/vendor/**",
       "!src/platform/contracts.generated.ts"
     ]
   },

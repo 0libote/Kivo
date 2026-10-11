@@ -36,7 +36,6 @@ Use the PR's review installer on Windows 11 24H2+ before publishing:
 - In Notepad and a browser text field, test Ctrl+Win tap/start/stop, hold/release, cancellation, and a custom shortcut. Confirm Kivo does not leave modifier keys held.
 - Capture and rewrite selected text, replace it, and verify the clipboard is restored. Change focus or selection during generation and confirm the result is retained without inserting into the new target.
 - Test system SAPI with an installed language and denied microphone access; test the local model with GPU and CPU fallback when available.
-- Download, prepare, transcribe with, and remove Voz/Ear in actual WebView2 with WebGPU and CPU fallback. Verify CSP permits only the expected runtime assets, cold/warm cache behavior, network interruption, offline restart, rapid install/remove, cancellation, and unsupported/mismatched language failures.
 - Check overlays on mixed-DPI monitors and confirm they preserve the editor's focus.
 - Exercise a signed update through Settings → About, including a same-version beta rebuild, and confirm restart loads the advertised version.
 

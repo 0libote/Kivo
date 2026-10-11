@@ -35,38 +35,22 @@ function fnBody(source: string, name: string): string {
   return end === -1 ? "" : tail.slice(0, end);
 }
 
-const [
-  configRs,
-  typesTs,
-  shellRs,
-  commandsRs,
-  nativeTs,
-  aiRs,
-  aiProvidersRs,
-  aiModelsTs,
-  vozRs,
-  vozWorker,
-  appTs,
-  libRs,
-] = await Promise.all([
-  read("src-tauri/src/config/mod.rs"),
-  read("src/types.ts"),
-  read("src-tauri/src/shell.rs"),
-  read("src-tauri/src/commands/mod.rs"),
-  Promise.all([read("src/platform/native.ts"), read("src/platform/bridge.ts")]).then((sources) =>
-    sources.join("\n"),
-  ),
-  read("src-tauri/src/ai/mod.rs"),
-  Promise.all([
-    read("src-tauri/src/ai/providers.rs"),
-    read("src-tauri/src/ai/providers/catalog.rs"),
-  ]).then((sources) => sources.join("\n")),
-  read("src/ai/models.ts"),
-  read("src-tauri/src/speech/voz.rs"),
-  read("src/features/dictation/voz.worker.ts"),
-  read("src/App.tsx"),
-  read("src-tauri/src/lib.rs"),
-]);
+const [configRs, typesTs, shellRs, commandsRs, nativeTs, aiRs, aiProvidersRs, aiModelsTs] =
+  await Promise.all([
+    read("src-tauri/src/config/mod.rs"),
+    read("src/types.ts"),
+    read("src-tauri/src/shell.rs"),
+    read("src-tauri/src/commands/mod.rs"),
+    Promise.all([read("src/platform/native.ts"), read("src/platform/bridge.ts")]).then((sources) =>
+      sources.join("\n"),
+    ),
+    read("src-tauri/src/ai/mod.rs"),
+    Promise.all([
+      read("src-tauri/src/ai/providers.rs"),
+      read("src-tauri/src/ai/providers/catalog.rs"),
+    ]).then((sources) => sources.join("\n")),
+    read("src/ai/models.ts"),
+  ]);
 
 /** `HostPlatform::Windows => ShortcutBinding::new("...")` inside `fnName`. */
 function rustDefault(fnName: string, host: "Windows" | "Linux"): string | null {
@@ -329,46 +313,6 @@ check(
     aiModelsTs.includes("NATIVE_MODELS") &&
     nativeTs.includes("AiModelInfo"),
   "pricing (cost_label_for / per-1M fallbacks) missing from the model pipeline",
-);
-
-// --- 7. Voz runtime parity and language safety --------------------------------
-check(
-  "Voz remains a third shared speech engine",
-  configRs.includes("Voz,") && typesTs.includes('"voz"') && vozRs.includes("SpeechBackend::Voz"),
-  "the persisted, frontend, and shared Rust speech-engine identifiers must all include Voz",
-);
-check(
-  "Windows loads the pinned browser SDK on demand in the flow-bar worker",
-  vozWorker.includes("/* @vite-ignore */") &&
-    vozWorker.includes("@desert-ant-labs/voz@3.5.0/+esm") &&
-    vozWorker.includes("@desert-ant-labs/ear@3.5.0/+esm") &&
-    appTs.includes('context.surface !== "flow-bar"'),
-  "Voz/Ear runtime URLs should remain version-pinned, runtime-only imports confined to the Windows flow-bar worker",
-);
-check(
-  "Windows Voz worker validates message origin without rejecting WebView2 worker traffic",
-  vozWorker.includes('event.origin !== "" && event.origin !== self.location.origin') &&
-    vozWorker.includes("isVozWorkerRequest(event.data)"),
-  "dedicated-worker messages may expose an empty origin in WebView2; reject every other foreign origin before validating the payload",
-);
-check(
-  "Windows Voz readiness requires completed model loads",
-  vozWorker.includes('const vozModelReadyPath = "/voz-model-ready"') &&
-    vozWorker.includes('const languageCheckReadyPath = "/voz-language-check-ready"') &&
-    vozWorker.includes("publishReadiness(assertCurrent, setVozModelReady)") &&
-    vozWorker.includes("vozInstalled !== undefined && languageCheckInstalled !== undefined"),
-  "status must use explicit completion markers instead of treating a partial Desert Ant cache as a finished install",
-);
-check(
-  "Windows verifies language before Voz inference",
-  vozRs.includes("validate_detected_language") &&
-    vozWorker.includes("ear.identify(samples, 16000)"),
-  "Voz must only transcribe after a reliable supported-language match",
-);
-check(
-  "Linux keeps Voz unavailable in the native harness",
-  vozRs.includes("UnavailableVozRuntime") && libRs.includes("not(windows)"),
-  "Linux must retain the simulated speech engine without claiming Voz support",
 );
 
 if (failures > 0) {

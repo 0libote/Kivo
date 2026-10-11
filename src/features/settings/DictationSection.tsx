@@ -8,55 +8,12 @@ import {
   type AppSettings,
   type MicrophoneDevice,
   type SpeechLanguage,
-  type VozModelStatus,
 } from "../../types";
 import { DictationCleanupModel } from "./DictationCleanupModel";
 import { LocalSpeechModels } from "./LocalSpeechModels";
 import { type SaveSettings, SettingRow, SettingsContent, SettingsGroup } from "./settings-layout";
 import { styles } from "./settings-styles";
-import { VozSetup } from "./VozSetup";
 import { VocabularySummaryRow } from "./WritingSection";
-
-const VOZ_LANGUAGES: SpeechLanguage[] = [
-  "bg",
-  "cs",
-  "da",
-  "de",
-  "el",
-  "en",
-  "es",
-  "et",
-  "fi",
-  "fr",
-  "hr",
-  "hu",
-  "it",
-  "lt",
-  "lv",
-  "mt",
-  "nl",
-  "pl",
-  "pt",
-  "ro",
-  "ru",
-  "sk",
-  "sl",
-  "sv",
-  "uk",
-].map((code) => ({
-  code,
-  name: new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? code,
-  installed: true,
-  downloadable: false,
-}));
-VOZ_LANGUAGES.unshift({
-  code: "auto",
-  name: "Automatic (on-device detection)",
-  installed: true,
-  downloadable: false,
-});
-
-const VOZ_LANGUAGE_CODES = new Set(VOZ_LANGUAGES.map(({ code }) => code));
 
 export function DictationSection({
   context,
@@ -73,21 +30,10 @@ export function DictationSection({
   readonly save: SaveSettings;
   readonly onVocabulary: () => void;
 }) {
-  const [vozStatus, setVozStatus] = useState<VozModelStatus>({
-    supported: false,
-    downloaded: false,
-    phase: "unsupported",
-    progress: null,
-    runtime: "Checking availability",
-    error: null,
-  });
-  const selectedLanguage = settings.dictationLanguage.split(/[-_]/)[0].toLowerCase();
-  const vozLanguageSupported =
-    settings.dictationLanguage === "auto" || VOZ_LANGUAGE_CODES.has(selectedLanguage);
-  const languageOptions = settings.speechEngine === "voz" ? VOZ_LANGUAGES : languages;
+  const languageOptions = languages;
   const languageDescription = dictationLanguageDescription(settings.speechEngine, context.platform);
   const engineDescription =
-    settings.speechEngine === "local" || settings.speechEngine === "voz"
+    settings.speechEngine === "local"
       ? "On-device: audio is transcribed by a model on this computer and never sent anywhere."
       : "System: uses the operating-system speech engine, which may use the network on some systems.";
   return (
@@ -105,11 +51,6 @@ export function DictationSection({
             options={[
               { label: "System", value: "system" },
               { label: "On-device", value: "local" },
-              {
-                label: "Voz · Recommended",
-                value: "voz",
-                disabled: !vozStatus.supported || !vozStatus.downloaded || !vozLanguageSupported,
-              },
             ]}
             value={settings.speechEngine}
           />
@@ -119,14 +60,6 @@ export function DictationSection({
             <LocalSpeechModels save={save} settings={settings} />
           </SettingRow>
         ) : null}
-        <SettingRow label="Voz on-device model" stacked>
-          <VozSetup context={context} onStatus={setVozStatus} />
-          {!vozLanguageSupported && vozStatus.supported ? (
-            <span {...stylex.props(styles.empty)}>
-              Select one of Voz’s supported languages to enable Voz as the transcription engine.
-            </span>
-          ) : null}
-        </SettingRow>
         <SettingRow label="Language" description={languageDescription}>
           {languageOptions.length === 0 ? (
             <span {...stylex.props(styles.empty)}>
@@ -265,9 +198,6 @@ function dictationLanguageDescription(
 ): string {
   if (engine === "local") {
     return "On-device models detect the spoken language automatically; set this only to force one.";
-  }
-  if (engine === "voz") {
-    return "Voz checks the spoken language on-device before transcription. Automatic needs a reliable match; otherwise Kivo asks you to choose another engine.";
   }
   if (platform === "windows") {
     return "Automatic uses the system speech language. Only installed desktop speech languages can start dictation — install one in Windows Settings → Time & language → Speech.";

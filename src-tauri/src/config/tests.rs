@@ -41,16 +41,18 @@ fn settings_round_trip_without_a_secret_field() {
 }
 
 #[test]
-fn voz_engine_preference_round_trips_as_an_independent_choice() {
+fn retired_voz_preference_migrates_to_system_without_losing_settings() {
     let path = temporary_settings_path();
-    let repository = SettingsRepository::new(&path);
-    let mut settings = AppSettings::default();
-    settings.dictation.speech_engine = SpeechEnginePreference::Voz;
-    repository.save(&settings).unwrap();
+    let mut json = serde_json::to_value(AppSettings::default()).unwrap();
+    json["dictation"]["speechEngine"] = serde_json::json!("voz");
+    std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+    let settings = SettingsRepository::new(&path).load().unwrap();
     assert_eq!(
-        repository.load().unwrap().dictation.speech_engine,
-        SpeechEnginePreference::Voz
+        settings.dictation.speech_engine,
+        SpeechEnginePreference::System
     );
+    assert_eq!(settings.ai.models, AppSettings::default().ai.models);
+    assert!(!serde_json::to_string(&settings).unwrap().contains("voz"));
     let _ = fs::remove_file(path);
 }
 

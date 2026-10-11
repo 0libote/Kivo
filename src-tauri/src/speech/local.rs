@@ -179,7 +179,7 @@ impl SpeechEngine for LocalSpeechEngine {
         Box::pin(async move {
             let model_id = match &options.backend {
                 SpeechBackend::Local { model_id } => model_id.clone(),
-                SpeechBackend::System | SpeechBackend::Voz => String::new(),
+                SpeechBackend::System => String::new(),
             };
             let path = self.resolve_model(&model_id)?;
             self.ensure_loaded(&path).await?;

@@ -332,9 +332,9 @@ impl DictationSettings {
 #[serde(rename_all = "camelCase")]
 pub enum SpeechEnginePreference {
     #[default]
+    #[serde(alias = "voz")]
     System,
     Local,
-    Voz,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

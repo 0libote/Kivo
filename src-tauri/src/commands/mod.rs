@@ -23,7 +23,6 @@ use crate::{
         DictationMachine, DictationPhase, MicrophoneDevice, SpeechBackend, SpeechEngine,
         SpeechError, SpeechEventSink, SpeechStartOptions,
         model_store::{LocalSpeechModel, ModelStore, ModelStoreError},
-        voz::{VozModelStatus, VozRuntime, VozWorkerReply},
     },
     text::{
         ActiveApplication, CapturedSelection, ScreenPoint, ScreenRect, TextError, TextService,
@@ -410,7 +409,6 @@ impl AppCore {
             SpeechEnginePreference::Local => SpeechBackend::Local {
                 model_id: settings.local_speech_model.clone().unwrap_or_default(),
             },
-            SpeechEnginePreference::Voz => SpeechBackend::Voz,
         };
         let started = tokio::select! {
             biased;
@@ -485,7 +483,7 @@ impl AppCore {
             Some(model) => vec![model],
             None => ai_models,
         };
-        let (mut final_text, _voz_alignment) = transcript.into_parts();
+        let mut final_text = transcript.into_text();
         if dictation.improve_with_ai
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text, &dictation.vocabulary)
         {
@@ -1186,14 +1184,12 @@ fn speech_engine_id(preference: SpeechEnginePreference) -> &'static str {
     match preference {
         SpeechEnginePreference::System => "system",
         SpeechEnginePreference::Local => "local",
-        SpeechEnginePreference::Voz => "voz",
     }
 }
 
 fn parse_speech_engine(value: &str) -> SpeechEnginePreference {
     match value {
         "local" => SpeechEnginePreference::Local,
-        "voz" => SpeechEnginePreference::Voz,
         _ => SpeechEnginePreference::System,
     }
 }
@@ -1685,53 +1681,6 @@ pub fn list_local_speech_models(store: State<'_, Arc<ModelStore>>) -> Vec<LocalS
 }
 
 #[tauri::command]
-pub async fn get_voz_model_status(
-    runtime: State<'_, Arc<dyn VozRuntime>>,
-) -> Result<VozModelStatus, String> {
-    runtime
-        .model_status()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn download_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result<(), String> {
-    runtime.download().await.map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub async fn delete_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result<(), String> {
-    runtime
-        .remove_model()
-        .await
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn complete_voz_worker_request(
-    window: tauri::WebviewWindow,
-    runtime: State<'_, Arc<dyn VozRuntime>>,
-    reply: VozWorkerReply,
-) -> Result<(), String> {
-    validate_worker_surface(window.label())?;
-    runtime
-        .complete_worker_request(reply)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-pub fn set_voz_worker_ready(
-    window: tauri::WebviewWindow,
-    runtime: State<'_, Arc<dyn VozRuntime>>,
-    ready: bool,
-) -> Result<(), String> {
-    validate_worker_surface(window.label())?;
-    runtime
-        .set_worker_ready(ready)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 pub async fn download_local_speech_model(
     app: AppHandle,
     store: State<'_, Arc<ModelStore>>,
@@ -2198,11 +2147,3 @@ pub fn frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[cfg(test)]
 mod contracts;
-
-fn validate_worker_surface(label: &str) -> Result<(), String> {
-    if label == "flow-bar" {
-        Ok(())
-    } else {
-        Err("Only the flow bar may answer speech worker requests.".into())
-    }
-}

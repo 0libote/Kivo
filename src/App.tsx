@@ -11,14 +11,9 @@ import { WritingToolsPopup } from "./features/writing-tools/WritingToolsPopup";
 import { useNativeEvent } from "./hooks/useNativeEvent";
 import { useSystemPreferences } from "./hooks/useSystemPreferences";
 import { initialAppContext, nativeBridge } from "./platform/native";
+import { clearRetiredModelCaches } from "./platform/retired-model-cache";
 import { kivoTheme } from "./theme/built/kivo";
-import type { AppContext, VozWorkerReply } from "./types";
-
-function isVozWorkerReadyMessage(
-  message: VozWorkerReply | { type: "ready" },
-): message is { type: "ready" } {
-  return "type" in message && message.type === "ready";
-}
+import type { AppContext } from "./types";
 
 // Settings and onboarding load on demand. The event-driven overlays stay
 // eager so their native events cannot arrive before their listeners mount.
@@ -75,68 +70,17 @@ export function App() {
     };
   }, []);
 
-  // Windows Voz owns a tiny dedicated worker inside the persistent flow-bar
-  // WebView2. The SDK plus ONNX/LiteRT runtimes are not shipped in Kivo; the
-  // worker downloads the pinned runtime only when a Voz operation needs it.
   useEffect(() => {
-    if (!nativeBridge.isNative || context.platform !== "windows" || context.surface !== "flow-bar")
-      return;
-    const worker = new Worker(new URL("./features/dictation/voz.worker.ts", import.meta.url), {
-      type: "module",
-    });
-    let disposed = false;
-    let subscribed = false;
-    let workerLoaded = false;
-    let unlisten: (() => void) | undefined;
-    const markReadyIfInitialized = () => {
-      if (subscribed && workerLoaded)
-        void nativeBridge.setVozWorkerReady(true).catch(() => undefined);
-    };
-    worker.addEventListener(
-      "message",
-      (event: MessageEvent<VozWorkerReply | { type: "ready" }>) => {
-        if (isVozWorkerReadyMessage(event.data)) {
-          workerLoaded = true;
-          markReadyIfInitialized();
-          return;
-        }
-        void nativeBridge.completeVozWorkerRequest(event.data);
-      },
-    );
-    const markNotReady = () => {
-      workerLoaded = false;
-      void nativeBridge.setVozWorkerReady(false).catch(() => undefined);
-    };
-    worker.addEventListener("error", markNotReady);
-    worker.addEventListener("messageerror", markNotReady);
-    void nativeBridge
-      .setVozWorkerReady(false)
-      .then(() =>
-        nativeBridge.on("voz-worker-request", (request) => {
-          // Web Worker postMessage has no targetOrigin argument.
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin
-          worker.postMessage(request);
-        }),
-      )
-      .then((stop) => {
-        if (disposed) {
-          stop();
-          return;
-        }
-        unlisten = stop;
-        subscribed = true;
-        markReadyIfInitialized();
-      })
-      .catch(() => {
-        // Keep the backend unready. Voz operations then fail with an
-        // actionable startup error rather than timing out on a lost event.
-      });
-    return () => {
-      disposed = true;
-      unlisten?.();
-      void nativeBridge.setVozWorkerReady(false).catch(() => undefined);
-      worker.terminate();
-    };
+    if (
+      nativeBridge.isNative &&
+      context.platform === "windows" &&
+      context.surface === "flow-bar" &&
+      typeof caches !== "undefined"
+    ) {
+      void clearRetiredModelCaches(caches).catch(() =>
+        console.warn("Retired speech cache cleanup failed; Kivo will retry next launch."),
+      );
+    }
   }, [context.platform, context.surface]);
 
   useEffect(() => {

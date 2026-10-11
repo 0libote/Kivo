@@ -8,10 +8,7 @@ const env = {
   KIVO_UI_PRODUCTION: "1",
   KIVO_UI_TEST_PORT: "1428",
 };
-for (const args of [
-  ["run", "build:frontend"],
-  ["run", "test:ui"],
-]) {
+async function run(args: string[]) {
   const child = Bun.spawn([process.execPath, ...args], {
     env,
     stdout: "inherit",
@@ -20,3 +17,6 @@ for (const args of [
   const code = await child.exited;
   if (code) process.exit(code);
 }
+// The browser must exercise the output of the completed build.
+await run(["run", "build:frontend"]);
+await run(["run", "test:ui"]);

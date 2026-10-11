@@ -70,16 +70,18 @@ export async function promoteContinuous(
     .filter((asset) => /^Kivo_.*_[0-9a-f]{40}_[0-9a-f]{64}_x64-setup\.exe$/.test(asset.name))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const currentName = basename(installer);
-  for (const asset of installers.slice(10)) {
-    if (asset.name === currentName) continue;
-    for (const name of [asset.name, `${asset.name}.sig`]) {
-      if (!retained.some((candidate) => candidate.name === name)) continue;
+  const obsolete = installers
+    .slice(10)
+    .flatMap((asset) => (asset.name === currentName ? [] : [asset.name, `${asset.name}.sig`]))
+    .filter((name) => retained.some((asset) => asset.name === name));
+  await Promise.all(
+    obsolete.map(async (name) => {
       try {
         await command.run(["release", "delete-asset", "continuous", name, "--yes"]);
       } catch (cause) {
         console.warn(`Could not remove old beta asset ${name}:`, cause);
       }
-    }
-  }
+    }),
+  );
   return true;
 }

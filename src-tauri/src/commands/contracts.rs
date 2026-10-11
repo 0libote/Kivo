@@ -71,11 +71,3 @@ fn native_contracts() {
         );
     }
 }
-
-#[test]
-fn worker_replies_require_the_flow_bar() {
-    assert!(super::validate_worker_surface("flow-bar").is_ok());
-    for label in ["settings", "onboarding", "writing-tools", "unknown"] {
-        assert!(super::validate_worker_surface(label).is_err());
-    }
-}
