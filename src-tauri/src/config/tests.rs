@@ -1,8 +1,9 @@
 use std::{env, fs, time::SystemTime};
 
 use super::{
-    AppSettings, HostPlatform, SettingsRepository, ShortcutBinding, SpeechEnginePreference,
-    ThemePreference, dictation_default_for, foreign_default_replacement, writing_tools_default_for,
+    AppSettings, DictationSettings, HostPlatform, SettingsRepository, ShortcutBinding,
+    SpeechEnginePreference, ThemePreference, dictation_default_for, foreign_default_replacement,
+    writing_tools_default_for,
 };
 
 fn temporary_settings_path() -> std::path::PathBuf {
@@ -41,18 +42,16 @@ fn settings_round_trip_without_a_secret_field() {
 }
 
 #[test]
-fn retired_voz_preference_migrates_to_system_without_losing_settings() {
+fn voz_engine_preference_round_trips_as_an_independent_choice() {
     let path = temporary_settings_path();
-    let mut json = serde_json::to_value(AppSettings::default()).unwrap();
-    json["dictation"]["speechEngine"] = serde_json::json!("voz");
-    std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
-    let settings = SettingsRepository::new(&path).load().unwrap();
+    let repository = SettingsRepository::new(&path);
+    let mut settings = AppSettings::default();
+    settings.dictation.speech_engine = SpeechEnginePreference::Voz;
+    repository.save(&settings).unwrap();
     assert_eq!(
-        settings.dictation.speech_engine,
-        SpeechEnginePreference::System
+        repository.load().unwrap().dictation.speech_engine,
+        SpeechEnginePreference::Voz
     );
-    assert_eq!(settings.ai.models, AppSettings::default().ai.models);
-    assert!(!serde_json::to_string(&settings).unwrap().contains("voz"));
     let _ = fs::remove_file(path);
 }
 
@@ -515,4 +514,11 @@ fn dictation_vocabulary_reads_legacy_word_lists() {
     assert_eq!(settings.dictation.vocabulary[0].meaning, "");
     assert_eq!(settings.dictation.vocabulary[1].word, "SOC 2");
     assert_eq!(settings.dictation.vocabulary[1].meaning, "compliance");
+}
+
+#[test]
+fn old_voz_preferences_preserve_engine_but_require_usage_acknowledgement() {
+    let settings: DictationSettings = serde_json::from_str(r#"{"speechEngine":"voz"}"#).unwrap();
+    assert_eq!(settings.speech_engine, SpeechEnginePreference::Voz);
+    assert!(!settings.desert_ant_usage_accepted);
 }

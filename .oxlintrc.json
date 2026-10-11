@@ -18,7 +18,8 @@
     "coverage/**",
     "src-tauri/**",
     "src/theme/built/**",
-    "src/platform/contracts.generated.ts"
+    "src/platform/contracts.generated.ts",
+    "src/vendor/**"
   ],
   "rules": {
     "typescript/consistent-type-imports": "error",

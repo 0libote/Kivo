@@ -308,3 +308,36 @@ for (const state of ["idle", "starting", "listening", "processing", "error"]) {
     assertNoErrors();
   });
 }
+
+test("optional Desert Ant models require disclosure acknowledgement and support revocation", async ({
+  page,
+}) => {
+  const assertNoErrors = failOnConsoleErrors(page);
+  await page.goto("/?surface=settings&harness=1&platform=windows");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+  await page.getByRole("button", { name: "Dictation", exact: true }).click();
+  const download = page.getByRole("button", { name: "Download and prepare Voz", exact: true });
+  await expect(
+    page.getByText("Optional model with required usage reporting", { exact: true }),
+  ).toBeVisible();
+  await expect(download).toBeDisabled();
+  const acknowledgement = page.getByRole("switch", {
+    name: "Allow Desert Ant usage reporting",
+    exact: true,
+  });
+  await acknowledgement.click();
+  await expect(download).toBeEnabled();
+  await download.click();
+  await expect(page.getByText("Downloaded and prepared", { exact: true })).toBeVisible();
+  const voz = page.getByRole("radio", { name: "Voz · Optional", exact: true });
+  await expect(voz).toBeEnabled();
+  await voz.click();
+  await expect(voz).toHaveAttribute("aria-checked", "true");
+  await acknowledgement.click();
+  await expect(voz).toBeDisabled();
+  await expect(page.getByRole("radio", { name: "System", exact: true })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  assertNoErrors();
+});

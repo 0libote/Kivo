@@ -1,4 +1,4 @@
-> Archived experiment: removed in PR #78 because the SDK license requires usage telemetry, conflicting with Kivo's no-telemetry product promise. System speech and native on-device models remain. This document is historical, not an implementation plan.
+> Voz/Ear remains optional, with explicit acknowledgement of required Desert Ant device-usage telemetry. See docs/user-guide.md for the current data collection notice.
 
 # Voz integration plan
 

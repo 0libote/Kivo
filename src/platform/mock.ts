@@ -25,6 +25,8 @@ import {
   type SelectionContext,
   type SpeechLanguage,
   type Surface,
+  type VozModelStatus,
+  type VozWorkerReply,
   type WritingRequest,
   type WritingResponse,
 } from "../types";
@@ -43,6 +45,14 @@ export class MockBridge implements NativeBridge {
   frontendReady = () => Promise.resolve();
   private readonly platform = detectedPlatform();
   private settings: AppSettings;
+  private vozStatus: VozModelStatus = {
+    supported: true,
+    downloaded: false,
+    phase: "notDownloaded",
+    progress: null,
+    runtime: "Simulated test engine",
+    error: null,
+  };
   private permissions: PermissionStatus[];
   private paused = false;
   private apiKeyStatuses: Record<AiProviderId, ApiKeyStatus> = {
@@ -57,7 +67,6 @@ export class MockBridge implements NativeBridge {
     const stored = window.localStorage.getItem("kivo-dev-settings");
     const parsed = stored ? (JSON.parse(stored) as Partial<AppSettings>) : {};
     this.settings = { ...defaultSettings(this.platform), ...parsed };
-    if (this.settings.speechEngine !== "local") this.settings.speechEngine = "system";
     // Pre-queue harnesses stored a single model + backup: fold them into the
     // ordered queue so the selector never starts empty.
     this.settings.aiProvider = normalizeAiProvider(
@@ -364,6 +373,57 @@ export class MockBridge implements NativeBridge {
     return Promise.resolve(structuredClone(this.localModels));
   }
 
+  getVozModelStatus(): Promise<VozModelStatus> {
+    return Promise.resolve(structuredClone(this.vozStatus));
+  }
+
+  async downloadVozModel() {
+    if (!this.settings.desertAntUsageAccepted)
+      throw new Error("Acknowledge Desert Ant usage reporting before downloading Voz.");
+    if (!this.vozStatus.supported || this.vozStatus.downloaded) return;
+    this.vozStatus = { ...this.vozStatus, phase: "downloading", progress: 0 };
+    await [0.2, 0.45, 0.7, 1].reduce(
+      (previous, progress) =>
+        previous.then(() => {
+          this.vozStatus = { ...this.vozStatus, progress };
+          this.emit("voz-model-status", {
+            phase: "downloading",
+            progress,
+            error: null,
+          });
+          // Keep each simulated progress state visible to the browser harness.
+          return delay(120);
+        }),
+      Promise.resolve(),
+    );
+    this.vozStatus = { ...this.vozStatus, phase: "preparing", progress: null };
+    this.emit("voz-model-status", { phase: "preparing", progress: null, error: null });
+    await delay(240);
+    this.vozStatus = { ...this.vozStatus, downloaded: true, phase: "ready", progress: null };
+    this.emit("voz-model-status", { phase: "ready", progress: null, error: null });
+  }
+
+  deleteVozModel(): Promise<void> {
+    this.vozStatus = {
+      ...this.vozStatus,
+      downloaded: false,
+      phase: "notDownloaded",
+      progress: null,
+    };
+    this.emit("voz-model-status", { phase: "notDownloaded", progress: null, error: null });
+    return Promise.resolve();
+  }
+
+  completeVozWorkerRequest(_reply: VozWorkerReply): Promise<void> {
+    // The browser harness simulates the runtime directly; it never starts a
+    // model worker or downloads Voz assets.
+    return Promise.resolve();
+  }
+
+  setVozWorkerReady(_ready: boolean): Promise<void> {
+    return Promise.resolve();
+  }
+
   listAiProviders(): Promise<AiProviderInfo[]> {
     return Promise.resolve(structuredClone(FALLBACK_AI_PROVIDERS));
   }
@@ -433,6 +493,8 @@ export class MockBridge implements NativeBridge {
   }
 
   startDictation(): Promise<void> {
+    if (this.settings.speechEngine === "voz" && !this.settings.desertAntUsageAccepted)
+      return Promise.reject(new Error("Acknowledge Desert Ant usage reporting before using Voz."));
     this.emit("dictation-state", { status: "listening", sessionId: crypto.randomUUID() });
     return Promise.resolve();
   }

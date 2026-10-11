@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
-  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on Windows. No accounts, no telemetry — System or on-device speech, optional AI polish." />
+  <meta name="description" content="Kivo is a quiet background utility for system-wide dictation and focused writing assistance on Windows. No accounts. System or on-device speech, optional AI polish. Optional Voz/Ear sends disclosed device-usage telemetry." />
   <meta name="theme-color" content="#f5f5f3" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#1b1b1d" media="(prefers-color-scheme: dark)" />
   <title>Kivo — Talk instead of type</title>
@@ -94,7 +94,7 @@
 
       <ul class="trust">
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No accounts</li>
-        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No telemetry</li>
+        <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No Kivo-hosted analytics</li>
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>OS-native speech</li>
         <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Keys stay in Credential Manager</li>
       </ul>
@@ -160,7 +160,7 @@
       <div class="privacy">
         <div>
           <h2>Your words take the shortest possible trip.</h2>
-          <p class="section__sub" style="margin-bottom:0">No Kivo account, hosted backend, or telemetry. The table shows exactly where each kind of data goes.</p>
+          <p class="section__sub" style="margin-bottom:0">No Kivo account or hosted analytics. Optional Desert Ant Voz/Ear sends required device-usage telemetry; audio and transcripts stay local. Review and acknowledge this in Dictation settings before use.</p>
           <ul class="checklist">
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Microphone audio → system speech or an on-device model. Never sent to the writing AI provider.</li>
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Selected text → your chosen provider when you run a writing action.</li>
@@ -172,6 +172,7 @@
           <table class="flow-table" aria-label="Where your data goes">
             <thead><tr><th>Data</th><th>Destination</th></tr></thead>
             <tbody>
+              <tr><td>Optional Voz/Ear usage</td><td>Desert Ant Labs receives SDK-generated device-usage reporting to count monthly active devices; no audio, transcripts or user content, according to <a href="https://license.desertant.com/1.0">license section 7</a>. Downloads and reporting expose your IP address to their hosts. Choose System or native On-device to avoid Desert Ant reporting.</td></tr>
               <tr><td>Voice audio</td><td><span class="pill pill--local">Chosen speech engine</span><br />System speech or on-device transcription</td></tr>
               <tr><td>Dictated transcript</td><td><span class="pill pill--local">Local insert</span><br />Optional AI cleanup through your chosen provider</td></tr>
               <tr><td>Writing action text</td><td><span class="pill pill--ok">Chosen AI provider</span><br />Hosted API or local endpoint</td></tr>

@@ -18,6 +18,10 @@ import {
   type SelectionContext,
   type SpeechLanguage,
   type Surface,
+  type VozModelProgress,
+  type VozModelStatus,
+  type VozWorkerReply,
+  type VozWorkerRequest,
   type WritingRequest,
   type WritingResponse,
 } from "../types";
@@ -33,6 +37,8 @@ export type NativeEventMap = {
   "settings-changed": AppSettings;
   "local-models-changed": LocalSpeechModelInfo[];
   "local-model-progress": LocalModelProgress;
+  "voz-model-status": VozModelProgress;
+  "voz-worker-request": VozWorkerRequest;
 };
 
 export interface UpdateResult {
@@ -62,6 +68,11 @@ export interface NativeBridge {
   downloadLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
   cancelLocalSpeechModelDownload(modelId: string): Promise<void>;
   deleteLocalSpeechModel(modelId: string): Promise<LocalSpeechModelInfo[]>;
+  getVozModelStatus(): Promise<VozModelStatus>;
+  downloadVozModel(): Promise<void>;
+  deleteVozModel(): Promise<void>;
+  completeVozWorkerRequest(reply: VozWorkerReply): Promise<void>;
+  setVozWorkerReady(ready: boolean): Promise<void>;
   listAiProviders(): Promise<AiProviderInfo[]>;
   listAiModels(provider?: AiProviderId): Promise<AiModelInfo[]>;
   detectLocalAiServers(): Promise<LocalAiServerInfo[]>;

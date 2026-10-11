@@ -25,7 +25,14 @@ Dictation can run either on the operating-system speech engine or entirely on th
 
 - **System** (default) uses the OS engine. On Windows it is the installed desktop SAPI engine.
 - **On-device** records the default microphone, resamples it to 16 kHz, and transcribes with a downloaded model. Audio never leaves the machine.
-Earlier experimental builds offered Voz/Ear. That integration was removed because its required SDK usage telemetry conflicts with Kivo's no-telemetry promise. Its saved engine preference migrates to System; choose On-device if you want a native local model. Known retired browser model caches are cleared on launch.
+- **Voz (optional, Windows)** uses Desert Ant Labs Voz for local transcription and Ear for local language detection. SDK/runtime and model files download only on demand. Review the disclosure and turn on **Allow Desert Ant usage reporting** before downloading or using them. Existing Voz preferences are preserved, but require this acknowledgement too. Turn it off to stop using these SDKs and switch back to System. Native On-device models do not use Desert Ant SDKs.
+
+### Data collection
+
+Kivo has no account system or Kivo-hosted analytics. Optional Voz/Ear SDKs send mandatory device-usage telemetry to Desert Ant Labs at `https://events.desertant.com/api/v1/ingest`. According to [license section 7](https://license.desertant.com/1.0), the SDK generates an identifier solely to count monthly active devices; reporting is not tied to an end user/account and excludes inputs, outputs and other user content. Audio, language detection and transcripts are processed locally. Desert Ant Labs is the controller of this telemetry. It cannot be disabled while using the SDKs; choose System or native On-device instead if you do not want this reporting. Kivo does not block or alter the SDK's reporting.
+
+Runtime downloads use jsDelivr; model downloads use Hugging Face and its delivery hosts. These hosts and the reporting server receive network metadata such as your IP address. Review the linked license for authoritative terms; Desert Ant's website privacy page describes its website and is not a substitute for SDK telemetry disclosure.
+
 
 On-device models are GGML/GGUF conversions published by [`handy-computer`](https://huggingface.co/handy-computer) on Hugging Face (Apache-2.0 and model-specific licenses), the same files the `transcribe-cpp` runtime is built for. The catalog spans Whisper plus Parakeet, Canary, Moonshine, SenseVoice, Qwen3-ASR, Cohere Transcribe, Nemotron, Granite, Voxtral, GigaAM, and Fun-ASR, so you can trade accuracy, speed, language coverage, and size. Each card shows a family, parameter count, language coverage, and relative accuracy/speed bars. Every model is pinned to a commit and verified by SHA-256 before it is treated as installed, so a moved tag or truncated download can never become a model. Downloads can be cancelled, and installed models deleted, from the same screen.
 

@@ -68,7 +68,47 @@ export interface WritingPreset {
 export type AiProviderId = "gemini" | "zen" | "go" | "custom";
 
 /** Which recognizer powers dictation (mirrors `SpeechEnginePreference`). */
-export type SpeechEngineId = "system" | "local";
+export type SpeechEngineId = "system" | "local" | "voz";
+
+export interface VozModelStatus {
+  supported: boolean;
+  downloaded: boolean;
+  phase: "unsupported" | "notDownloaded" | "downloading" | "preparing" | "ready" | "failed";
+  progress: number | null;
+  runtime: string;
+  error: string | null;
+}
+
+export interface VozModelProgress {
+  phase: "notDownloaded" | "downloading" | "preparing" | "ready" | "failed";
+  progress: number | null;
+  error: string | null;
+}
+
+export interface VozWorkerRequest {
+  requestId: string;
+  operation: "status" | "download" | "prepare" | "remove" | "transcribe";
+  samples?: number[];
+  language?: string;
+}
+
+export interface VozWorkerReply {
+  requestId: string;
+  complete: boolean;
+  phase?: VozModelStatus["phase"];
+  progress?: number | null;
+  downloaded?: boolean;
+  transcript?: {
+    text: string;
+    words: { text: string; start: number; end: number }[];
+    durationSeconds: number;
+    processingSeconds: number;
+    detectedLanguage: string | null;
+    languageReliable: boolean;
+    languageConfidence: number;
+  };
+  error?: string;
+}
 
 /** One downloadable on-device speech model. */
 export interface LocalSpeechModelInfo {
@@ -133,6 +173,7 @@ export interface AppSettings {
   dictationHoldEnabled: boolean;
   dictationHoldThresholdMs: number;
   speechEngine: SpeechEngineId;
+  desertAntUsageAccepted: boolean;
   /** On-device model id; null means the recommended model. */
   localSpeechModel: string | null;
   /** Model used to clean up dictated text; null follows the Writing Tools queue. */
@@ -319,6 +360,7 @@ export function defaultSettings(platform: Platform): AppSettings {
     dictationHoldEnabled: true,
     dictationHoldThresholdMs: 350,
     speechEngine: "system",
+    desertAntUsageAccepted: false,
     localSpeechModel: null,
     dictationCleanupModel: null,
     dictationVocabulary: [],

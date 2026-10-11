@@ -2,7 +2,7 @@
 
 System-wide dictation and writing tools for Windows. Dictate into your current app, rewrite selected text, or summarize text and links from a compact popup.
 
-Kivo runs in the background. It has no account system, telemetry, or hosted analytics.
+Kivo runs in the background. It has no account system or Kivo-hosted analytics. Optional Desert Ant Voz/Ear models send required device-usage telemetry to Desert Ant Labs; audio and transcripts stay on-device. Review and acknowledge this in Settings before using them. See [data collection](docs/user-guide.md#data-collection).
 
 ## Download
 

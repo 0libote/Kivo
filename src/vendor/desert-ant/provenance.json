@@ -1,0 +1,20 @@
+{
+  "core": {
+    "version": "3.5.0",
+    "url": "https://registry.npmjs.org/@desert-ant-labs/core/-/core-3.5.0.tgz",
+    "integrity": "sha512-1Q7kXhixGcfwFRJFduGcCOaBho0Jy2hBvV9DP0UvUS0pt7axTVgVjtloz7yMeH4d4Qht0du0n8ywU8DyTbyJKw==",
+    "declarationSha256": "78b2d237e2fba0fe16e59bcb1faa7d7564dfae183b6c04c310b2107073f2d56c"
+  },
+  "ear": {
+    "version": "3.5.0",
+    "url": "https://registry.npmjs.org/@desert-ant-labs/ear/-/ear-3.5.0.tgz",
+    "integrity": "sha512-/akm67bdOuCaF0gojtLvgGvD5gPRlV2t8w96YwzHcqlUY0BCdu7++VhLW0LQXAoQZmkGW53TH7uXcs/ePKNhfA==",
+    "declarationSha256": "cecb9123a3ba5cdcb4e72e119954d33464540964c4bc170343cb94dc268e4219"
+  },
+  "voz": {
+    "version": "3.5.0",
+    "url": "https://registry.npmjs.org/@desert-ant-labs/voz/-/voz-3.5.0.tgz",
+    "integrity": "sha512-xc5QLzRIxKRD4LRmMHJzIQtH6kfyHc6xWpNr+ZP1l4+iE4gTFku/g0Wr+3Rhoswb7PI0TkB0F3MPufMMlZDEPw==",
+    "declarationSha256": "5db3f07d5f82c9e026791b6860af2b1bb63f4aa744f4b32c7cd0f3a6140d8c2f"
+  }
+}

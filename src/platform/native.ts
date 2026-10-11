@@ -18,6 +18,8 @@ import {
   type SelectionContext,
   type SpeechLanguage,
   type Surface,
+  type VozModelStatus,
+  type VozWorkerReply,
   type WritingRequest,
   type WritingResponse,
 } from "../types";
@@ -82,6 +84,12 @@ class TauriBridge implements NativeBridge {
     call<void>("cancel_local_speech_model_download", { modelId });
   deleteLocalSpeechModel = (modelId: string) =>
     call<LocalSpeechModelInfo[]>("delete_local_speech_model", { modelId });
+  getVozModelStatus = () => call<VozModelStatus>("get_voz_model_status");
+  downloadVozModel = () => call<void>("download_voz_model");
+  deleteVozModel = () => call<void>("delete_voz_model");
+  completeVozWorkerRequest = (reply: VozWorkerReply) =>
+    call<void>("complete_voz_worker_request", { reply });
+  setVozWorkerReady = (ready: boolean) => call<void>("set_voz_worker_ready", { ready });
   listAiProviders = () => call<AiProviderInfo[]>("list_ai_providers");
   listAiModels = (provider?: AiProviderId) =>
     call<AiModelInfo[]>("list_ai_models", { provider: provider ?? null });

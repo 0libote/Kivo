@@ -18,7 +18,8 @@
       "!src/theme/built/**",
       "!bun.lock",
       "!**/*.html",
-      "!src/platform/contracts.generated.ts"
+      "!src/platform/contracts.generated.ts",
+      "!src/vendor/**"
     ]
   },
   "formatter": {

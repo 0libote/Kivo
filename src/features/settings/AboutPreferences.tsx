@@ -163,8 +163,9 @@ export function AboutPreferences({
         </button>
       </div>
       <p {...stylex.props(styles.privacyNote)}>
-        No accounts, hosted analytics, or telemetry; your text is processed only when you invoke
-        Kivo.
+        No accounts or Kivo-hosted analytics. Optional Desert Ant Voz/Ear models send required
+        device-usage telemetry to Desert Ant Labs, disclosed in Dictation settings. Your text is
+        processed only when you invoke Kivo.
       </p>
     </>
   );

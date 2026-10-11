@@ -38,7 +38,8 @@
     "check:website": "bun scripts/check-website.ts",
     "check:bundle": "bun scripts/check-bundle.ts",
     "generate:contracts": "bun scripts/generate-contracts.ts",
-    "test:ui:install": "bun --bun playwright install --with-deps chromium"
+    "test:ui:install": "bun --bun playwright install --with-deps chromium",
+    "vendor:voz-types": "bun scripts/vendor-voz-types.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "^0.6.3",

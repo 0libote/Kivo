@@ -205,6 +205,8 @@ pub struct DictationSettings {
     /// Which recognizer to use. `System` keeps the OS engine (the default so
     /// existing installs are unchanged); `Local` runs a downloaded model.
     pub speech_engine: SpeechEnginePreference,
+    /// Explicit acknowledgement of Desert Ant SDK usage reporting; false for old installs.
+    pub desert_ant_usage_accepted: bool,
     /// Selected on-device model id. `None` resolves to the recommended model.
     pub local_speech_model: Option<String>,
     /// Optional model id for the AI dictation cleanup. `None` uses the Writing
@@ -230,6 +232,7 @@ impl Default for DictationSettings {
             hold_enabled: true,
             hold_threshold_ms: 350,
             speech_engine: SpeechEnginePreference::System,
+            desert_ant_usage_accepted: false,
             local_speech_model: None,
             cleanup_model: None,
             vocabulary: Vec::new(),
@@ -332,9 +335,9 @@ impl DictationSettings {
 #[serde(rename_all = "camelCase")]
 pub enum SpeechEnginePreference {
     #[default]
-    #[serde(alias = "voz")]
     System,
     Local,
+    Voz,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

@@ -23,6 +23,7 @@ use crate::{
         DictationMachine, DictationPhase, MicrophoneDevice, SpeechBackend, SpeechEngine,
         SpeechError, SpeechEventSink, SpeechStartOptions,
         model_store::{LocalSpeechModel, ModelStore, ModelStoreError},
+        voz::{VozModelStatus, VozRuntime, VozWorkerReply},
     },
     text::{
         ActiveApplication, CapturedSelection, ScreenPoint, ScreenRect, TextError, TextService,
@@ -400,6 +401,12 @@ impl AppCore {
             .map_err(|_| AppCoreError::Unavailable)?
             .prepare()?;
         let settings = self.settings()?.dictation;
+        if settings.speech_engine == SpeechEnginePreference::Voz
+            && let Err(error) = require_desert_ant_usage(settings.desert_ant_usage_accepted)
+        {
+            self.fail_dictation(generation);
+            return Err(error.into());
+        }
         let locale = match settings.language {
             LanguagePreference::Auto => None,
             LanguagePreference::Locale { tag } => Some(tag),
@@ -409,6 +416,7 @@ impl AppCore {
             SpeechEnginePreference::Local => SpeechBackend::Local {
                 model_id: settings.local_speech_model.clone().unwrap_or_default(),
             },
+            SpeechEnginePreference::Voz => SpeechBackend::Voz,
         };
         let started = tokio::select! {
             biased;
@@ -483,7 +491,7 @@ impl AppCore {
             Some(model) => vec![model],
             None => ai_models,
         };
-        let mut final_text = transcript.into_text();
+        let (mut final_text, _voz_alignment) = transcript.into_parts();
         if dictation.improve_with_ai
             && let Ok(prompt) = dictation_cleanup_prompt(&final_text, &dictation.vocabulary)
         {
@@ -1184,12 +1192,14 @@ fn speech_engine_id(preference: SpeechEnginePreference) -> &'static str {
     match preference {
         SpeechEnginePreference::System => "system",
         SpeechEnginePreference::Local => "local",
+        SpeechEnginePreference::Voz => "voz",
     }
 }
 
 fn parse_speech_engine(value: &str) -> SpeechEnginePreference {
     match value {
         "local" => SpeechEnginePreference::Local,
+        "voz" => SpeechEnginePreference::Voz,
         _ => SpeechEnginePreference::System,
     }
 }
@@ -1214,6 +1224,8 @@ pub struct FrontendSettings {
     pub dictation_hold_threshold_ms: u64,
     #[serde(default = "default_speech_engine")]
     pub speech_engine: String,
+    #[serde(default)]
+    pub desert_ant_usage_accepted: bool,
     #[serde(default)]
     pub local_speech_model: Option<String>,
     #[serde(default)]
@@ -1278,6 +1290,7 @@ impl From<AppSettings> for FrontendSettings {
             dictation_hold_enabled: settings.dictation.hold_enabled,
             dictation_hold_threshold_ms: settings.dictation.hold_threshold_ms,
             speech_engine: speech_engine_id(settings.dictation.speech_engine).into(),
+            desert_ant_usage_accepted: settings.dictation.desert_ant_usage_accepted,
             local_speech_model: settings.dictation.local_speech_model,
             dictation_cleanup_model: settings.dictation.cleanup_model,
             dictation_vocabulary: settings.dictation.vocabulary,
@@ -1357,6 +1370,7 @@ impl TryFrom<FrontendSettings> for AppSettings {
                 hold_enabled: settings.dictation_hold_enabled,
                 hold_threshold_ms: settings.dictation_hold_threshold_ms,
                 speech_engine: parse_speech_engine(&settings.speech_engine),
+                desert_ant_usage_accepted: settings.desert_ant_usage_accepted,
                 local_speech_model: settings.local_speech_model,
                 cleanup_model: settings.dictation_cleanup_model,
                 vocabulary: settings.dictation_vocabulary,
@@ -1392,6 +1406,7 @@ pub struct SettingsPatch {
     dictation_hold_enabled: Option<bool>,
     dictation_hold_threshold_ms: Option<u64>,
     speech_engine: Option<String>,
+    desert_ant_usage_accepted: Option<bool>,
     local_speech_model: Option<Option<String>>,
     dictation_cleanup_model: Option<Option<String>>,
     dictation_vocabulary: Option<Vec<crate::config::VocabularyEntry>>,
@@ -1436,6 +1451,7 @@ impl SettingsPatch {
         assign!(dictation_hold_enabled);
         assign!(dictation_hold_threshold_ms);
         assign!(speech_engine);
+        assign!(desert_ant_usage_accepted);
         assign!(local_speech_model);
         assign!(dictation_cleanup_model);
         assign!(dictation_vocabulary);
@@ -1678,6 +1694,69 @@ fn windows_speech_languages() -> Option<Vec<SpeechLanguage>> {
 #[tauri::command]
 pub fn list_local_speech_models(store: State<'_, Arc<ModelStore>>) -> Vec<LocalSpeechModel> {
     store.list()
+}
+
+#[tauri::command]
+pub async fn get_voz_model_status(
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+) -> Result<VozModelStatus, String> {
+    runtime
+        .model_status()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+fn require_desert_ant_usage(accepted: bool) -> Result<(), SpeechError> {
+    if accepted {
+        return Ok(());
+    }
+    Err(SpeechError::DesertAntUsageNotAccepted)
+}
+
+#[tauri::command]
+pub async fn download_voz_model(
+    core: State<'_, Arc<AppCore>>,
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+) -> Result<(), String> {
+    let accepted = core
+        .settings()
+        .map_err(|error| error.to_string())?
+        .dictation
+        .desert_ant_usage_accepted;
+    require_desert_ant_usage(accepted).map_err(|error| error.to_string())?;
+    runtime.download().await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result<(), String> {
+    runtime
+        .remove_model()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn complete_voz_worker_request(
+    window: tauri::WebviewWindow,
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+    reply: VozWorkerReply,
+) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
+    runtime
+        .complete_worker_request(reply)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_voz_worker_ready(
+    window: tauri::WebviewWindow,
+    runtime: State<'_, Arc<dyn VozRuntime>>,
+    ready: bool,
+) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
+    runtime
+        .set_worker_ready(ready)
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2147,3 +2226,11 @@ pub fn frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[cfg(test)]
 mod contracts;
+
+fn validate_worker_surface(label: &str) -> Result<(), String> {
+    if label == "flow-bar" {
+        Ok(())
+    } else {
+        Err("Only the flow bar may answer speech worker requests.".into())
+    }
+}
