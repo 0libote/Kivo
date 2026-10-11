@@ -64,7 +64,7 @@ bun tauri dev
 
 Linux behavior: dictation uses a simulated engine (override the transcript with `KIVO_LINUX_DICTATION_TEXT`, the captured text with `KIVO_LINUX_TEST_TEXT`), API keys persist to a dev-only file vault (`~/.config/kivo/linux-credentials.json`, override with `KIVO_LINUX_CREDENTIAL_FILE` in tests — never a shipping credential store), and Copy uses `wl-copy`/`xclip` when present. Dictation holds `Control+Alt+Space`; Writing Tools uses `Ctrl+Space`.
 
-Useful checks:
+Quick checks (use `bun run ai-check:full` for the authoritative application, Rust, full browser, built-frontend, bundle, and website gate):
 
 ```sh
 bun typecheck
@@ -76,7 +76,7 @@ bun run test          # bun test
 bun test:ui           # Playwright
 bun run build
 bun check:rust
-cargo test --manifest-path src-tauri/Cargo.toml
+cargo test --locked --manifest-path src-tauri/Cargo.toml
 bun run desktop:build  # fast local package
 bun tauri build        # full stable release profile
 ```
@@ -105,4 +105,12 @@ Platform code is isolated under `src-tauri/src/platform/`. Windows uses UI Autom
 
 Windows x86_64 on Windows 11 24H2+ is the release target. macOS desktop support has been removed; browser-only frontend development remains possible on other hosts. Linux is retained solely for the simulated native bench and shared tests, not distribution. Do not add cross-desktop parity requirements.
 
-CI compiles, lints, and tests the Windows backend on every PR and builds a review NSIS installer. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.
+CI uses fail-safe change classification: application changes build and exercise a Windows review NSIS installer; native/shared/build configuration changes additionally run Windows and Linux Clippy/tests. Documentation-only changes keep workflow validation and the required aggregate; website changes run website checks. Main and release verification run the complete shared gate. Linux runs shared Rust and simulated adapter tests plus the browser harness. The browser suite exercises Windows behavior with a Windows user agent on either host; it does not execute Win32 or WebView2 APIs. Before release, follow the native Windows checklist in the release guide.
+
+## Generated contracts and speech declarations
+
+Run `bun run generate:models` after changing the Gemini catalogue/blocklist and `bun run generate:contracts` after changing Rust provider/catalogue/default-setting serialization. Cargo tests reject stale native snapshots; TypeScript checks their public shapes. This caught pricing-field naming mismatches that source-name checks could not catch.
+
+The optional Windows Voz runtime uses version-pinned remote imports. Its full public SDK declarations, notices, integrity metadata, and update procedure are in `src/vendor/desert-ant/README.md`; root installs do not include the SDK's large runtime packages. Run `bun run vendor:voz-types --check` to verify declarations against the exact registry artifacts. The normal unit gate checks local hashes offline.
+
+Browser tests own ports 1427 (dev) and 1428 (production), refuse server reuse, and wait for rendered/settings-ready surfaces. `bun run test:ui:production` builds a separate `dist-browser` Windows harness with an explicit mock opt-in. Normal desktop builds exclude that harness. See [repository health](repository-health-plan.md) for baseline measurements, remediation, retained dependencies, and maintenance ownership.

@@ -1,6 +1,31 @@
-# Kivo repository audit — 11 October 2026
+# Kivo repository health — 11 October 2026
 
-Scope: tracked repository at 86b55a8; frontend, Rust desktop, build/check scripts, dependencies and lockfiles, workflows, packaging, website, documentation, tests, and live GitHub run/branch-protection metadata. No application source, dependencies, workflows, or repository settings changed. This is a repository-level audit with targeted implementation review, not a claim that every native path or third-party dependency has been exhaustively reviewed.
+Original audit scope: tracked repository at 86b55a8; frontend, Rust desktop, build/check scripts, dependencies and lockfiles, workflows, packaging, website, documentation, tests, and live GitHub run/branch-protection metadata. No application source, dependencies, workflows, or repository settings changed. This is a repository-level audit with targeted implementation review, not a claim that every native path or third-party dependency has been exhaustively reviewed.
+
+## Remediation in PR #78
+
+The findings below describe the original baseline, not the current branch. Implementation: https://github.com/0libote/Kivo/pull/78.
+
+| Area | Implemented change | Evidence / remaining acceptance |
+| --- | --- | --- |
+| Continuous releases | Content- and commit-qualified immutable installers/signatures; manifest promoted last; main-only publication; freshness checked twice; old asset pairs retained | Interrupted/superseded upload tests. GitHub manifest replacement can briefly return 404; it no longer points at replaced installer bytes. Real signed-update acceptance remains in the release checklist. |
+| CI cost | Shared verification for PRs and releases; fail-safe change classification; one full browser host; cheap frontend checks grouped; pinned Rust; profile caches saved only on main; release debug info disabled | Workflow/action lint; explicit success/skipped aggregate keeps the existing required check name. Cold/warm hosted timings must be compared after merge; no claimed speedup from unmeasured compiler caching. |
+| Native coverage | Windows PR installer is installed, launched, checked for four hydrated/rendered WebViews, and uninstalled | Automated CI smoke; real microphone, insertion, shortcuts, GPU, DPI, and signed-update checks stay explicit in docs/releasing.md. |
+| Installer execution | Ollama button opens the official download page; executable downloader/spawner and its bridge/events removed | Build/contracts/browser setup coverage. Local server probes run concurrently. |
+| Model lifecycle | Rust per-model operation guards survive cancellation/verification/publication; Voz queues operations, invalidates obsolete loads, cancels timed-out/dropped requests, ignores late replies, and restricts worker IPC to the flow bar | Operation, serialization, native guard, request cleanup, and browser tests. SDK downloads cannot be forcibly aborted through the current upstream API; obsolete results cannot publish readiness. |
+| Dependency bloat | Four root ML packages removed; full exact SDK declarations and license notices retained with tarball integrity and offline hashes | Two frozen clean installs: baseline 259 packages / 1,012 MB, branch 233 / 581 MB (about 43% less). These are installed disk sizes, not installer sizes. Weekly upstream provenance check. |
+| Production bundle | Native/shared/mock adapters split; mock bridge and gallery compiled out of desktop builds; worker remains demand-loaded | Bundle gate rejects simulation/runtime leakage; production Windows frontend browser smoke covers four surfaces. |
+| Contracts | Actual Rust serde snapshots typechecked by TypeScript; defaults compared on both hosts; priced fallbacks/provider metadata generated from Rust | Found and fixed inputPer1M/outputPer1M/monthlyLimitUsd IPC names. Cargo rejects stale snapshots; source-name checks retained only as supplemental guards. |
+| Architecture | Settings sections/layout extracted; provider catalogue/pricing and tests extracted; AI/config tests moved; updater orchestration extracted | Existing behavior coverage retained. Further module splitting is maintenance work, not a prerequisite for correctness; avoid a broad mechanical rewrite. |
+| Maintenance | Website local-link/anchor/HTML/JS gate; canonical full checks; dependency owner and patch removal criteria documented | Keep security/DOM/theme/audio dependencies that are used. Historical audit/design files retained and labeled. |
+
+## Retained dependencies and follow-up policy
+
+DOMPurify/marked/jsdom, StyleX/Astryx, Tauri, and active native speech/audio dependencies provide exercised functionality and stay. The Astryx patch has an order-independence regression test and is removed when upstream theme generation fixes that case. GLib's small soundness patch stays until Tauri's Linux dependency stack consumes a fixed release; its upstream iterator regression test stays with the vendored source. Dependency compiler warnings are upstream, not suppressed application failures.
+
+Repository maintainer **0libote** owns weekly dependency-health failures and a monthly frontend update review while Dependabot issue [#16071](https://github.com/dependabot/dependabot-core/issues/16071) blocks Bun v2 lockfile updates. Review on the first Monday each month; next review 2 November 2026. Re-enable automated Bun updates only after a test PR proves lockfile compatibility. Recheck both local patches with each relevant dependency upgrade.
+
+Remote speech runtime trust is explicit: exact top-level SDK/runtime versions, HTTPS jsDelivr delivery, recorded upstream tarball integrity for declarations, version-scoped completion markers, existing CSP, and native Windows acceptance. This does not provide a cryptographic lockfile for every CDN executable/model fetch. A fully offline/self-hosted SDK distribution should be a separate product/deployment decision with upstream licensing and runtime tests; vendoring declarations must not be presented as executable verification.
 
 ## Assessment
 
@@ -122,7 +147,7 @@ Use --locked in check:rust; add a pinned rust-toolchain.toml. Consolidate AGENTS
 
 Success measures: no mixed beta manifest/assets; no late model resurrection or shared partial-file writes; a green exact-SHA release gate; docs-only changes avoid native builds; visible cache hit/size metrics; smaller root dependency footprint; passing real Windows smoke checks. Establish targets after two or three representative baseline runs rather than promising a fixed percentage improvement.
 
-## Verification and limitations
+## Original audit verification and limitations
 
 Local /usr/bin/bun fails because its npm wrapper's postinstall was not run. /home/oliver/.bun/bin/bun is a working 1.4.2 installation and was used via PATH for verification; repository files were not changed to work around this environment issue.
 

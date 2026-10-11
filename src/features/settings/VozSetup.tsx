@@ -97,10 +97,32 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
   }
 
   async function remove() {
-    await nativeBridge.deleteVozModel();
-    const next = await nativeBridge.getVozModelStatus();
-    setStatus(next);
-    onStatus?.(next);
+    if (busy) return;
+    setBusy(true);
+    try {
+      await nativeBridge.deleteVozModel();
+      const next = await nativeBridge.getVozModelStatus();
+      setStatus(next);
+      onStatus?.(next);
+    } catch (cause) {
+      setStatus((current) => ({
+        ...current,
+        error: cause instanceof Error ? cause.message : "Voz could not be removed.",
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openCredits() {
+    try {
+      await nativeBridge.openExternal("https://desertant.com/models/voz/");
+    } catch (cause) {
+      setStatus((current) => ({
+        ...current,
+        error: cause instanceof Error ? cause.message : "Could not open model credits.",
+      }));
+    }
   }
 
   const isWorking = status.phase === "downloading" || status.phase === "preparing";
@@ -134,7 +156,13 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
     modelAction = (
       <div {...stylex.props(styles.actions)}>
         <span {...stylex.props(styles.ready)}>Downloaded and prepared</span>
-        <Button label="Remove model" onClick={() => void remove()} variant="ghost" />
+        <Button
+          isDisabled={busy}
+          isLoading={busy}
+          label="Remove model"
+          onClick={() => void remove()}
+          variant="ghost"
+        />
       </div>
     );
   } else {
@@ -166,6 +194,11 @@ export function VozSetup({ context, onStatus }: VozSetupProps) {
       ) : null}
       {status.error ? <Banner status="error" title={status.error} /> : null}
       {modelAction}
+      <Button
+        label="Voz and Ear by Desert Ant · model credits"
+        onClick={() => void openCredits()}
+        variant="ghost"
+      />
     </div>
   );
 }

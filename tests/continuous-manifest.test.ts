@@ -17,6 +17,7 @@ async function publish(signedVersion: string) {
   const directory = mkdtempSync(join(tmpdir(), "kivo-manifest-"));
   directories.push(directory);
   const installer = join(directory, "Kivo_0.1.0_x64-setup.exe");
+  await Bun.write(installer, "installer bytes");
   await Bun.write(
     `${installer}.sig`,
     Buffer.from(`trusted comment: timestamp:1 version:${signedVersion}`).toString("base64"),
@@ -35,9 +36,12 @@ describe("Windows continuous updater manifest", () => {
     const manifest = await Bun.file(join(directory, "beta/continuous.json")).json();
     expect(manifest.version).toBe(`0.1.0+${sha}`);
     expect(Object.keys(manifest.platforms)).toEqual(["windows-x86_64"]);
-    expect(manifest.platforms["windows-x86_64"].url).toBe(
-      "https://github.com/0libote/Kivo/releases/download/continuous/Kivo_0.1.0_x64-setup.exe",
+    expect(manifest.platforms["windows-x86_64"].url).toMatch(
+      new RegExp(
+        `^https://github.com/0libote/Kivo/releases/download/continuous/Kivo_0\\.1\\.0_${sha}_[0-9a-f]{64}_x64-setup\\.exe$`,
+      ),
     );
+    expect(await Bun.file(result.stdout.toString().trim()).text()).toBe("installer bytes");
     expect(manifest.platforms["windows-x86_64"].signature).toBeTruthy();
   });
 

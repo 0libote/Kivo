@@ -1,16 +1,9 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import * as stylex from "@stylexjs/stylex";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { useNativeEvent } from "../../hooks/useNativeEvent";
 import { nativeBridge } from "../../platform/native";
-import {
-  type AppSettings,
-  type LocalAiInstallProgress,
-  type LocalAiServerInfo,
-  NativeError,
-} from "../../types";
+import { type AppSettings, type LocalAiServerInfo, NativeError } from "../../types";
 
 interface LocalAiSetupProps {
   readonly settings: AppSettings;
@@ -32,10 +25,7 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
   const [servers, setServers] = useState<LocalAiServerInfo[]>([]);
   const [scanning, setScanning] = useState(true);
   const [installing, setInstalling] = useState(false);
-  const [progress, setProgress] = useState<LocalAiInstallProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useNativeEvent<LocalAiInstallProgress>("local-ai-install-progress", setProgress);
 
   const scan = useCallback(() => {
     setScanning(true);
@@ -63,17 +53,14 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
   async function install() {
     setInstalling(true);
     setError(null);
-    setProgress(null);
     try {
-      await nativeBridge.installLocalAiRuntime();
-      setError("Finish the Ollama install, then Refresh to detect it.");
+      await nativeBridge.openExternal("https://ollama.com/download/windows");
     } catch (error_) {
       setError(
-        error_ instanceof NativeError ? error_.message : "The installer couldn’t be downloaded.",
+        error_ instanceof NativeError ? error_.message : "The download page couldn’t be opened.",
       );
     } finally {
       setInstalling(false);
-      setProgress(null);
     }
   }
 
@@ -111,19 +98,10 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
         </p>
         <Button
           isDisabled={disabled || installing}
-          label={installing ? "Downloading…" : "Install Ollama"}
+          label={installing ? "Opening…" : "Download Ollama"}
           onClick={() => void install()}
           size="sm"
         />
-        {progress && progress.total > 0 ? (
-          <ProgressBar
-            isLabelHidden
-            label="Downloading Ollama"
-            max={progress.total}
-            value={progress.downloaded}
-            xstyle={styles.download}
-          />
-        ) : null}
       </div>
     );
   }
@@ -142,20 +120,20 @@ export function LocalAiSetup({ settings, save, disabled }: LocalAiSetupProps) {
 const styles = stylex.create({
   root: {
     display: "grid",
-    gap: "8px",
+    gap: "var(--spacing-2)",
   },
   list: {
     display: "grid",
-    gap: "8px",
+    gap: "var(--spacing-2)",
   },
   row: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: "12px",
-    padding: "9px 12px",
+    gap: "var(--spacing-3)",
+    padding: "var(--spacing-2) var(--spacing-3)",
     backgroundColor: "var(--color-background-card)",
-    borderWidth: "1px",
+    borderWidth: "var(--border-width)",
     borderStyle: "solid",
     borderColor: "var(--color-border)",
     borderRadius: "var(--radius-element)",
@@ -165,31 +143,28 @@ const styles = stylex.create({
   },
   labels: {
     display: "grid",
-    gap: "2px",
+    gap: "var(--spacing-1)",
   },
   name: {
-    fontSize: "13px",
-    fontWeight: 620,
+    fontSize: "var(--font-size-sm)",
+    fontWeight: "var(--font-weight-semibold)",
   },
   meta: {
     color: "var(--color-text-secondary)",
-    fontSize: "11.5px",
+    fontSize: "var(--font-size-xs)",
   },
   empty: {
     display: "grid",
-    gap: "8px",
+    gap: "var(--spacing-2)",
     justifyItems: "start",
-  },
-  download: {
-    width: "220px",
   },
   footer: {
     display: "flex",
   },
   note: {
-    margin: "2px 0 14px",
+    margin: "var(--spacing-1) 0 var(--spacing-3)",
     color: "var(--color-text-secondary)",
-    fontSize: "12px",
-    lineHeight: 1.4,
+    fontSize: "var(--font-size-sm)",
+    lineHeight: "normal",
   },
 });

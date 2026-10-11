@@ -12,6 +12,7 @@ test.use({
 test("onboarding shows the Windows no-permission-prompt note", async ({ page }) => {
   await page.setViewportSize({ width: 640, height: 560 });
   await page.goto("/?surface=onboarding&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Get started" }).click();
   await expect(page.getByText("No permission prompt is normally required.")).toBeVisible();
 });
@@ -19,6 +20,7 @@ test("onboarding shows the Windows no-permission-prompt note", async ({ page }) 
 test("settings shows the Windows dictation language and shortcut defaults", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 600 });
   await page.goto("/?surface=settings&harness=1");
+  await expect(page.locator("html")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
   await page.getByRole("button", { name: "Dictation", exact: true }).click();
   await expect(
     page.getByText("Only installed desktop speech languages can start dictation"),

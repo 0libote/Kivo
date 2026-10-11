@@ -1,5 +1,8 @@
-import type { Ear as EarModel } from "@desert-ant-labs/ear";
-import type { Voz as VozModel } from "@desert-ant-labs/voz";
+import type * as EarSdk from "../../vendor/desert-ant/ear";
+import type { Ear as EarModel } from "../../vendor/desert-ant/ear";
+import type * as VozSdk from "../../vendor/desert-ant/voz";
+import type { Voz as VozModel } from "../../vendor/desert-ant/voz";
+import { OperationQueue, publishReadiness } from "./operation-queue";
 import type {
   VozModelPhase,
   VozTranscript,
@@ -9,8 +12,8 @@ import type {
 
 // Keep the Windows installer free of the browser ML stack. These exact,
 // version-pinned modules are fetched only when the user installs/prepares Voz.
-// jsDelivr serves immutable npm versions, and the model weights themselves
-// remain pinned/verified by Desert Ant's SDK.
+// Declaration provenance is recorded in src/vendor/desert-ant. Executable
+// CDN dependencies remain a separate trust boundary; see docs/releasing.md.
 const EAR_SDK_URL = "https://cdn.jsdelivr.net/npm/@desert-ant-labs/ear@3.5.0/+esm";
 const VOZ_SDK_URL = "https://cdn.jsdelivr.net/npm/@desert-ant-labs/voz@3.5.0/+esm";
 const LITERT_URL = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/+esm";
@@ -18,28 +21,19 @@ const LITERT_WASM_DIR = "https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/
 const ORT_WEBGPU_URL =
   "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/ort.webgpu.bundle.min.mjs";
 
-type EarConstructor = {
-  load(options?: {
-    litert?: unknown;
-    litertWasmDir?: string;
-    onProgress?: (fraction: number) => void;
-  }): Promise<EarModel>;
-};
-
-type VozConstructor = {
-  load(options?: { ort?: unknown; onProgress?: (fraction: number) => void }): Promise<VozModel>;
-};
-
-type EarModule = { Ear: EarConstructor };
-type VozModule = { Voz: VozConstructor };
+type EarModule = Pick<typeof EarSdk, "Ear">;
+type VozModule = Pick<typeof VozSdk, "Voz">;
 
 let recognizer: VozModel | null = null;
 let loadPromise: Promise<VozModel> | null = null;
 let identifier: EarModel | null = null;
-let earRuntimePromise: Promise<{ Ear: EarConstructor; litert: unknown }> | null = null;
-let vozRuntimePromise: Promise<{ Voz: VozConstructor; ort: unknown }> | null = null;
+let earRuntimePromise: Promise<{ Ear: EarModule["Ear"]; litert: unknown }> | null = null;
+let vozRuntimePromise: Promise<{ Voz: VozModule["Voz"]; ort: unknown }> | null = null;
 
-const stateCache = "kivo-voz-state";
+const operations = new OperationQueue();
+const cancelled = new Set<string>();
+const activeRequests = new Set<string>();
+const stateCache = "kivo-voz-state-ear3.5.0-voz3.5.0-litert2.5.3-ort1.30.0";
 const languageCheckReadyPath = "/voz-language-check-ready";
 const vozModelReadyPath = "/voz-model-ready";
 
@@ -117,19 +111,31 @@ async function loadVozRuntime(requestId: string) {
   return vozRuntimePromise;
 }
 
-async function loadEar(requestId: string) {
+async function loadEar(requestId: string, assertCurrent: () => void) {
   if (identifier) return identifier;
   const { Ear, litert } = await loadEarRuntime(requestId);
-  identifier = await Ear.load({
+  const loaded = await Ear.load({
     litert,
     litertWasmDir: LITERT_WASM_DIR,
     onProgress: (fraction: number) => progress(requestId, "downloading", fraction),
   });
-  await setLanguageCheckReady(true);
+  try {
+    assertCurrent();
+  } catch (cause) {
+    loaded.dispose();
+    throw cause;
+  }
+  try {
+    await publishReadiness(assertCurrent, setLanguageCheckReady);
+  } catch (cause) {
+    loaded.dispose();
+    throw cause;
+  }
+  identifier = loaded;
   return identifier;
 }
 
-async function load(requestId: string, needsDownload: boolean) {
+async function load(requestId: string, needsDownload: boolean, assertCurrent: () => void) {
   if (recognizer) return recognizer;
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
@@ -139,8 +145,9 @@ async function load(requestId: string, needsDownload: boolean) {
       ort,
       onProgress: (fraction: number) => progress(requestId, "downloading", fraction),
     });
+    assertCurrent();
     progress(requestId, "preparing");
-    await setVozModelReady(true);
+    await publishReadiness(assertCurrent, setVozModelReady);
     recognizer = loaded;
     return recognizer;
   })();
@@ -157,7 +164,36 @@ self.addEventListener("message", (event: MessageEvent<unknown>) => {
   // origin, then validate the structured request before doing work.
   if (event.origin !== "" && event.origin !== self.location.origin) return;
   if (!isVozWorkerRequest(event.data)) return;
-  void handle(event.data);
+  const request = event.data;
+  if (request.operation === "cancel") {
+    if (activeRequests.has(request.requestId)) cancelled.add(request.requestId);
+    return;
+  }
+  if (request.operation === "status") {
+    void handle(request, () => undefined);
+    return;
+  }
+  activeRequests.add(request.requestId);
+  if (request.operation === "remove") operations.invalidate();
+  void operations
+    .run((assertCurrent) =>
+      handle(request, () => {
+        assertCurrent();
+        if (cancelled.has(request.requestId)) throw new Error("The model operation timed out.");
+      }),
+    )
+    .catch((cause: unknown) => {
+      send({
+        requestId: request.requestId,
+        complete: true,
+        phase: "failed",
+        error: cause instanceof Error ? cause.message : "The operation was cancelled.",
+      });
+    })
+    .finally(() => {
+      cancelled.delete(request.requestId);
+      activeRequests.delete(request.requestId);
+    });
 });
 
 // Workers do not support a targetOrigin argument on postMessage.
@@ -169,25 +205,28 @@ function isVozWorkerRequest(value: unknown): value is VozWorkerRequest {
   const request = value as Partial<VozWorkerRequest>;
   return (
     typeof request.requestId === "string" &&
-    ["status", "download", "prepare", "remove", "transcribe"].includes(request.operation as string)
+    ["status", "download", "prepare", "remove", "transcribe", "cancel"].includes(
+      request.operation as string,
+    )
   );
 }
 
-async function handle(request: VozWorkerRequest) {
+async function handle(request: VozWorkerRequest, assertCurrent: () => void) {
   try {
+    assertCurrent();
     switch (request.operation) {
       case "status":
         await reportStatus(request.requestId);
         return;
       case "download":
       case "prepare":
-        await install(request);
+        await install(request, assertCurrent);
         return;
       case "remove":
         await remove(request.requestId);
         return;
       case "transcribe":
-        await transcribe(request);
+        await transcribe(request, assertCurrent);
         return;
       default:
         throw new Error("Unsupported Voz worker operation.");
@@ -215,9 +254,10 @@ async function reportStatus(requestId: string) {
   });
 }
 
-async function install(request: VozWorkerRequest) {
-  await loadEar(request.requestId);
-  const loaded = await load(request.requestId, request.operation === "download");
+async function install(request: VozWorkerRequest, assertCurrent: () => void) {
+  await loadEar(request.requestId, assertCurrent);
+  const loaded = await load(request.requestId, request.operation === "download", assertCurrent);
+  assertCurrent();
   if (!loaded) throw new Error("Voz could not be loaded.");
   send({
     requestId: request.requestId,
@@ -246,17 +286,19 @@ async function remove(requestId: string) {
   });
 }
 
-async function transcribe(request: VozWorkerRequest) {
+async function transcribe(request: VozWorkerRequest, assertCurrent: () => void) {
   if (!request.samples || !request.language) {
     throw new Error("Voz needs captured audio and a selected language.");
   }
-  const ear = await loadEar(request.requestId);
-  const loaded = await load(request.requestId, false);
+  const ear = await loadEar(request.requestId, assertCurrent);
+  const loaded = await load(request.requestId, false, assertCurrent);
   if (!loaded) throw new Error("Voz is not prepared. Download it in Dictation settings first.");
   const samples = Float32Array.from(request.samples);
   const detection = await ear.identify(samples, 16000);
   assertSupportedLanguage(request.language, detection);
+  assertCurrent();
   const raw = await loaded.transcribe(samples);
+  assertCurrent();
   const transcript: VozTranscript = {
     text: raw.text,
     words: raw.words,

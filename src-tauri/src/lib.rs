@@ -113,6 +113,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            commands::frontend_ready,
             commands::get_app_context,
             commands::get_settings,
             commands::update_settings,
@@ -131,7 +132,6 @@ pub fn run() {
             commands::cancel_local_speech_model_download,
             commands::delete_local_speech_model,
             commands::detect_local_ai_servers,
-            commands::install_local_ai_runtime,
             commands::list_ai_providers,
             commands::list_ai_models,
             commands::get_api_key_status,

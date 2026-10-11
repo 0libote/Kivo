@@ -221,9 +221,28 @@ impl VozRuntime for UnavailableVozRuntime {
     }
 }
 
-/// Windows' tagged Voz release is the official ONNX Runtime Web build. The
-/// isolated worker lives in Kivo's persistent flow-bar WebView2; Rust sends
-/// captured PCM only for the duration of local inference.
+/// Unregister/cancel pending work when its request future is dropped.
+#[cfg(any(test, windows))]
+struct PendingRequest<'a, T, F: FnOnce()> {
+    pending: &'a Mutex<HashMap<String, T>>,
+    id: String,
+    cancel: Option<F>,
+}
+
+#[cfg(any(test, windows))]
+impl<T, F: FnOnce()> Drop for PendingRequest<'_, T, F> {
+    fn drop(&mut self) {
+        let removed = self
+            .pending
+            .lock()
+            .is_ok_and(|mut pending| pending.remove(&self.id).is_some());
+        if removed && let Some(cancel) = self.cancel.take() {
+            cancel();
+        }
+    }
+}
+
+/// Windows worker adapter; captured PCM is sent only for local inference.
 #[cfg(windows)]
 pub struct WindowsVozRuntime {
     app: AppHandle,
@@ -259,6 +278,22 @@ impl WindowsVozRuntime {
             .lock()
             .map_err(|_| SpeechError::Backend)?
             .insert(id.clone(), sender);
+        let _pending = PendingRequest {
+            pending: &self.pending,
+            id: id.clone(),
+            cancel: Some(|| {
+                let _ = self.app.emit_to(
+                    "flow-bar",
+                    "voz-worker-request",
+                    VozWorkerRequest {
+                        request_id: id.clone(),
+                        operation: "cancel".into(),
+                        samples: None,
+                        language: None,
+                    },
+                );
+            }),
+        };
         let request = VozWorkerRequest {
             request_id: id.clone(),
             operation: operation.into(),
@@ -270,10 +305,6 @@ impl WindowsVozRuntime {
             .emit_to("flow-bar", "voz-worker-request", request)
             .is_err()
         {
-            self.pending
-                .lock()
-                .map_err(|_| SpeechError::Backend)?
-                .remove(&id);
             return Err(SpeechError::VozUnavailable);
         }
         let timeout = match operation {
@@ -286,14 +317,9 @@ impl WindowsVozRuntime {
         match tokio::time::timeout(timeout, receiver).await {
             Ok(Ok(reply)) => reply,
             Ok(Err(_)) => Err(SpeechError::VozUnavailable),
-            Err(_) => {
-                if let Ok(mut pending) = self.pending.lock() {
-                    pending.remove(&id);
-                }
-                Err(SpeechError::VozRuntime(format!(
-                    "Voz {operation} timed out. Check the model and WebView2, then retry."
-                )))
-            }
+            Err(_) => Err(SpeechError::VozRuntime(format!(
+                "Voz {operation} timed out. Check the model and WebView2, then retry."
+            ))),
         }
     }
 
@@ -351,6 +377,11 @@ impl VozRuntime for WindowsVozRuntime {
         })
     }
     fn complete_worker_request(&self, reply: VozWorkerReply) -> Result<(), SpeechError> {
+        let mut pending = self.pending.lock().map_err(|_| SpeechError::Backend)?;
+        if !pending.contains_key(&reply.request_id) {
+            // Timeout/duplicate replies and their progress cannot resurrect UI state.
+            return Ok(());
+        }
         if !reply.complete {
             if let Some(phase) = reply.phase {
                 let status = VozModelStatus {
@@ -367,11 +398,7 @@ impl VozRuntime for WindowsVozRuntime {
             }
             return Ok(());
         }
-        let sender = self
-            .pending
-            .lock()
-            .map_err(|_| SpeechError::Backend)?
-            .remove(&reply.request_id);
+        let sender = pending.remove(&reply.request_id);
         if let Some(sender) = sender {
             let _ = sender.send(Ok(reply));
         }
@@ -615,5 +642,41 @@ mod tests {
         assert!(matches!(error, SpeechError::VozRuntime(_)));
         #[cfg(not(windows))]
         assert_eq!(error, SpeechError::VozUnavailable);
+    }
+}
+
+#[cfg(test)]
+mod pending_request_tests {
+    use super::PendingRequest;
+    use std::{
+        collections::HashMap,
+        sync::{
+            Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+    #[test]
+    fn dropped_request_unregisters_and_cancels_but_completed_request_does_not() {
+        let pending = Mutex::new(HashMap::from([
+            ("aborted".into(), ()),
+            ("complete".into(), ()),
+        ]));
+        let cancelled = AtomicBool::new(false);
+        drop(PendingRequest {
+            pending: &pending,
+            id: "aborted".into(),
+            cancel: Some(|| cancelled.store(true, Ordering::Relaxed)),
+        });
+        assert!(cancelled.load(Ordering::Relaxed));
+        assert!(!pending.lock().unwrap().contains_key("aborted"));
+        cancelled.store(false, Ordering::Relaxed);
+        let completed = PendingRequest {
+            pending: &pending,
+            id: "complete".into(),
+            cancel: Some(|| cancelled.store(true, Ordering::Relaxed)),
+        };
+        pending.lock().unwrap().remove("complete");
+        drop(completed);
+        assert!(!cancelled.load(Ordering::Relaxed));
     }
 }

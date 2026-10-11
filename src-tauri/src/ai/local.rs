@@ -1,21 +1,15 @@
 //! First-class local AI support: detect commonly used OpenAI-compatible
-//! servers (Ollama, LM Studio, llama.cpp) and, when none is installed, fetch
-//! and launch the official Ollama installer.
+//! servers (Ollama, LM Studio, llama.cpp). Installation stays in the user’s
+//! browser through the official vendor download page.
 //!
 //! Kivo does not bundle an LLM runtime. Running one is a user choice with real
 //! disk/memory cost, so instead this module makes the common local servers
-//! one-click to detect and configure, and offers to install Ollama the same
-//! way a browser would hand the download to the OS.
+//! one-click to detect and configure. Kivo never downloads or executes an installer.
 
-use std::{path::Path, time::Duration};
+use std::time::Duration;
 
-#[cfg(target_os = "windows")]
-use std::process::Command;
-
-use futures_util::StreamExt;
+use futures_util::future::join_all;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,13 +20,6 @@ pub struct LocalAiServer {
     pub base_url: String,
     pub running: bool,
     pub models: Vec<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalAiInstallProgress {
-    pub downloaded: u64,
-    pub total: u64,
 }
 
 /// One candidate per server a user is likely to already run.
@@ -49,18 +36,17 @@ pub async fn detect_local_servers() -> Vec<LocalAiServer> {
     else {
         return Vec::new();
     };
-    let mut servers = Vec::with_capacity(CANDIDATES.len());
-    for (id, name, base_url) in CANDIDATES {
+    join_all(CANDIDATES.iter().map(|(id, name, base_url)| async {
         let models = list_models(&client, base_url).await;
-        servers.push(LocalAiServer {
+        LocalAiServer {
             id: (*id).to_owned(),
             name: (*name).to_owned(),
             base_url: (*base_url).to_owned(),
             running: models.is_some(),
             models: models.unwrap_or_default(),
-        });
-    }
-    servers
+        }
+    }))
+    .await
 }
 
 async fn list_models(client: &reqwest::Client, base_url: &str) -> Option<Vec<String>> {
@@ -78,66 +64,4 @@ async fn list_models(client: &reqwest::Client, base_url: &str) -> Option<Vec<Str
     }
     let listing: Listing = response.json().await.ok()?;
     Some(listing.data.into_iter().map(|entry| entry.id).collect())
-}
-
-/// Official installer URL for the host, or `None` on unsupported platforms.
-fn installer_url() -> Option<&'static str> {
-    #[cfg(target_os = "windows")]
-    return Some("https://ollama.com/download/OllamaSetup.exe");
-    #[cfg(not(target_os = "windows"))]
-    return None;
-}
-
-/// Downloads the official installer and hands it to the OS. The user still
-/// approves the install; Kivo never runs it silently.
-pub async fn install_runtime(app: &AppHandle) -> Result<(), String> {
-    let url = installer_url()
-        .ok_or_else(|| "Installing a local AI runtime is only supported on Windows.".to_owned())?;
-    let file_name = "kivo-ollama-setup.exe";
-    let path = std::env::temp_dir().join(file_name);
-
-    let response = reqwest::Client::new()
-        .get(url)
-        .send()
-        .await
-        .map_err(|_| "The installer could not be downloaded.".to_owned())?;
-    if !response.status().is_success() {
-        return Err("The installer could not be downloaded.".into());
-    }
-    let total = response.content_length().unwrap_or(0);
-    let mut file = tokio::fs::File::create(&path)
-        .await
-        .map_err(|_| "The installer could not be saved.".to_owned())?;
-    let mut downloaded = 0u64;
-    let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|_| "The installer download was interrupted.".to_owned())?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|_| "The installer could not be saved.".to_owned())?;
-        downloaded += chunk.len() as u64;
-        let _ = app.emit(
-            "local-ai-install-progress",
-            LocalAiInstallProgress { downloaded, total },
-        );
-    }
-    file.flush()
-        .await
-        .map_err(|_| "The installer could not be saved.".to_owned())?;
-    drop(file);
-    launch_installer(&path)
-}
-
-fn launch_installer(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let result = Command::new(path).spawn();
-    #[cfg(not(target_os = "windows"))]
-    let result: std::io::Result<std::process::Child> = {
-        // Unsupported host: keep the path meaningful for the error context.
-        let _ = path;
-        Err(std::io::Error::other("unsupported"))
-    };
-    result
-        .map(|_| ())
-        .map_err(|_| "The installer could not be opened.".to_owned())
 }

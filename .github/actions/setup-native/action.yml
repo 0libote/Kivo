@@ -1,0 +1,46 @@
+name: Native build prerequisites
+description: Pinned Rust, host prerequisites, and profile-specific dependency cache.
+inputs:
+  profile:
+    description: Cache identity for checks, beta, or stable builds
+    required: true
+outputs:
+  cache-hit:
+    description: Whether the dependency cache matched
+    value: ${{ steps.cache.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+      with:
+        toolchain: 1.99.0
+        components: rustfmt, clippy
+    - if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $version = '1.4.357.0'
+        $installer = Join-Path $env:RUNNER_TEMP 'vulkan-sdk.exe'
+        curl.exe --fail --silent --show-error --location --retry 3 --output $installer "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+        if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK download failed.' }
+        $process = Start-Process -FilePath $installer -ArgumentList '--accept-licenses','--default-answer','--confirm-command','install' -Wait -PassThru
+        if ($process.ExitCode -ne 0) { throw "Vulkan SDK installer failed: $($process.ExitCode)" }
+        $sdk = "C:\VulkanSDK\$version"
+        if (-not (Test-Path "$sdk\Include\vulkan\vulkan.h")) { throw 'Vulkan SDK headers missing.' }
+        "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append
+    - if: runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake build-essential
+    - id: cache
+      uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      with:
+        workspaces: src-tauri
+        shared-key: ${{ inputs.profile }}
+        cache-bin: false
+        save-if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    - shell: bash
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        CACHE_PROFILE: ${{ inputs.profile }}
+      run: |
+        echo "Rust dependency cache ($CACHE_PROFILE): hit=$CACHE_HIT" >> "$GITHUB_STEP_SUMMARY"

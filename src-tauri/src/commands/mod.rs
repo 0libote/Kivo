@@ -1709,9 +1709,11 @@ pub async fn delete_voz_model(runtime: State<'_, Arc<dyn VozRuntime>>) -> Result
 
 #[tauri::command]
 pub fn complete_voz_worker_request(
+    window: tauri::WebviewWindow,
     runtime: State<'_, Arc<dyn VozRuntime>>,
     reply: VozWorkerReply,
 ) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
     runtime
         .complete_worker_request(reply)
         .map_err(|error| error.to_string())
@@ -1719,9 +1721,11 @@ pub fn complete_voz_worker_request(
 
 #[tauri::command]
 pub fn set_voz_worker_ready(
+    window: tauri::WebviewWindow,
     runtime: State<'_, Arc<dyn VozRuntime>>,
     ready: bool,
 ) -> Result<(), String> {
+    validate_worker_surface(window.label())?;
     runtime
         .set_worker_ready(ready)
         .map_err(|error| error.to_string())
@@ -1762,17 +1766,6 @@ pub fn delete_local_speech_model(
 #[tauri::command]
 pub async fn detect_local_ai_servers() -> Vec<crate::ai::LocalAiServer> {
     crate::ai::detect_local_servers().await
-}
-
-#[tauri::command]
-pub async fn install_local_ai_runtime(app: AppHandle) -> Result<(), CommandError> {
-    crate::ai::install_runtime(&app)
-        .await
-        .map_err(|message| CommandError {
-            code: "local_ai_install".into(),
-            message,
-            recoverable: true,
-        })
 }
 
 #[tauri::command]
@@ -2181,3 +2174,35 @@ fn invalid_settings_json() -> serde_json::Error {
 
 #[cfg(test)]
 mod tests;
+
+/// The review-installer harness waits for real WebViews to hydrate and render.
+/// Release builds ignore the harness entirely; no path comes from IPC.
+#[tauri::command]
+pub fn frontend_ready(window: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(debug_assertions)]
+    if let Some(directory) = std::env::var_os("KIVO_SMOKE_DIRECTORY") {
+        let label = window.label();
+        if !matches!(
+            label,
+            "settings" | "onboarding" | "flow-bar" | "writing-tools"
+        ) {
+            return Err("Unknown frontend surface.".into());
+        }
+        let path = std::path::PathBuf::from(directory).join(format!("{label}.json"));
+        let report = serde_json::json!({ "surface": label, "version": env!("CARGO_PKG_VERSION") });
+        std::fs::write(path, report.to_string()).map_err(|error| error.to_string())?;
+    }
+    let _ = window;
+    Ok(())
+}
+
+#[cfg(test)]
+mod contracts;
+
+fn validate_worker_surface(label: &str) -> Result<(), String> {
+    if label == "flow-bar" {
+        Ok(())
+    } else {
+        Err("Only the flow bar may answer speech worker requests.".into())
+    }
+}

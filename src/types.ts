@@ -147,11 +147,6 @@ export interface LocalAiServerInfo {
   models: string[];
 }
 
-export interface LocalAiInstallProgress {
-  downloaded: number;
-  total: number;
-}
-
 export interface AiProviderInfo {
   id: AiProviderId;
   label: string;
