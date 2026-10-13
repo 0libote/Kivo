@@ -31,6 +31,7 @@ import {
 } from "../../types";
 import { builtinActionFor, resolvePresetPrompt, resolveWritingPresets } from "./presets";
 import {
+  hostnameForSummaryUrl,
   initialWritingToolsState,
   type WritingToolsEvent,
   type WritingToolsState,
@@ -217,7 +218,11 @@ export function WritingToolsPopup({ platform, settings }: WritingToolsPopupProps
           (content instanceof HTMLElement ? content.scrollHeight : element.scrollHeight) + 4;
         if (height === reportedHeight) return;
         reportedHeight = height;
-        void nativeBridge.setSurfaceMode("writing-tools", mode, height).catch(() => {});
+        void nativeBridge.setSurfaceMode("writing-tools", mode, height).catch(() => {
+          // Best-effort resize report: losing one update only leaves the
+          // window at its previous size, so it must never replace the
+          // visible menu/result with an error.
+        });
       });
     };
     const observer = new ResizeObserver(reportHeight);
@@ -621,6 +626,8 @@ function ResultView({
         const output = Math.ceil(resultText.length / 4);
         setCostEstimate((input * model.inputPer1M + output * model.outputPer1M) / 1_000_000);
       })
+      // A failed estimate already surfaces: costEstimate stays null and the
+      // footer reads "cost estimate unavailable".
       .catch(() => {});
     return () => {
       active = false;
@@ -790,7 +797,9 @@ function SummaryChoiceView({
   isLinkSummary,
   url,
 }: SummaryChoiceViewProps) {
-  const hostname = isLinkSummary ? new URL(url).hostname.replace(/^www\./u, "") : null;
+  // hostnameForSummaryUrl never throws: an unparseable selection shows the
+  // generic summary hint instead of crashing render.
+  const hostname = isLinkSummary ? hostnameForSummaryUrl(url) : null;
   return (
     <div {...stylex.props(styles.summary)}>
       <header data-tauri-drag-region {...stylex.props(styles.popupHeader)}>

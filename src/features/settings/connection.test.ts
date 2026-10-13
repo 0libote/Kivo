@@ -1,5 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { testFailureConnection } from "./connection";
+import type { ApiKeyStatus } from "../../types";
+import {
+  API_STATUS_UNAVAILABLE_NOTICE,
+  apiStatusAfterModelSave,
+  PROVIDER_LIST_FALLBACK_NOTICE,
+  testFailureConnection,
+} from "./connection";
 
 describe("testFailureConnection", () => {
   it("maps key problems to invalid", () => {
@@ -41,5 +47,29 @@ describe("testFailureConnection", () => {
     for (const code of ["", "unknown", "no_result", "invalid_link", "settings_runtime"]) {
       expect(testFailureConnection(code)).toBe("untested");
     }
+  });
+});
+
+describe("apiStatusAfterModelSave", () => {
+  const connected: ApiKeyStatus = { configured: true, connection: "connected" };
+
+  it("marks the connection untested when the queue persisted", () => {
+    expect(apiStatusAfterModelSave(connected, true)).toEqual({
+      configured: true,
+      connection: "untested",
+    });
+  });
+
+  it("leaves a failed save exactly as it was, never untested", () => {
+    expect(apiStatusAfterModelSave(connected, false)).toBe(connected);
+  });
+});
+
+describe("settings failure notices", () => {
+  it("uses stable user-facing copy", () => {
+    expect(API_STATUS_UNAVAILABLE_NOTICE).toBe("Saved key status isn’t available right now.");
+    expect(PROVIDER_LIST_FALLBACK_NOTICE).toBe(
+      "Provider list isn’t available right now. Showing the saved list.",
+    );
   });
 });

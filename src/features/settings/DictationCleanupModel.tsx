@@ -2,10 +2,11 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import { nativeBridge } from "../../platform/native";
 import type { AiModelInfo, AppSettings } from "../../types";
+import type { SaveSettings } from "./settings-layout";
 
 interface DictationCleanupModelProps {
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
 }
 
 /**

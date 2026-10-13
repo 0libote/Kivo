@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { renderMarkdown } from "./SafeMarkdown";
+import { MARKDOWN_ALLOWED_ATTR, MARKDOWN_ALLOWED_TAGS, renderMarkdown } from "./SafeMarkdown";
 
 /** Parse sanitized output in a real DOM so element queries are meaningful. */
 function rendered(source: string): HTMLElement {
@@ -66,5 +66,43 @@ describe("renderMarkdown safety", () => {
   it("strips event-handler attributes even if parsing ever emits them", () => {
     const host = rendered('<b onmouseover="alert(1)">bold</b>');
     expect(host.querySelector("[onmouseover]")).toBeNull();
+  });
+
+  it("exposes an allowlist with no navigation, media, form, or style elements", () => {
+    for (const tag of [
+      "a",
+      "img",
+      "script",
+      "iframe",
+      "form",
+      "input",
+      "button",
+      "style",
+      "video",
+      "audio",
+      "h1",
+    ]) {
+      expect(MARKDOWN_ALLOWED_TAGS).not.toContain(tag);
+    }
+    expect(MARKDOWN_ALLOWED_ATTR).toEqual([]);
+  });
+
+  it("keeps tables and strikethrough, which the allowlist covers", () => {
+    const host = rendered("| a | b |\n|---|---|\n| 1 | 2 |\n\n~~gone~~");
+    expect(host.querySelector("table")).not.toBeNull();
+    expect(host.querySelector("del")?.textContent).toBe("gone");
+  });
+
+  it("strips task-list checkbox inputs, which the allowlist does not cover", () => {
+    const host = rendered("- [ ] todo\n- [x] done");
+    expect(host.querySelector("input")).toBeNull();
+    expect(host.textContent).toContain("todo");
+  });
+
+  it("strips element attributes such as fenced-code language classes", () => {
+    const host = rendered("```ts\ncode\n```");
+    const code = host.querySelector("pre code");
+    expect(code?.textContent?.trim()).toBe("code");
+    expect(code?.getAttribute("class")).toBeNull();
   });
 });

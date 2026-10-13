@@ -3,17 +3,19 @@ import * as stylex from "@stylexjs/stylex";
 import { useRef, useState } from "react";
 import { Icon } from "../../components/Icon";
 import type { AppSettings, VocabularyWord } from "../../types";
+import type { SaveSettings } from "./settings-layout";
 import {
   formatVocabularyExport,
   MAX_VOCABULARY_WORDS,
   mergeVocabulary,
   normalizeVocabularySetting,
   parseVocabularyInput,
+  readVocabularyImportText,
 } from "./vocabulary";
 
 interface DictationVocabularyProps {
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
   readonly onNotice: (message: string | null) => void;
 }
 
@@ -94,7 +96,13 @@ export function DictationVocabulary({ settings, save, onNotice }: DictationVocab
   }
 
   async function importFile(file: File) {
-    const text = await file.text().catch(() => "");
+    // A read failure is reported as such: it must not fold into "" and
+    // misreport a broken file as having no new words.
+    const text = await readVocabularyImportText(file);
+    if (text === null) {
+      onNotice("That file couldn't be read.");
+      return;
+    }
     const next = mergeVocabulary(words, parseVocabularyInput(text));
     if (next.length === words.length) {
       onNotice("No new words found in that file.");

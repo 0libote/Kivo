@@ -2,7 +2,7 @@ import * as stylex from "@stylexjs/stylex";
 import { type ReactNode } from "react";
 import { type AppSettings } from "../../types";
 import { styles } from "./settings-styles";
-export type SaveSettings = (patch: Partial<AppSettings>) => Promise<void>;
+export type SaveSettings = (patch: Partial<AppSettings>) => Promise<boolean>;
 export function SettingsContent({
   title,
   subtitle,

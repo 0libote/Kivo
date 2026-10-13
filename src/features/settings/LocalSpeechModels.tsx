@@ -11,10 +11,11 @@ import {
   type LocalSpeechModelInfo,
   NativeError,
 } from "../../types";
+import type { SaveSettings } from "./settings-layout";
 
 interface LocalSpeechModelsProps {
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
 }
 
 function formatBytes(bytes: number): string {

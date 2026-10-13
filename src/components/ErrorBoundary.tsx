@@ -2,6 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import * as stylex from "@stylexjs/stylex";
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportErrorBoundary } from "./error-report";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -18,8 +19,11 @@ export class ErrorBoundary extends Component<Props, State> {
     return { failed: true };
   }
 
-  componentDidCatch(_error: Error, _info: ErrorInfo) {
-    // Intentionally avoid logging: rendered surfaces can contain private user text.
+  componentDidCatch(error: Error, _info: ErrorInfo) {
+    // Count and report by error name/message only. Props, children, user
+    // text, and the ErrorInfo component stack are never logged: this
+    // boundary wraps surfaces that render private user content.
+    reportErrorBoundary(error);
   }
 
   render() {

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "bun:test";
-import { initialWritingToolsState, isWebUrl, writingToolsReducer } from "./state";
+import {
+  hostnameForSummaryUrl,
+  initialWritingToolsState,
+  isWebUrl,
+  writingToolsReducer,
+} from "./state";
 
 const context = {
   hasSelection: true,
@@ -102,5 +107,19 @@ describe("isWebUrl", () => {
     expect(isWebUrl("javascript:alert(1)")).toBe(false);
     expect(isWebUrl("https://user:secret@example.com")).toBe(false);
     expect(isWebUrl("Some selected text")).toBe(false);
+  });
+});
+
+describe("hostnameForSummaryUrl", () => {
+  it("returns the hostname without a www prefix", () => {
+    expect(hostnameForSummaryUrl("https://www.example.com/article")).toBe("example.com");
+    expect(hostnameForSummaryUrl("http://example.com")).toBe("example.com");
+  });
+
+  it("returns null instead of throwing for non-links", () => {
+    expect(hostnameForSummaryUrl("Some selected text")).toBeNull();
+    expect(hostnameForSummaryUrl("javascript:alert(1)")).toBeNull();
+    expect(hostnameForSummaryUrl("https://user:secret@example.com")).toBeNull();
+    expect(hostnameForSummaryUrl("")).toBeNull();
   });
 });

@@ -4,10 +4,11 @@ import * as stylex from "@stylexjs/stylex";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { nativeBridge } from "../../platform/native";
 import { type AppSettings, type LocalAiServerInfo, NativeError } from "../../types";
+import type { SaveSettings } from "./settings-layout";
 
 interface LocalAiSetupProps {
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
   readonly disabled: boolean;
 }
 
