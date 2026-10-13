@@ -74,7 +74,10 @@ bun run knip          # dead files, exports and dependencies
 bun run theme:check   # Astryx theme artifacts are current
 bun run test          # bun test
 bun test:ui           # Playwright
+bun run test:ui:production  # built Windows frontend harness
 bun run build
+bun run check:bundle  # frontend output has no ML implementation or dev harness
+bun run check:website
 bun check:rust
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 bun run desktop:build  # fast local package

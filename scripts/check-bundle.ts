@@ -1,11 +1,14 @@
 export {};
 
-const assets = [...new Bun.Glob("assets/*").scanSync("dist")];
+// The production harness builds a separate directory (KIVO_DIST=dist-browser);
+// check whichever frontend output the caller built, defaulting to dist.
+const outDir = process.env.KIVO_DIST ?? "dist";
+const assets = [...new Bun.Glob("assets/*").scanSync(outDir)];
 if (assets.length === 0) throw new Error("Build the frontend before checking its output.");
 const forbidden = /(?:OrtSession|InferenceSession|WebAssembly\.instantiate|koffi)/;
 const sizes = await Promise.all(
   assets.map(async (asset) => {
-    const file = Bun.file(`dist/${asset}`);
+    const file = Bun.file(`${outDir}/${asset}`);
     if (asset.endsWith(".js")) {
       const source = await file.text();
       if (
