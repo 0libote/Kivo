@@ -22,3 +22,8 @@ src-tauri/keys/
 .tools/
 
 /dist-browser/
+
+# Generated continuous-channel staging (CI only, never committed).
+beta/continuous.json
+beta/notes.md
+beta/windows/

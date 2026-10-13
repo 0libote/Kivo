@@ -21,6 +21,10 @@ jobs:
 
   windows:
     needs: [verify]
+    # Stable releases must originate from version tags or main. Without this,
+    # a manual dispatch from any branch could cut a stable release, and the
+    # tag-version check below is skipped for non-tag refs.
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     concurrency:
       group: stable-release-${{ github.ref }}
       cancel-in-progress: false
