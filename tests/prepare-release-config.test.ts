@@ -8,7 +8,13 @@ const output = fileURLToPath(
   new URL("../src-tauri/target/release-tauri.conf.json", import.meta.url),
 );
 // "Ed" algorithm identifier + 8-byte key number + 32-byte Ed25519 key.
-const valid = Buffer.concat([Buffer.from("Ed"), Buffer.alloc(40, 7)]).toString("base64");
+const rawValid = Buffer.concat([Buffer.from("Ed"), Buffer.alloc(40, 7)]).toString("base64");
+// The form `tauri signer generate` actually emits: outer base64 of the
+// minisign .pub file text, whose last line inner-decodes to the 42-byte key.
+const valid = Buffer.from(
+  `untrusted comment: minisign public key: ABCDEF12\n${rawValid}\n`,
+  "utf8",
+).toString("base64");
 
 function prepare(publicKey?: string) {
   const env = { ...process.env };
@@ -28,11 +34,21 @@ describe("release updater public key", () => {
   });
 
   it("rejects non-minisign values", async () => {
+    const truncatedFileKey = Buffer.from(
+      `untrusted comment: minisign public key: ABCDEF12\n${rawValid.slice(0, 40)}\n`,
+      "utf8",
+    ).toString("base64");
+    const wrongInnerSize = Buffer.from(
+      `untrusted comment: minisign public key: ABCDEF12\n${Buffer.alloc(64).toString("base64")}\n`,
+      "utf8",
+    ).toString("base64");
     const invalid = [
       "not-a-key",
       "untrusted comment: minisign public key: DEADBEEF\nRW fake",
-      valid.slice(0, 40),
+      rawValid.slice(0, 40),
       Buffer.alloc(64).toString("base64"),
+      truncatedFileKey,
+      wrongInnerSize,
     ];
     for (const publicKey of invalid) {
       const result = prepare(publicKey);
@@ -46,10 +62,12 @@ describe("release updater public key", () => {
   it("writes a minisign public key into the generated release config", async () => {
     const previous = (await Bun.file(output).exists()) ? await Bun.file(output).text() : null;
     try {
-      const result = prepare(valid);
-      expect(result.exitCode).toBe(0);
-      const config = await Bun.file(output).json();
-      expect(config.plugins.updater.pubkey).toBe(valid);
+      for (const publicKey of [valid, rawValid]) {
+        const result = prepare(publicKey);
+        expect(result.exitCode).toBe(0);
+        const config = await Bun.file(output).json();
+        expect(config.plugins.updater.pubkey).toBe(publicKey);
+      }
     } finally {
       if (previous === null)
         await Bun.file(output)

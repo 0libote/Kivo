@@ -1,21 +1,52 @@
-// The Tauri updater verifies releases with minisign, so the configured public
-// key must be a minisign public key: base64-encoded "Ed" algorithm identifier,
-// 8-byte key number, and 32-byte Ed25519 key (42 bytes, 56 base64 characters).
-// Anything else (a private key, the commented .pub file, a truncated secret)
-// would only fail later at signing or update-verification time.
-export function assertMinisignPublicKey(publicKey: string): void {
-  let bytes: Buffer;
+// Tauri's updater pubkey is the base64 encoding of a minisign public key
+// file: outer base64 decodes to UTF-8 text ("untrusted comment: ...\n<inner
+// base64>\n"), and the last non-empty line inner-decodes to "Ed" + 8-byte key
+// number + 32-byte Ed25519 key (42 bytes). A bare single-layer 42-byte key is
+// also accepted for forwards compatibility, but `tauri signer generate`
+// emits the file form.
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function decodeBase64Strict(value: string): Buffer | null {
+  if (!BASE64_RE.test(value) || value.length % 4 !== 0) return null;
   try {
-    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(publicKey)) throw new Error("not base64");
-    bytes = Buffer.from(publicKey, "base64");
+    const bytes = Buffer.from(value, "base64");
+    // Buffer is lenient: reject non-canonical encodings.
+    if (bytes.toString("base64") !== value) return null;
+    return bytes;
   } catch {
-    throw new Error("TAURI_UPDATER_PUBKEY must be a base64-encoded minisign public key.");
+    return null;
   }
-  if (bytes.length !== 42) {
-    throw new Error(
-      `TAURI_UPDATER_PUBKEY must decode to 42 bytes (a minisign public key), got ${bytes.length}.`,
-    );
+}
+
+export function assertMinisignPublicKey(publicKey: string): void {
+  const invalid = "TAURI_UPDATER_PUBKEY must be a base64-encoded minisign public key file.";
+  const outer = decodeBase64Strict(publicKey);
+  if (!outer) throw new Error(invalid);
+  // Tauri file form: outer decodes to text, last line decodes to 42 bytes.
+  try {
+    const text = outer.toString("utf8");
+    if (!text.includes("\0")) {
+      const lines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      if (lines.length >= 1) {
+        const inner = decodeBase64Strict(lines[lines.length - 1]);
+        if (inner?.length === 42 && inner.subarray(0, 2).toString("binary") === "Ed") {
+          return;
+        }
+      }
+    }
+  } catch {
+    // Fall through to the raw-key check below.
   }
+  // Legacy raw form: outer directly decodes to the 42-byte key.
+  if (outer.length === 42 && outer.subarray(0, 2).toString("binary") === "Ed") {
+    return;
+  }
+  throw new Error(
+    `TAURI_UPDATER_PUBKEY must decode to a minisign public key (file text ~100+ bytes whose last line decodes to 42 bytes starting with "Ed", or a raw 42-byte key), got outer ${outer.length} bytes.`,
+  );
 }
 
 const publicKey = process.env.TAURI_UPDATER_PUBKEY?.trim();
