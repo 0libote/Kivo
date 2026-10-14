@@ -49,7 +49,10 @@ Run the checks before submitting a change:
 ```sh
 bun run check
 bun run test:ui
+bun run test:ui:production
 bun run build
+bun run check:bundle
+bun run check:website
 bun run check:rust
 bun run lint:rust
 cargo test --locked --manifest-path src-tauri/Cargo.toml
