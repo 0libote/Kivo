@@ -93,8 +93,10 @@ export function SettingsWindow({
       setNotice(null);
       try {
         await updateSettings(patch);
+        return true;
       } catch (error) {
         setNotice(error instanceof NativeError ? error.message : "The setting couldn’t be saved.");
+        return false;
       }
     },
     [updateSettings],

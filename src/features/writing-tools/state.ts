@@ -70,6 +70,20 @@ export function isWebUrl(value: string): boolean {
   }
 }
 
+/**
+ * Display hostname for the link-summary header. Null when the text is not a
+ * credential-free HTTP(S) URL, so render code can call this unconditionally
+ * instead of constructing `new URL` (which throws) during render.
+ */
+export function hostnameForSummaryUrl(url: string): string | null {
+  if (!isWebUrl(url)) return null;
+  try {
+    return new URL(url.trim()).hostname.replace(/^www\./u, "");
+  } catch {
+    return null;
+  }
+}
+
 function openState(event: Extract<WritingToolsEvent, { type: "OPEN" }>): WritingToolsState {
   const sourceText = event.context.initialText ?? "";
   if (!event.context.hasSelection || !sourceText.trim()) {

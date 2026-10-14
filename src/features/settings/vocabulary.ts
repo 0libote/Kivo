@@ -94,3 +94,16 @@ export function normalizeVocabularySetting(value: unknown): VocabularyWord[] {
     }),
   );
 }
+
+/**
+ * Read an import file's text. Null signals a read failure so callers can
+ * report it distinctly from an empty file: folding failures into `""` would
+ * misreport a broken file as "no new words found".
+ */
+export async function readVocabularyImportText(file: Pick<File, "text">): Promise<string | null> {
+  try {
+    return await file.text();
+  } catch {
+    return null;
+  }
+}

@@ -292,7 +292,7 @@ function NumberPreference({
   readonly value: number;
   readonly min: number;
   readonly max: number;
-  readonly onChange: (value: number) => Promise<void>;
+  readonly onChange: (value: number) => unknown;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   return (

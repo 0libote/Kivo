@@ -12,7 +12,11 @@ import {
   type AppSettings,
   NativeError,
 } from "../../types";
-import { testFailureConnection } from "./connection";
+import {
+  apiStatusAfterModelSave,
+  PROVIDER_LIST_FALLBACK_NOTICE,
+  testFailureConnection,
+} from "./connection";
 import { LocalAiSetup } from "./LocalAiSetup";
 import { ModelQueueEditor } from "./ModelQueueEditor";
 import { type SaveSettings, SettingRow, SettingsContent, SettingsGroup } from "./settings-layout";
@@ -49,11 +53,15 @@ export function AiSection({
       .then((next) => {
         if (active && next.length > 0) setProviders(next);
       })
-      .catch(() => {});
+      .catch(() => {
+        // Fall back to the bundled list, but say so: otherwise offline users
+        // never learn the provider list is stale.
+        if (active) setNotice(PROVIDER_LIST_FALLBACK_NOTICE);
+      });
     return () => {
       active = false;
     };
-  }, []);
+  }, [setNotice]);
 
   async function refreshKeyStatus() {
     try {
@@ -78,9 +86,13 @@ export function AiSection({
               if (aiProvider === provider) return;
               setBusy("switch-provider");
               setNotice(null);
+              // save() reports success instead of rejecting and already
+              // notices on failure: only refresh the key status after a
+              // persisted switch, so a failed save keeps its own notice.
               void save({ aiProvider })
-                .then(() => refreshKeyStatus())
-                .catch(() => {})
+                .then((saved) => {
+                  if (saved) return refreshKeyStatus();
+                })
                 .finally(() => setBusy(null));
             }}
             value={provider}
@@ -111,9 +123,11 @@ export function AiSection({
                     const raw = event.target.value.trim();
                     const aiCustomBaseUrl = raw === "" ? null : raw;
                     if (aiCustomBaseUrl !== settings.aiCustomBaseUrl) {
-                      void save({ aiCustomBaseUrl }).catch(() =>
-                        setNotice("The base URL couldn’t be saved."),
-                      );
+                      // save() already notices generically on failure; prefer
+                      // the specific message when the URL did not persist.
+                      void save({ aiCustomBaseUrl }).then((saved) => {
+                        if (!saved) setNotice("The base URL couldn’t be saved.");
+                      });
                     }
                   }}
                   placeholder={info.defaultBaseUrl ?? "http://localhost:11434/v1"}
@@ -257,9 +271,11 @@ export function AiSection({
             disabled={busy !== null}
             provider={provider}
             onChange={(aiModels) => {
-              void save({ aiModels })
-                .then(() => setApiStatus((current) => ({ ...current, connection: "untested" })))
-                .catch(() => {});
+              // save() reports success instead of rejecting: only a persisted
+              // queue change invalidates the last connection test.
+              void save({ aiModels }).then((saved) => {
+                setApiStatus((current) => apiStatusAfterModelSave(current, saved));
+              });
             }}
             value={settings.aiModels}
           />

@@ -55,10 +55,46 @@ function escapeHtml(value: string): string {
     .replaceAll('"', "&quot;");
 }
 
+/**
+ * Explicit element allowlist for model output. The renderer overrides above
+ * already neutralize links/images/raw HTML into literal text, so marked can
+ * still only emit block/inline formatting elements; this pins exactly that
+ * set (no anchors, images, inputs, scripts, or styling hooks) and strips
+ * every attribute, including fenced-code language classes. Anything marked
+ * emits in the future is denied by default. Exported for unit tests.
+ */
+export const MARKDOWN_ALLOWED_TAGS = [
+  "h2",
+  "h3",
+  "h4",
+  "p",
+  "blockquote",
+  "ul",
+  "ol",
+  "li",
+  "pre",
+  "code",
+  "em",
+  "strong",
+  "del",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "hr",
+  "br",
+];
+export const MARKDOWN_ALLOWED_ATTR: string[] = [];
+
 /** Markdown source to sanitized HTML. Exported for unit tests. */
 export function renderMarkdown(markdown: string): string {
   const parsed = kivoMarked.parse(markdown, { async: false });
-  return DOMPurify.sanitize(parsed);
+  return DOMPurify.sanitize(parsed, {
+    ALLOWED_TAGS: MARKDOWN_ALLOWED_TAGS,
+    ALLOWED_ATTR: MARKDOWN_ALLOWED_ATTR,
+  });
 }
 
 export function SafeMarkdown({ children }: { readonly children: string }) {

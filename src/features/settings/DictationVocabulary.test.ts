@@ -5,6 +5,7 @@ import {
   mergeVocabulary,
   normalizeVocabularySetting,
   parseVocabularyInput,
+  readVocabularyImportText,
   splitVocabularyItem,
 } from "./vocabulary";
 
@@ -85,5 +86,23 @@ describe("custom words parsing", () => {
       ],
     );
     expect(normalizeVocabularySetting(undefined)).toEqual([]);
+  });
+});
+
+describe("readVocabularyImportText", () => {
+  it("returns the file text on success", async () => {
+    await expect(readVocabularyImportText({ text: async () => "Kivo, SOC 2" })).resolves.toBe(
+      "Kivo, SOC 2",
+    );
+  });
+
+  it("returns null on read failure instead of an empty file", async () => {
+    await expect(
+      readVocabularyImportText({
+        text: async () => {
+          throw new Error("disk gone");
+        },
+      }),
+    ).resolves.toBeNull();
   });
 });

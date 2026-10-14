@@ -22,10 +22,11 @@ import {
   withWritingPreset,
 } from "../writing-tools/presets";
 import { ModelQueueEditor } from "./ModelQueueEditor";
+import type { SaveSettings } from "./settings-layout";
 
 interface WritingPresetListProps {
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
 }
 
 /**
@@ -150,7 +151,7 @@ export function WritingPresetList({ settings, save }: WritingPresetListProps) {
 interface WritingPresetFormProps {
   readonly preset: WritingPreset;
   readonly settings: AppSettings;
-  readonly save: (patch: Partial<AppSettings>) => Promise<void>;
+  readonly save: SaveSettings;
   readonly onClose: () => void;
 }
 

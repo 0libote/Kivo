@@ -82,7 +82,10 @@ function PermissionsPreferences({
       void nativeBridge
         .getPermissions()
         .then(setPermissions)
-        .catch(() => {});
+        .catch(() => {
+          // Background poll stays silent: the initial refresh above reports
+          // failures, and the next tick retries without flashing a notice.
+        });
     };
     const interval = window.setInterval(poll, 2500);
     window.addEventListener("focus", poll);

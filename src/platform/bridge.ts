@@ -41,6 +41,41 @@ export type NativeEventMap = {
   "voz-worker-request": VozWorkerRequest;
 };
 
+function isEventRecord(payload: unknown): payload is Record<string, unknown> {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload);
+}
+
+/**
+ * Runtime guard for native event payloads. Tauri deserializes payloads as
+ * unknown JSON, so a backend shape change must never reach a typed handler
+ * unchecked: `useNativeEvent` drops anything implausible (and warns) instead
+ * of casting blindly. Kept structural on purpose — full schemas would repeat
+ * the NativeEventMap and rot; this catches gross mismatches (wrong
+ * primitive, null where an object is expected, missing payloads).
+ */
+export function isNativeEventPayload(event: keyof NativeEventMap, payload: unknown): boolean {
+  switch (event) {
+    case "show-about":
+    case "recovery-changed":
+      return payload === null || payload === undefined;
+    case "pause-changed":
+      return typeof payload === "boolean";
+    case "dictation-level":
+      return typeof payload === "number" && Number.isFinite(payload);
+    case "permission-status-changed":
+    case "local-models-changed":
+      return Array.isArray(payload);
+    case "dictation-state":
+    case "writing-context":
+    case "writing-error":
+    case "settings-changed":
+    case "local-model-progress":
+    case "voz-model-status":
+    case "voz-worker-request":
+      return isEventRecord(payload);
+  }
+}
+
 export interface UpdateResult {
   currentVersion: string;
   availableVersion?: string;

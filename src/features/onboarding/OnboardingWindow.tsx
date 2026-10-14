@@ -16,6 +16,7 @@ import type {
   PermissionKind,
   PermissionStatus,
 } from "../../types";
+import { API_STATUS_UNAVAILABLE_NOTICE } from "../settings/connection";
 import { ModelQueueEditor } from "../settings/ModelQueueEditor";
 
 interface OnboardingWindowProps {
@@ -43,7 +44,10 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
       void nativeBridge
         .getPermissions()
         .then((nextPermissions) => active && setPermissions(nextPermissions))
-        .catch(() => {});
+        .catch(() => {
+          // Background poll stays silent: the initial load below reports
+          // failures, and the next tick retries without flashing a message.
+        });
     };
     // Load independently so a key failure never misreports permissions.
     void nativeBridge
@@ -53,7 +57,7 @@ export function OnboardingWindow({ context, settings, updateSettings }: Onboardi
     void nativeBridge
       .getApiKeyStatus()
       .then((nextApi) => active && setApiStatus(nextApi))
-      .catch(() => active && setMessage("Saved key status isn’t available right now."));
+      .catch(() => active && setMessage(API_STATUS_UNAVAILABLE_NOTICE));
     // Re-read microphone access when returning from Windows Settings.
     const interval = window.setInterval(pollPermissions, 2500);
     window.addEventListener("focus", pollPermissions);
@@ -327,17 +331,20 @@ function ApiKeyStep(props: ApiKeyStepProps) {
         <select
           aria-label="AI provider"
           id="onboarding-ai-provider"
-          onChange={(event) => {
+          onChange={async (event) => {
             const aiProvider = normalizeAiProvider(event.target.value);
             if (aiProvider === provider) return;
-            void updateSettings({ aiProvider })
-              .then(() =>
-                nativeBridge
-                  .getApiKeyStatus()
-                  .then(setApiStatus)
-                  .catch(() => {}),
-              )
-              .catch(() => setMessage("The provider couldn’t be saved."));
+            try {
+              await updateSettings({ aiProvider });
+            } catch {
+              setMessage("The provider couldn’t be saved.");
+              return;
+            }
+            try {
+              setApiStatus(await nativeBridge.getApiKeyStatus());
+            } catch {
+              setMessage(API_STATUS_UNAVAILABLE_NOTICE);
+            }
           }}
           value={provider}
           {...stylex.props(styles.select)}
