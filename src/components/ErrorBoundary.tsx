@@ -20,8 +20,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, _info: ErrorInfo) {
-    // Count and report by error name/message only. Props, children, user
-    // text, and the ErrorInfo component stack are never logged: this
+    // Count and report with a fixed message. Error details, props, children,
+    // user text, and the ErrorInfo component stack are never logged: this
     // boundary wraps surfaces that render private user content.
     reportErrorBoundary(error);
   }

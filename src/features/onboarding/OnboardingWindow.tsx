@@ -331,17 +331,20 @@ function ApiKeyStep(props: ApiKeyStepProps) {
         <select
           aria-label="AI provider"
           id="onboarding-ai-provider"
-          onChange={(event) => {
+          onChange={async (event) => {
             const aiProvider = normalizeAiProvider(event.target.value);
             if (aiProvider === provider) return;
-            void updateSettings({ aiProvider })
-              .then(() =>
-                nativeBridge
-                  .getApiKeyStatus()
-                  .then(setApiStatus)
-                  .catch(() => setMessage(API_STATUS_UNAVAILABLE_NOTICE)),
-              )
-              .catch(() => setMessage("The provider couldn’t be saved."));
+            try {
+              await updateSettings({ aiProvider });
+            } catch {
+              setMessage("The provider couldn’t be saved.");
+              return;
+            }
+            try {
+              setApiStatus(await nativeBridge.getApiKeyStatus());
+            } catch {
+              setMessage(API_STATUS_UNAVAILABLE_NOTICE);
+            }
           }}
           value={provider}
           {...stylex.props(styles.select)}

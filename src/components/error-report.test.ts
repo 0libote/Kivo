@@ -20,12 +20,17 @@ describe("reportErrorBoundary", () => {
     expect(errors).toHaveBeenCalledTimes(2);
   });
 
-  it("logs only the error name and message, never render content", () => {
+  it("does not log private text from error details or extra fields", () => {
     const userText = "secret dictated sentence";
-    reportErrorBoundary(new TypeError("boom"));
-    const logged = errors.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(logged).toContain("TypeError");
-    expect(logged).toContain("boom");
+    reportErrorBoundary(
+      Object.assign(new TypeError(userText), {
+        name: userText,
+        stack: userText,
+        componentStack: userText,
+      }),
+    );
+    expect(errors).toHaveBeenCalledWith("Kivo window failed.");
+    const logged = JSON.stringify(errors.mock.calls);
     expect(logged).not.toContain(userText);
     expect(logged).not.toContain("componentStack");
   });
