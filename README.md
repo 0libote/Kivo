@@ -29,34 +29,24 @@ Keys are stored in Windows Credential Manager. Kivo keeps the latest dictation i
 
 ## Develop
 
-Install Bun, stable Rust, and the [platform build prerequisites](docs/development.md#prerequisites), then:
+Install stable Rust with [rustup](https://rustup.rs/), then:
 
 ```sh
-bun install
-bun tauri dev
+cargo run --manifest-path native-app/Cargo.toml
 ```
-
-For a browser preview without OS integration:
-
-```sh
-bun dev
-```
-
-Open `http://127.0.0.1:1420/?surface=gallery&harness=1` to inspect the test bench. For a local desktop package, run `bun run desktop:build`.
 
 Run the checks before submitting a change:
 
 ```sh
-bun run check
-bun run test:ui
-bun run test:ui:production
-bun run build
-bun run check:bundle
-bun run check:website
-bun run check:rust
-bun run lint:rust
+cargo fmt --manifest-path native-app/Cargo.toml --all -- --check
+cargo clippy --locked --manifest-path native-app/Cargo.toml --all-targets -- -D warnings
+cargo test --locked --manifest-path native-app/Cargo.toml
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 ```
+
+`src-tauri/` remains as the reference backend for the OS integrations being
+ported to the native app. The `docs/` guides still describe the previous
+Tauri layout and are pending a rewrite.
 
 ## Documentation
 
