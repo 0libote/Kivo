@@ -70,20 +70,21 @@ fn apply_theme(settings: &Settings, ctx: &egui::Context) {
 }
 
 impl eframe::App for KivoApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("surface-tabs").show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+        egui::Panel::top("surface-tabs").show(ui, |ui| {
             ui.horizontal(|ui| {
                 for surface in Surface::ALL {
                     ui.selectable_value(&mut self.surface, surface, surface.title());
                 }
             });
         });
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| match self.surface {
                 Surface::FlowBar => flow_writing::show_flow_bar(ui, &mut self.flow),
                 Surface::WritingTools => flow_writing::show_writing_tools(
                     ui,
-                    ctx,
+                    &ctx,
                     &mut self.writing,
                     &self.settings_ui.api_key,
                     &self.settings.ai_model,
@@ -95,7 +96,7 @@ impl eframe::App for KivoApp {
                         &mut self.settings_ui,
                         &mut self.save_error,
                     );
-                    apply_theme(&self.settings, ctx);
+                    apply_theme(&self.settings, &ctx);
                 }
                 Surface::Onboarding => {
                     settings_onboarding::show_onboarding(
@@ -103,9 +104,47 @@ impl eframe::App for KivoApp {
                         &mut self.settings,
                         &mut self.onboarding,
                     );
-                    apply_theme(&self.settings, ctx);
+                    apply_theme(&self.settings, &ctx);
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::App;
+
+    #[test]
+    fn every_surface_renders_its_content() {
+        let ctx = egui::Context::default();
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut app = KivoApp {
+            surface: Surface::FlowBar,
+            settings: Settings::default(),
+            flow: flow_bar::State::default(),
+            writing: writing_tools::State::default(),
+            settings_ui: settings_surface::State::default(),
+            onboarding: onboarding::State::default(),
+            save_error: None,
+        };
+        for (surface, content) in [
+            (Surface::FlowBar, "Dictation"),
+            (Surface::WritingTools, "Text to process:"),
+            (Surface::Settings, "Gemini API key"),
+            (Surface::Onboarding, "Welcome to Kivo"),
+        ] {
+            app.surface = surface;
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| app.ui(ui, &mut frame));
+            let has_content = output.shapes.iter().any(|shape| {
+                matches!(
+                    &shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.text() == content
+                )
+            });
+            output.drop_without_applying_deltas();
+            assert!(has_content, "Missing content for {surface:?}");
+        }
     }
 }
