@@ -42,7 +42,9 @@ pub fn prompt_for(action: Action, source: &str, custom: Option<&str>) -> Result<
         return Err("Text too long for Summarize (200,000 char limit).".to_string());
     }
     let instruction = match action {
-        Action::Proofread => "Fix spelling, grammar, and punctuation, changing as little as possible.",
+        Action::Proofread => {
+            "Fix spelling, grammar, and punctuation, changing as little as possible."
+        }
         Action::Rewrite => "Rewrite for clarity keeping meaning.",
         Action::Friendly => "Rewrite in a friendly tone keeping meaning.",
         Action::Professional => "Rewrite in a professional tone keeping meaning.",
@@ -100,7 +102,11 @@ struct ReqBuilder {
 }
 impl ReqClient {
     fn post(&self, url: &str) -> ReqBuilder {
-        ReqBuilder { url: url.to_string(), key: String::new(), body: serde_json::Value::Null }
+        ReqBuilder {
+            url: url.to_string(),
+            key: String::new(),
+            body: serde_json::Value::Null,
+        }
     }
 }
 impl ReqBuilder {

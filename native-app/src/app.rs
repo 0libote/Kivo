@@ -13,7 +13,12 @@ pub enum Surface {
 }
 
 impl Surface {
-    pub const ALL: [Surface; 4] = [Surface::FlowBar, Surface::WritingTools, Surface::Settings, Surface::Onboarding];
+    pub const ALL: [Surface; 4] = [
+        Surface::FlowBar,
+        Surface::WritingTools,
+        Surface::Settings,
+        Surface::Onboarding,
+    ];
     pub fn title(self) -> &'static str {
         match self {
             Surface::FlowBar => "Flow bar",
@@ -38,7 +43,11 @@ impl KivoApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let settings = Settings::load();
         apply_theme(&settings, &cc.egui_ctx);
-        let surface = if settings.onboarding_complete { Surface::FlowBar } else { Surface::Onboarding };
+        let surface = if settings.onboarding_complete {
+            Surface::FlowBar
+        } else {
+            Surface::Onboarding
+        };
         Self {
             surface,
             settings,
@@ -79,11 +88,20 @@ impl eframe::App for KivoApp {
                     &self.settings_ui.api_key,
                 ),
                 Surface::Settings => {
-                    settings_onboarding::show_settings(ui, &mut self.settings, &mut self.settings_ui, &mut self.save_error);
+                    settings_onboarding::show_settings(
+                        ui,
+                        &mut self.settings,
+                        &mut self.settings_ui,
+                        &mut self.save_error,
+                    );
                     apply_theme(&self.settings, ctx);
                 }
                 Surface::Onboarding => {
-                    settings_onboarding::show_onboarding(ui, &mut self.settings, &mut self.onboarding);
+                    settings_onboarding::show_onboarding(
+                        ui,
+                        &mut self.settings,
+                        &mut self.onboarding,
+                    );
                     apply_theme(&self.settings, ctx);
                 }
             });

@@ -15,7 +15,12 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
             state.message = None;
         }
         if ui.button("Stop").clicked() {
-            state.status = flow_bar::Status::Processing;
+            if state.transcript.trim().is_empty() {
+                state.status = flow_bar::Status::Error;
+                state.message = Some("Nothing captured yet.".to_string());
+            } else {
+                state.status = flow_bar::Status::Processing;
+            }
         }
         if ui.button("Mark success").clicked() {
             state.status = flow_bar::Status::Success;
@@ -45,6 +50,7 @@ pub fn show_writing_tools(
             Ok(sel) => {
                 state.input = sel.text;
                 state.can_replace = sel.can_replace;
+                state.captured_app = Some(sel.app_name);
                 state.error = None;
                 state.mode = writing_tools::Mode::Menu;
             }
@@ -53,6 +59,9 @@ pub fn show_writing_tools(
                 state.mode = writing_tools::Mode::Error;
             }
         }
+    }
+    if let Some(app) = &state.captured_app {
+        ui.small(format!("Captured from {app}"));
     }
     ui.label("Text to process:");
     ui.text_edit_multiline(&mut state.input);
@@ -76,7 +85,7 @@ pub fn show_writing_tools(
             ui.spinner();
             ui.label("Working…");
         }
-        writing_tools::Mode::Result => {
+        writing_tools::Mode::Result | writing_tools::Mode::Chat => {
             ui.label("Result:");
             ui.text_edit_multiline(&mut state.result);
             ui.horizontal(|ui| {
@@ -84,7 +93,10 @@ pub fn show_writing_tools(
                     platform::copy_to_clipboard(ctx, &state.result);
                 }
                 let can_replace = state.can_replace;
-                if ui.add_enabled(can_replace, egui::Button::new("Replace selection")).clicked() {
+                if ui
+                    .add_enabled(can_replace, egui::Button::new("Replace selection"))
+                    .clicked()
+                {
                     match platform::replace_selection(&state.result) {
                         Ok(_) => state.error = None,
                         Err(e) => {
@@ -132,7 +144,14 @@ fn run_action(
         Ok(text) => {
             state.result = text;
             state.action = Some(action);
-            state.mode = writing_tools::Mode::Result;
+            // Chat answers never replace a selection; other actions keep
+            // whatever the capture reported.
+            state.can_replace = action.replaces_selection() && state.can_replace;
+            state.mode = if action == Action::Chat {
+                writing_tools::Mode::Chat
+            } else {
+                writing_tools::Mode::Result
+            };
         }
         Err(e) => {
             state.error = Some(e);

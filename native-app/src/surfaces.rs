@@ -21,7 +21,13 @@ pub mod flow_bar {
 
     impl Default for State {
         fn default() -> Self {
-            Self { status: Status::Idle, transcript: String::new(), message: None, level: 0.0, session: 0 }
+            Self {
+                status: Status::Idle,
+                transcript: String::new(),
+                message: None,
+                level: 0.0,
+                session: 0,
+            }
         }
     }
 }
@@ -48,6 +54,7 @@ pub mod writing_tools {
         pub error: Option<String>,
         pub action: Option<Action>,
         pub can_replace: bool,
+        pub captured_app: Option<String>,
     }
 }
 

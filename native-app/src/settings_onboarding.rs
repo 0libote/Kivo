@@ -1,3 +1,4 @@
+use crate::platform;
 use crate::settings::{Settings, Theme};
 use crate::surfaces::{onboarding, settings_surface};
 
@@ -17,7 +18,10 @@ pub fn show_settings(
     ui.checkbox(&mut settings.launch_at_login, "Launch at login");
     ui.checkbox(&mut settings.start_in_background, "Start in background");
     ui.checkbox(&mut settings.show_idle_flow_bar, "Show idle flow bar");
-    ui.checkbox(&mut settings.improve_dictation_with_ai, "Improve dictation with AI");
+    ui.checkbox(
+        &mut settings.improve_dictation_with_ai,
+        "Improve dictation with AI",
+    );
     ui.checkbox(&mut settings.sound_feedback, "Sound feedback");
     ui.horizontal(|ui| {
         ui.label("Dictation shortcut:");
@@ -28,8 +32,29 @@ pub fn show_settings(
         ui.text_edit_singleline(&mut settings.writing_shortcut);
     });
     ui.horizontal(|ui| {
+        ui.label("Microphone:");
+        let current = platform::microphones()
+            .iter()
+            .find(|(id, _)| Some(id) == settings.microphone_id.as_ref())
+            .map(|(_, name)| name.clone())
+            .unwrap_or_else(|| "System Default".to_string());
+        egui::ComboBox::from_id_salt("mic")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (id, name) in platform::microphones() {
+                    ui.selectable_value(&mut settings.microphone_id, Some(id), name);
+                }
+            });
+    });
+    ui.horizontal(|ui| {
         ui.label("Language:");
-        ui.text_edit_singleline(&mut settings.dictation_language);
+        egui::ComboBox::from_id_salt("lang")
+            .selected_text(settings.dictation_language.clone())
+            .show_ui(ui, |ui| {
+                for (code, name) in platform::speech_languages() {
+                    ui.selectable_value(&mut settings.dictation_language, code, name);
+                }
+            });
     });
     ui.separator();
     ui.heading("Gemini API key");
@@ -64,13 +89,13 @@ pub fn show_settings(
     }
 }
 
-pub fn show_onboarding(
-    ui: &mut egui::Ui,
-    settings: &mut Settings,
-    state: &mut onboarding::State,
-) {
+pub fn show_onboarding(ui: &mut egui::Ui, settings: &mut Settings, state: &mut onboarding::State) {
     ui.heading("Welcome to Kivo");
-    ui.label(format!("Step {} of {}", state.step + 1, onboarding::STEPS.len()));
+    ui.label(format!(
+        "Step {} of {}",
+        state.step + 1,
+        onboarding::STEPS.len()
+    ));
     ui.label(onboarding::STEPS[state.step.min(onboarding::STEPS.len() - 1)]);
     match state.step {
         0 => {
@@ -91,14 +116,27 @@ pub fn show_onboarding(
         }
         _ => {
             ui.label("Create a Gemini key in AI Studio and paste it under Settings.");
-            ui.checkbox(&mut settings.onboarding_complete, "Mark onboarding complete");
+            ui.checkbox(
+                &mut settings.onboarding_complete,
+                "Mark onboarding complete",
+            );
         }
     }
     ui.horizontal(|ui| {
-        if ui.add_enabled(state.step > 0, egui::Button::new("Back")).clicked() {
+        if ui
+            .add_enabled(state.step > 0, egui::Button::new("Back"))
+            .clicked()
+        {
             state.step -= 1;
         }
-        if ui.button(if state.step + 1 >= onboarding::STEPS.len() { "Finish" } else { "Next" }).clicked() {
+        if ui
+            .button(if state.step + 1 >= onboarding::STEPS.len() {
+                "Finish"
+            } else {
+                "Next"
+            })
+            .clicked()
+        {
             if state.step + 1 >= onboarding::STEPS.len() {
                 settings.onboarding_complete = true;
                 let _ = settings.save();

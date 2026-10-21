@@ -21,7 +21,9 @@ pub enum PlatformError {
 impl std::fmt::Display for PlatformError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unsupported(what) => write!(f, "{what} isn't available in this native build yet."),
+            Self::Unsupported(what) => {
+                write!(f, "{what} isn't available in this native build yet.")
+            }
         }
     }
 }
