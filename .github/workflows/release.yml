@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ["app-v*"]
+    tags: ["app-v*", "[0-9]*.[0-9]*.[0-9]*"]
 permissions:
   contents: write
 jobs:
@@ -12,7 +12,7 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
