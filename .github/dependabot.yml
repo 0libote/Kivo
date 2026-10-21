@@ -1,6 +1,6 @@
 version: 2
 updates:
-  # Keep pinned GitHub Actions SHAs fresh.
+  # Keep pinned GitHub Actions fresh.
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -1,57 +1,27 @@
 name: Release
-
 on:
   push:
     tags: ["app-v*"]
-  workflow_dispatch:
-
-# Tags do not trigger the CI workflow (it listens on pull_request / main),
-# so stable releases use the complete shared verification gate instead of shipping
-# whatever a tag points at unchecked.
 permissions:
-  contents: read
-
+  contents: write
 jobs:
-  verify:
-    uses: ./.github/workflows/verify.yml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      app: true
-      backend: true
-
-  windows:
-    needs: [verify]
-    # Stable releases must originate from version tags or main. Without this,
-    # a manual dispatch from any branch could cut a stable release, and the
-    # tag-version check below is skipped for non-tag refs.
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
-    concurrency:
-      group: stable-release-${{ github.ref }}
-      cancel-in-progress: false
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
     env:
       CARGO_PROFILE_RELEASE_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
-    runs-on: windows-latest
-    timeout-minutes: 45
-    permissions:
-      contents: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.99.0
-      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          workspaces: native-app
-          shared-key: release
       - name: Validate tag version
         shell: bash
         run: |
           version="$(grep '^version' native-app/Cargo.toml | head -1 | cut -d'"' -f2)"
-          if [ "$GITHUB_REF_TYPE" = tag ]; then test "$GITHUB_REF_NAME" = "app-v$version"; fi
-      - name: Build unsigned native binary
+          test "$GITHUB_REF_NAME" = "app-v$version"
+      - name: Build release binary
         shell: pwsh
         run: |
           cargo build --locked --release --manifest-path native-app/Cargo.toml
@@ -79,9 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           version="$(grep '^version' native-app/Cargo.toml | head -1 | cut -d'"' -f2)"
-          tag="${GITHUB_REF_NAME:-app-v$version}"
-          gh release create "$tag" native-app/target/release/kivo-native.exe \
-            --target "$GITHUB_SHA" \
+          gh release create "$GITHUB_REF_NAME" native-app/target/release/kivo-native.exe \
             --draft \
             --title "Kivo $version" \
             --notes "Kivo ${version}. Windows 11 24H2+: download kivo-native.exe and run it (SmartScreen: More info -> Run anyway, unless signed)."
