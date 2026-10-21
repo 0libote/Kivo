@@ -1,5 +1,7 @@
-//! Minimal Gemini prompt builders + blocking REST call.
-//! Mirrors `src-tauri/src/ai` semantics (model, store:false, deadlines) without Tauri.
+//! Gemini prompts and a bounded REST call run on a worker thread.
+
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 pub const MODEL: &str = "gemini-3.8-flash";
 
@@ -57,95 +59,100 @@ pub fn prompt_for(action: Action, source: &str, custom: Option<&str>) -> Result<
     Ok(format!("{instruction}\n\n---\n{source}"))
 }
 
-/// Synchronous Gemini call via the Interactions API. Runs on a worker thread
-/// from the UI so the frame loop never blocks.
-pub fn run_blocking(api_key: &str, prompt: &str, link_url: Option<&str>) -> Result<String, String> {
+/// Keep both the key and source text off the process command line.
+fn curl_config(api_key: &str, model: &str, prompt: &str) -> Result<String, String> {
     let key = api_key.trim();
-    if key.is_empty() {
-        return Err("Set your Gemini API key in Settings first.".to_string());
+    if key.is_empty() || key.chars().any(char::is_control) {
+        return Err("Set a valid Gemini API key in Settings first.".to_string());
     }
-    let client = reqwest_blocking_client()?;
+    if model.trim().is_empty() {
+        return Err("Set a Gemini model in Settings first.".to_string());
+    }
     let body = serde_json::json!({
-        "model": MODEL,
+        "model": model.trim(),
         "store": false,
         "input": prompt,
-        "context": link_url,
     });
-    let res: serde_json::Value = client
-        .post("https://generativelanguage.googleapis.com/v1beta/interactions")
-        .header("x-goog-api-key", key)
-        .json(&body)
-        .send()
-        .map_err(|e| format!("Network error: {e}"))?
-        .json()
-        .map_err(|e| format!("Bad response: {e}"))?;
-    res.get("output_text")
-        .or_else(|| res.get("text"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| "Gemini returned no text.".to_string())
+    Ok(format!(
+        "header = {}\nheader = \"Content-Type: application/json\"\nheader = \"Api-Revision: 2026-05-20\"\ndata = {}\n",
+        serde_json::to_string(&format!("x-goog-api-key: {key}")).unwrap(),
+        serde_json::to_string(&body.to_string()).unwrap(),
+    ))
 }
 
-fn reqwest_blocking_client() -> Result<ReqClient, String> {
-    Ok(ReqClient)
+pub fn run_blocking(api_key: &str, model: &str, prompt: &str) -> Result<String, String> {
+    let config = curl_config(api_key, model, prompt)?;
+    let mut command = Command::new("curl");
+    command
+        .args([
+            "--disable",
+            "--silent",
+            "--show-error",
+            "--fail-with-body",
+            "--max-time",
+            "20",
+            "--config",
+            "-",
+        ])
+        .arg("https://generativelanguage.googleapis.com/v1beta/interactions")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Could not start curl: {e}"))?;
+    let written = child.stdin.take().unwrap().write_all(config.as_bytes());
+    if let Err(error) = written {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("Could not send request to curl: {error}"));
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("Network error: {e}"))?;
+    if !output.status.success() {
+        let detail = serde_json::from_slice::<serde_json::Value>(&output.stdout)
+            .ok()
+            .and_then(|body| {
+                body.get("error")?
+                    .get("message")?
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| {
+                "Gemini request failed. Check your connection, key, model, and quota.".to_string()
+            });
+        return Err(detail.chars().take(300).collect());
+    }
+    let response =
+        serde_json::from_slice(&output.stdout).map_err(|e| format!("Bad response: {e}"))?;
+    parse_response(&response)
 }
 
-// Tiny std-only HTTP shim so `cargo check` works without new deps; the real
-// network path is behind the `blocking-net` hookup below.
-// To keep the one-go port dependency-light we shell out to `curl` when
-// available, which every supported macOS/Windows install has.
-struct ReqClient;
-struct ReqBuilder {
-    url: String,
-    key: String,
-    body: serde_json::Value,
-}
-impl ReqClient {
-    fn post(&self, url: &str) -> ReqBuilder {
-        ReqBuilder {
-            url: url.to_string(),
-            key: String::new(),
-            body: serde_json::Value::Null,
-        }
+fn parse_response(response: &serde_json::Value) -> Result<String, String> {
+    if response.get("status").and_then(|value| value.as_str()) != Some("completed") {
+        return Err("Gemini did not complete the request.".to_string());
     }
-}
-impl ReqBuilder {
-    fn header(mut self, _: &str, key: &str) -> Self {
-        self.key = key.to_string();
-        self
+    let text: String = response
+        .get("steps")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|step| step.get("type").and_then(|value| value.as_str()) == Some("model_output"))
+        .filter_map(|step| step.get("content")?.as_array())
+        .flatten()
+        .filter(|part| part.get("type").and_then(|value| value.as_str()) == Some("text"))
+        .filter_map(|part| part.get("text")?.as_str())
+        .collect();
+    if text.trim().is_empty() {
+        return Err("Gemini returned no text.".to_string());
     }
-    fn json(mut self, body: &serde_json::Value) -> Self {
-        self.body = body.clone();
-        self
-    }
-    fn send(self) -> Result<ReqResponse, String> {
-        let out = std::process::Command::new("curl")
-            .args(["-sS", "-m", "20", "-X", "POST"])
-            .arg("-H")
-            .arg("Content-Type: application/json")
-            .arg("-H")
-            .arg(format!("x-goog-api-key: {}", self.key))
-            .arg("-d")
-            .arg(self.body.to_string())
-            .arg(&self.url)
-            .output()
-            .map_err(|e| format!("Network error: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "Network error: curl failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        Ok(ReqResponse { bytes: out.stdout })
-    }
-}
-struct ReqResponse {
-    bytes: Vec<u8>,
-}
-impl ReqResponse {
-    fn json(self) -> Result<serde_json::Value, String> {
-        serde_json::from_slice(&self.bytes).map_err(|e| format!("Bad response: {e}"))
-    }
+    Ok(text.trim().to_owned())
 }
 
 #[cfg(test)]
@@ -161,5 +168,42 @@ mod tests {
     fn summarize_limit_matches_tauri() {
         let long = "x".repeat(200_001);
         assert!(prompt_for(Action::Summarize, &long, None).is_err());
+    }
+
+    #[test]
+    fn reads_completed_model_text_without_exposing_thoughts_or_input() {
+        let response = serde_json::json!({
+            "status": "completed",
+            "steps": [
+                {"type": "user_input", "content": [{"type": "text", "text": "source"}]},
+                {"type": "model_output", "content": [
+                    {"type": "thought", "text": "private reasoning"},
+                    {"type": "text", "text": "  Hello"},
+                    {"type": "text", "text": " world  "}
+                ]}
+            ]
+        });
+        assert_eq!(parse_response(&response).unwrap(), "Hello world");
+        assert!(parse_response(&serde_json::json!({"status": "in_progress"})).is_err());
+        assert!(parse_response(&serde_json::json!({"status": "completed", "steps": []})).is_err());
+    }
+
+    #[test]
+    fn request_config_preserves_large_private_text_and_rejects_header_injection() {
+        let prompt = format!("Quotes: \"hello\"\nUnicode: café\0{}", "x".repeat(200_000));
+        let config = curl_config("test-key", "new-model", &prompt).unwrap();
+        let data = config
+            .lines()
+            .find_map(|line| line.strip_prefix("data = "))
+            .unwrap();
+        let encoded_body: String = serde_json::from_str(data).unwrap();
+        let body: serde_json::Value = serde_json::from_str(&encoded_body).unwrap();
+        assert_eq!(body["input"], prompt);
+        assert_eq!(body["model"], "new-model");
+        assert_eq!(body["store"], false);
+        assert_eq!(config.lines().count(), 4);
+        assert!(curl_config("key\r\ninjected: value", MODEL, "text").is_err());
+        assert!(curl_config("", MODEL, "text").is_err());
+        assert!(curl_config("key", " ", "text").is_err());
     }
 }

@@ -87,6 +87,7 @@ impl eframe::App for KivoApp {
                     &ctx,
                     &mut self.writing,
                     &self.settings_ui.api_key,
+                    &self.settings.ai_model,
                 ),
                 Surface::Settings => {
                     settings_onboarding::show_settings(

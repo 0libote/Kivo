@@ -17,3 +17,6 @@ dirs = "7.0"
 
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+strip = true

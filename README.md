@@ -1,57 +1,48 @@
 # Kivo
 
-System-wide dictation and writing tools for Windows. Dictate into your current app, rewrite selected text, or summarize text and links from a compact popup.
+Kivo is a Windows dictation and writing utility being ported from Tauri to a native Rust UI.
+The current native build is a development preview: writing tools accept pasted text and call Gemini, while dictation, global shortcuts, system selection capture, and text replacement still need their OS integrations ported.
 
-Kivo runs in the background. It has no account system or Kivo-hosted analytics. Optional Desert Ant Voz/Ear models send required device-usage telemetry to Desert Ant Labs; audio and transcripts stay on-device. Review and acknowledge this in Settings before using them. See [data collection](docs/user-guide.md#data-collection).
+## Download and use
 
-## Download
+Published builds appear on [GitHub Releases](https://github.com/0libote/Kivo/releases).
+The release workflow produces a portable `kivo-native.exe` for Windows 11 24H2+ and leaves it in a draft for review. There is currently no installer, continuous beta channel, or native in-app updater. Unsigned builds may show a Windows SmartScreen warning.
 
-Get an installer from [GitHub Releases](https://github.com/0libote/Kivo/releases). The [latest beta](https://github.com/0libote/Kivo/releases/tag/continuous) follows `main` and may contain unfinished changes.
+1. Run `kivo-native.exe` and open Settings.
+2. Enter a Gemini API key and choose a model available to your key. The model ID is editable so a retired default does not require a new app build. Save settings to keep the model selection.
+3. Open Writing tools, paste text, and select an action. Copy the result into your app.
 
-| Platform | Requirements | Download |
-| --- | --- | --- |
-| Windows | Windows 11 24H2+ | `-setup.exe` |
+The key stays in memory for the current session; enter it again after restarting. Settings are saved in the OS config directory under `kivo/settings.json`. Text sent to Gemini leaves your computer; requests use `store: false`. The native preview does not yet use Windows Credential Manager or support the reference backend's other AI providers and local speech models.
 
-The beta is not a stable release. Windows builds may show a SmartScreen warning. See [installation and signing](docs/releasing.md) for details.
-
-Linux is a development test bench with simulated OS integration; it is not a supported release platform.
-
-## Use Kivo
-
-1. Open Kivo and complete the permission setup.
-2. Use the configured dictation shortcut to speak into the current text field.
-3. Select text and use the Writing Tools shortcut to proofread, rewrite, or summarize it.
-4. For AI features, choose a provider or local endpoint in Settings → AI.
-
-System dictation works without an AI key. Optional on-device transcription models can be installed in Settings → Dictation. Hosted writing tools and optional dictation cleanup send text to the provider you choose; local AI endpoints keep those requests on your computer. Link summaries require Gemini.
-
-Keys are stored in Windows Credential Manager. Kivo keeps the latest dictation in memory for recovery, rather than saving a transcript history.
+The Dictation surface currently uses typed or pasted text to exercise its UI states. Shortcut, microphone, and startup settings are placeholders until the integrations are ported. Linux is a development bench, not a supported release target.
 
 ## Develop
 
-Install stable Rust with [rustup](https://rustup.rs/), then:
+Install [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` selects Rust and the required components. The native Gemini transport also requires `curl` on PATH (included with supported Windows versions).
 
 ```sh
-cargo run --manifest-path native-app/Cargo.toml
+cargo run --locked --manifest-path native-app/Cargo.toml
 ```
 
-Run the checks before submitting a change:
+Run the native checks before submitting a change:
 
 ```sh
 cargo fmt --manifest-path native-app/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path native-app/Cargo.toml --all-targets -- -D warnings
 cargo test --locked --manifest-path native-app/Cargo.toml
-cargo test --locked --manifest-path src-tauri/Cargo.toml
+python3 -m unittest discover -s scripts -v
 ```
 
-`src-tauri/` remains as the reference backend for the OS integrations being
-ported to the native app. The `docs/` guides still describe the previous
-Tauri layout and are pending a rewrite.
+`src-tauri/` is the reference backend for integrations still being ported. Its frontend has been removed, so it is not a runnable alternative app. Changes there also need its format, Clippy, and test checks; use the same Cargo commands with `src-tauri/Cargo.toml`. On Ubuntu these require `libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, and `libasound2-dev`, plus CMake and a C/C++ compiler. The vendored GLib patch fixes an upstream soundness bug and must stay until the reference backend can use a fixed dependency.
 
-## Documentation
+CI caches both Rust targets, cancels superseded runs, and checks only the app affected by a change. Documentation-only changes run the release script tests without installing Rust or GTK. A manual CI run checks both apps. The required status remains `check`.
 
-- [User guide](docs/user-guide.md): AI setup, speech engines, summaries, permissions, and troubleshooting.
-- [Development](docs/development.md): toolchains, browser harness, Linux bench, and architecture.
-- [Releases](docs/releasing.md): installers, signing, release channels, and in-app updates.
-- [Website](website/README.md): preview and deploy the static site.
-- [Repository audit](docs/repo-audit.md): cleanup findings and remaining release checks.
+## Release
+
+Push a semantic version tag such as `0.2.0` or `app-v0.2.0`. The tag sets the versions in both manifests and lockfiles and the Tauri config before a locked Windows release build. Version syncing uses Python 3.11+ and does not resolve or download dependencies.
+
+If `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the executable is signed. Review and publish the resulting draft manually. Re-running a tag updates the existing draft asset; published releases require a new version tag.
+
+After the build, the workflow opens a version bump PR against `main`, explicitly dispatches CI, and enables auto-merge. This requires Actions to be allowed to create PRs and auto-merge to be enabled in repository settings. Older tags cannot downgrade the current native package version.
+
+[Installer artwork](packaging/README.md) is retained for the reference backend; it is not part of the native release.

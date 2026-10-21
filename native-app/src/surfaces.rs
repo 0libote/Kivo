@@ -45,7 +45,7 @@ pub mod writing_tools {
         Chat,
     }
 
-    #[derive(Clone, Debug, Default)]
+    #[derive(Debug, Default)]
     pub struct State {
         pub mode: Mode,
         pub input: String,
@@ -55,6 +55,7 @@ pub mod writing_tools {
         pub action: Option<Action>,
         pub can_replace: bool,
         pub captured_app: Option<String>,
+        pub pending: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     }
 }
 
@@ -71,5 +72,5 @@ pub mod onboarding {
     pub struct State {
         pub step: usize,
     }
-    pub const STEPS: [&str; 4] = ["Welcome", "Permissions", "Shortcuts", "AI key"];
+    pub const STEPS: [&str; 4] = ["Welcome", "Preview limits", "Shortcuts", "AI key"];
 }

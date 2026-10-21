@@ -18,10 +18,10 @@ src-tauri/keys/
 *.cer
 *.key
 
-.playwright-mcp/
-
 .tools/
+__pycache__/
 
+.playwright-mcp/
 /dist-browser/
 
 # Generated continuous-channel staging (CI only, never committed).
