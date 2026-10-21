@@ -1,6 +1,7 @@
 mod ai;
 mod commands;
 mod config;
+mod http;
 mod platform;
 mod security;
 mod shell;

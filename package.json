@@ -71,7 +71,7 @@
     "lefthook": "^2.1.14",
     "oxlint": "^1.85.0",
     "typescript": "^7.0.2",
-    "vite": "^8.3.1"
+    "vite": "^8.3.3"
   },
   "patchedDependencies": {
     "@astryxdesign/cli@0.6.3": "patches/@astryxdesign%2Fcli@0.6.3.patch"

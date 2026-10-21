@@ -21,7 +21,7 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
     let current_version = app.package_info().version.to_string();
     let current_sha = current_build_sha();
 
-    let client = reqwest::Client::builder()
+    let client = crate::http::client_builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(12))
         .build()

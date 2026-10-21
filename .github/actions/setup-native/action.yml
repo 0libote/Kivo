@@ -2,7 +2,7 @@ name: Native build prerequisites
 description: Pinned Rust, host prerequisites, and profile-specific dependency cache.
 inputs:
   profile:
-    description: Cache identity for checks, beta, or stable builds
+    description: Cache identity for checks or release builds
     required: true
 outputs:
   cache-hit:
