@@ -34,14 +34,18 @@ For a local installer/package, prefer the fast release-like build:
 bun run desktop:build
 ```
 
-That keeps Cargo output in the normal release directory but uses thin LTO,
-16 codegen units, and normal speed-oriented optimisation instead of the stable
-release's fat-LTO/single-codegen link. If `sccache` is already on `PATH`, the
-script also uses it for Rust and C/C++ compilation. The tagged release workflow
-still uses the full `[profile.release]` settings. Use `bun tauri build`
-directly only when you specifically want to reproduce that slower stable
-release profile. Pass normal Tauri build arguments after `--`, for example
-`bun run desktop:build -- --bundles nsis`.
+Local packages, CI betas, and tagged releases use the same optimized Cargo
+release profile: 16 codegen units, optimization level 2, stripped symbols, and
+no cross-crate LTO. Desktop builds emit only the Rust library linked by the
+executable. The HTTP clients share the updater's Ring TLS backend, avoiding a
+second native crypto build. Beta and stable jobs reuse the release dependency
+cache.
+
+If `sccache` is already on `PATH`, `desktop:build` uses it for Rust and C/C++
+compilation. Pass normal Tauri build arguments after `--`, for example
+`bun run desktop:build -- --bundles nsis`. For a compiler timing report, run
+`bun tauri build --no-bundle -- --locked --timings` and open
+`src-tauri/target/cargo-timings/cargo-timing.html`.
 
 The Vite-only preview includes a safe local harness for inspecting all four surfaces without invoking OS integration:
 
@@ -81,7 +85,7 @@ bun run check:website
 bun check:rust
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 bun run desktop:build  # fast local package
-bun tauri build        # full stable release profile
+bun tauri build        # shared release profile
 ```
 
 Git hooks are managed by Lefthook: `bun install` installs them, pre-commit runs

@@ -82,12 +82,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Beta-only fast release tuning. NSIS is the
-      # only Windows route: a single bundle build, no second packaging pass.
-      CARGO_PROFILE_RELEASE_LTO: thin
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "2"
-      CARGO_PROFILE_RELEASE_STRIP: "symbols"
+      # Beta and stable use the same optimized profile and dependency cache.
       CARGO_PROFILE_RELEASE_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
       # Stamped into the binary via option_env!("KIVO_BUILD_SHA") so the
@@ -100,7 +95,7 @@ jobs:
           bun-version: 1.4.2
       - uses: ./.github/actions/setup-native
         with:
-          profile: beta
+          profile: release
       - run: bun install --frozen-lockfile --ignore-scripts
       # The updater archive is signed with Tauri's key; the manual .exe
       # remains unsigned and may display a SmartScreen warning.
@@ -111,7 +106,7 @@ jobs:
         shell: pwsh
         run: |
           $timer = [System.Diagnostics.Stopwatch]::StartNew()
-          bun tauri build --bundles nsis --config src-tauri/target/release-tauri.conf.json
+          bun tauri build --bundles nsis --config src-tauri/target/release-tauri.conf.json -- --locked
           if ($LASTEXITCODE -ne 0) { throw 'Beta installer build failed.' }
           $timer.Stop()
           "Beta build: $($timer.Elapsed.TotalSeconds.ToString('F1')) seconds" | Out-File $env:GITHUB_STEP_SUMMARY -Append

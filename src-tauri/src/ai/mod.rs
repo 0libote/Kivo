@@ -548,7 +548,10 @@ impl GeminiClient {
 
     #[cfg(test)]
     pub(crate) fn with_timeout(mut self, timeout: Duration) -> Self {
-        self.http = reqwest::Client::builder().timeout(timeout).build().unwrap();
+        self.http = crate::http::client_builder()
+            .timeout(timeout)
+            .build()
+            .unwrap();
         self
     }
 
@@ -564,7 +567,7 @@ impl GeminiClient {
     }
 
     pub fn new() -> Result<Self, GeminiError> {
-        let http = reqwest::Client::builder()
+        let http = crate::http::client_builder()
             .connect_timeout(Duration::from_secs(5))
             // ponytail: 90s, not 20s — slow models (Gemma took 50s live for
             // 3 words) must not surface as "check your connection".

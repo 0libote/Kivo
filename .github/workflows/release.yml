@@ -42,7 +42,7 @@ jobs:
           bun-version: 1.4.2
       - uses: ./.github/actions/setup-native
         with:
-          profile: stable
+          profile: release
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Validate tag version
         shell: bash
@@ -73,7 +73,7 @@ jobs:
             See https://github.com/0libote/Kivo/blob/main/docs/releasing.md for installation and signing details.
           releaseDraft: true
           prerelease: false
-          args: --bundles nsis --config src-tauri/target/release-tauri.conf.json
+          args: --bundles nsis --config src-tauri/target/release-tauri.conf.json -- --locked
       - name: Sign installer when a certificate is configured
         shell: pwsh
         env:
