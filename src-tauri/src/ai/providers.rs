@@ -486,7 +486,7 @@ pub struct OpenAiCompatClient {
 
 impl OpenAiCompatClient {
     pub fn new() -> Result<Self, OpencodeError> {
-        let http = reqwest::Client::builder()
+        let http = crate::http::client_builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(90))
             .build()

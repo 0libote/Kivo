@@ -810,7 +810,7 @@ impl ModelStore {
             .await
             .map(|metadata| metadata.len())
             .unwrap_or(0);
-        let client = reqwest::Client::builder()
+        let client = crate::http::client_builder()
             .connect_timeout(Duration::from_secs(15))
             .build()
             .map_err(|_| ModelStoreError::Download)?;

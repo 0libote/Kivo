@@ -30,7 +30,7 @@ const CANDIDATES: &[(&str, &str, &str)] = &[
 ];
 
 pub async fn detect_local_servers() -> Vec<LocalAiServer> {
-    let Ok(client) = reqwest::Client::builder()
+    let Ok(client) = crate::http::client_builder()
         .timeout(Duration::from_millis(900))
         .build()
     else {
