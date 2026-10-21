@@ -3,6 +3,7 @@ dist/
 coverage/
 playwright-report/
 test-results/
+native-app/target/
 src-tauri/target/
 .DS_Store
 *.log

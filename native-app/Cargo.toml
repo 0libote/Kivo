@@ -1,0 +1,19 @@
+[package]
+name = "kivo-native"
+version = "0.1.0"
+edition = "2021"
+description = "Kivo as a fully native Rust desktop app (no webview)."
+
+[[bin]]
+name = "kivo-native"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.32", features = ["default_fonts", "glow"] }
+egui = "0.32"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "6.0"
+
+[dev-dependencies]
+tempfile = "3"

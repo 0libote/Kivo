@@ -17,7 +17,9 @@ jobs:
     permissions:
       contents: read
       actions: read
-      security-events: write
+    with:
+      app: true
+      backend: true
 
   windows:
     needs: [verify]
@@ -37,44 +39,24 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
-          bun-version: 1.4.2
-      - uses: ./.github/actions/setup-native
+          toolchain: 1.99.0
+      - uses: swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
-          profile: release
-      - run: bun install --frozen-lockfile --ignore-scripts
+          workspaces: native-app
+          shared-key: release
       - name: Validate tag version
         shell: bash
         run: |
-          version="$(bun -e 'console.log((await Bun.file("package.json").json()).version)')"
+          version="$(grep '^version' native-app/Cargo.toml | head -1 | cut -d'"' -f2)"
           if [ "$GITHUB_REF_TYPE" = tag ]; then test "$GITHUB_REF_NAME" = "app-v$version"; fi
-      # NSIS needs no paid certificate or store account. Tauri v2
-      # (`createUpdaterArtifacts: true`) re-uses the installer itself as the
-      # update bundle and signs it in place, so the artifacts are
-      # `-setup.exe` + `-setup.exe.sig` (merged into latest.json by
-      # tauri-action) — not the legacy `-setup.nsis.zip` pair, which only
-      # `v1Compatible` produces.
-      - run: bun run prepare:release
-        env:
-          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: app-v__VERSION__
-          releaseName: Kivo __VERSION__
-          releaseBody: |
-            Install Kivo using the Windows -setup.exe (Windows 11 24H2+).
-
-            The .sig and latest.json assets are used by the in-app updater.
-            See https://github.com/0libote/Kivo/blob/main/docs/releasing.md for installation and signing details.
-          releaseDraft: true
-          prerelease: false
-          args: --bundles nsis --config src-tauri/target/release-tauri.conf.json -- --locked
-      - name: Sign installer when a certificate is configured
+      - name: Build unsigned native binary
+        shell: pwsh
+        run: |
+          cargo build --locked --release --manifest-path native-app/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+      - name: Sign binary when a certificate is configured
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -86,38 +68,20 @@ jobs:
             try {
               $signTool = Get-ChildItem 'C:/Program Files (x86)/Windows Kits/10/bin/*/x64/signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
               if (-not $signTool) { throw 'SignTool was not found.' }
-              Get-ChildItem 'src-tauri/target/release/bundle/nsis/*-setup.exe' | ForEach-Object {
-                & $signTool.FullName sign /f $certificateFile /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName
-                if ($LASTEXITCODE -ne 0) { throw 'Installer signing failed.' }
-              }
+              & $signTool.FullName sign /f $certificateFile /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 native-app/target/release/kivo-native.exe
+              if ($LASTEXITCODE -ne 0) { throw 'Binary signing failed.' }
             } finally { Remove-Item -LiteralPath $certificateFile -ErrorAction SilentlyContinue }
           }
-      - name: Re-sign updater artifacts when a certificate is configured
-        shell: pwsh
+      - name: Draft stable release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: bash
         run: |
-          if ($env:WINDOWS_CERTIFICATE_BASE64) {
-            $version = (Get-Content package.json | ConvertFrom-Json).version
-            $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "app-v$version" }
-            $exe = "src-tauri/target/release/bundle/nsis/Kivo_${version}_x64-setup.exe"
-            $assetName = Split-Path $exe -Leaf
-            # Authenticode rewrote the installer, and clobbering its asset
-            # gives it a new id, so the signature and the id-based url that
-            # tauri-action generated during the build both stop matching it.
-            bun tauri signer sign --app-version $version $exe
-            if ($LASTEXITCODE -ne 0) { throw 'Updater signature refresh failed.' }
-            gh release upload $tag $exe "$exe.sig" --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Re-uploading the signed installer failed.' }
-            gh release download $tag --pattern latest.json --dir $env:RUNNER_TEMP --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Downloading latest.json failed.' }
-            $manifest = Join-Path $env:RUNNER_TEMP 'latest.json'
-            $assetUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag/$assetName"
-            bun scripts/refresh-updater-signature.ts $manifest "$exe.sig" windows-x86_64 $assetUrl
-            if ($LASTEXITCODE -ne 0) { throw 'latest.json refresh failed.' }
-            gh release upload $tag $manifest --clobber
-            if ($LASTEXITCODE -ne 0) { throw 'Re-uploading latest.json failed.' }
-          }
+          set -euo pipefail
+          version="$(grep '^version' native-app/Cargo.toml | head -1 | cut -d'"' -f2)"
+          tag="${GITHUB_REF_NAME:-app-v$version}"
+          gh release create "$tag" native-app/target/release/kivo-native.exe \
+            --target "$GITHUB_SHA" \
+            --draft \
+            --title "Kivo $version" \
+            --notes "Kivo ${version}. Windows 11 24H2+: download kivo-native.exe and run it (SmartScreen: More info -> Run anyway, unless signed)."

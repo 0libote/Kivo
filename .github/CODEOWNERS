@@ -1,5 +1,4 @@
 # Minimal ownership for release-adjacent areas.
-/scripts/ @0libote
 /packaging/ @0libote
 /website/ @0libote
-/tests/ @0libote
+/native-app/ @0libote
