@@ -3,23 +3,63 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
+  pull-requests: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 jobs:
+  # Keep this name: branch protection requires the `check` status.
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        if: github.event_name != 'workflow_dispatch'
+        id: changes
         with:
-          toolchain: 1.99.0
-          components: rustfmt, clippy
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev cmake build-essential
-      - run: cargo fmt --manifest-path native-app/Cargo.toml --all -- --check
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --locked --manifest-path native-app/Cargo.toml --all-targets -- -D warnings
-      - run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --locked --manifest-path native-app/Cargo.toml
-      - run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+          filters: |
+            native:
+              - 'native-app/**'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+            reference:
+              - 'src-tauri/**'
+              - 'rust-toolchain.toml'
+              - '.github/workflows/ci.yml'
+      - name: Check release version syncing
+        run: python3 -m unittest discover -s scripts -v
+      - name: Install pinned Rust toolchain
+        if: steps.changes.outputs.native == 'true' || steps.changes.outputs.reference == 'true' || github.event_name == 'workflow_dispatch'
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changes.outputs.native == 'true' || steps.changes.outputs.reference == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          workspaces: |
+            native-app
+            src-tauri
+      - name: Install native system dependencies
+        if: steps.changes.outputs.native == 'true' || steps.changes.outputs.reference == 'true' || github.event_name == 'workflow_dispatch'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+      - name: Install reference backend system dependencies
+        if: steps.changes.outputs.reference == 'true' || github.event_name == 'workflow_dispatch'
+        run: sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libasound2-dev
+      - name: Check native app
+        if: steps.changes.outputs.native == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          cargo fmt --manifest-path native-app/Cargo.toml --all -- --check
+          cargo clippy --locked --manifest-path native-app/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path native-app/Cargo.toml
+      - name: Check reference backend
+        if: steps.changes.outputs.reference == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo test --locked --manifest-path src-tauri/Cargo.toml

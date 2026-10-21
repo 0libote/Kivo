@@ -58,20 +58,11 @@ pub fn show_settings(
     });
     ui.separator();
     ui.heading("Gemini API key");
-    ui.label("Stored for this native build in the OS config dir; never logged.");
+    ui.label("Kept in memory for this session. Enter it again after restarting Kivo.");
     ui.add(egui::TextEdit::singleline(&mut state.api_key).password(true));
     ui.horizontal(|ui| {
-        if ui.button("Save key").clicked() {
-            if state.api_key.trim().len() > 8 {
-                settings.api_key_configured = true;
-                state.status = Some("Key saved.".to_string());
-            } else {
-                state.status = Some("Key looks too short.".to_string());
-            }
-        }
         if ui.button("Clear key").clicked() {
             state.api_key.clear();
-            settings.api_key_configured = false;
             state.status = Some("Key cleared.".to_string());
         }
         if ui.button("Save settings").clicked() {
@@ -80,6 +71,10 @@ pub fn show_settings(
                 state.status = Some("Settings saved.".to_string());
             }
         }
+    });
+    ui.horizontal(|ui| {
+        ui.label("Gemini model:");
+        ui.text_edit_singleline(&mut settings.ai_model);
     });
     if let Some(s) = &state.status {
         ui.label(s);
@@ -99,10 +94,10 @@ pub fn show_onboarding(ui: &mut egui::Ui, settings: &mut Settings, state: &mut o
     ui.label(onboarding::STEPS[state.step.min(onboarding::STEPS.len() - 1)]);
     match state.step {
         0 => {
-            ui.label("Quiet, system-wide dictation and writing help. No account, no telemetry.");
+            ui.label("Writing tools for pasted text. Dictation and system integration are still being ported.");
         }
         1 => {
-            ui.label("Grant Accessibility, Input Monitoring, Microphone, Speech Recognition in OS Settings when asked.");
+            ui.label("This preview accepts pasted text. Dictation, global shortcuts, and system selection capture are not available yet.");
         }
         2 => {
             ui.horizontal(|ui| {

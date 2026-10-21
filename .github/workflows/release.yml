@@ -3,35 +3,32 @@ on:
   push:
     tags: ["app-v*", "[0-9]*.[0-9]*.[0-9]*"]
 permissions:
-  contents: write
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   build:
+    permissions:
+      contents: write
     runs-on: windows-latest
     timeout-minutes: 45
     env:
       CARGO_PROFILE_RELEASE_DEBUG: "0"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+      - name: Install pinned Rust toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
         with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.99.0
-      # The tag is the version of record: force every version file to it
-      # before building so the binary reports the tag number.
+          workspaces: native-app
+          key: release
       - name: Sync versions to tag
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#app-v}"
-          test -n "$version"
-          sed -i "s/^version = \".*\"/version = \"$version\"/" native-app/Cargo.toml src-tauri/Cargo.toml
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/" src-tauri/tauri.conf.json
-          cargo metadata --no-deps --format-version 1 --manifest-path native-app/Cargo.toml > /dev/null
-          cargo metadata --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml > /dev/null
-          cargo metadata --locked --format-version 1 --manifest-path native-app/Cargo.toml > /dev/null
-          cargo metadata --locked --format-version 1 --manifest-path src-tauri/Cargo.toml > /dev/null
+          version="$(python scripts/sync_version.py "$GITHUB_REF_NAME")"
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build release binary
         shell: pwsh
@@ -54,52 +51,60 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Binary signing failed.' }
             } finally { Remove-Item -LiteralPath $certificateFile -ErrorAction SilentlyContinue }
           }
-      # Replace any existing release for this tag so re-pushed tags rebuild it.
-      - name: Force draft release for tag
+      - name: Upload draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          gh release delete "$GITHUB_REF_NAME" --yes > /dev/null 2>&1 || true
-          gh release create "$GITHUB_REF_NAME" native-app/target/release/kivo-native.exe \
-            --draft \
-            --title "Kivo $VERSION" \
-            --notes "Kivo ${VERSION}. Windows 11 24H2+: download kivo-native.exe and run it (SmartScreen: More info -> Run anyway, unless signed)."
-      # Main is protected (no direct pushes), so land the version bump
-      # through an auto-merge PR. Never downgrades a newer main.
-      - name: Push version bump to main
+          if gh release view "$GITHUB_REF_NAME" --json isDraft > "$RUNNER_TEMP/release.json"; then
+            if [ "$(jq -r .isDraft "$RUNNER_TEMP/release.json")" != true ]; then
+              echo "Release is already published; use a new version tag."
+              exit 1
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
+              --title "Kivo $VERSION" \
+              --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. Dictation and system selection integration are still being ported."
+          fi
+          gh release upload "$GITHUB_REF_NAME" native-app/target/release/kivo-native.exe --clobber
+
+  bump-version:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Open version bump PR
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          version="$(python3 scripts/sync_version.py "$GITHUB_REF_NAME" --only-newer)"
+          git add native-app/Cargo.toml native-app/Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          if git diff --cached --quiet; then
+            echo "main is already at this version or newer."
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          version="${GITHUB_REF_NAME#app-v}"
           branch="release-bump-$GITHUB_REF_NAME"
-          git reset --hard origin/main
-          current="$(grep '^version' native-app/Cargo.toml | head -1 | cut -d'"' -f2)"
-          if [ "$current" = "$version" ]; then
-            echo "main already at $version; nothing to do."
-            exit 0
-          fi
-          newest="$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -1)"
-          if [ "$newest" != "$version" ]; then
-            echo "main ($current) is newer than tag ($version); not downgrading."
-            exit 0
-          fi
-          git checkout -B "$branch" origin/main
-          sed -i "s/^version = \".*\"/version = \"$version\"/" native-app/Cargo.toml src-tauri/Cargo.toml
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$version\"/" src-tauri/tauri.conf.json
-          cargo metadata --no-deps --format-version 1 --manifest-path native-app/Cargo.toml > /dev/null
-          cargo metadata --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml > /dev/null
-          git add native-app/Cargo.toml native-app/Cargo.lock src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
+          git switch -c "$branch"
           git commit -m "Bump versions to $version for $GITHUB_REF_NAME"
-          git push --force-with-lease origin "$branch"
-          if ! gh pr view "$branch" --json number --jq .number > /dev/null 2>&1; then
+          expected="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+          git push "--force-with-lease=refs/heads/$branch:$expected" origin "$branch"
+          if [ -z "$(gh pr list --head "$branch" --base main --state open --json number --jq '.[0].number // empty')" ]; then
             gh pr create --head "$branch" --base main \
               --title "Bump versions to $version for $GITHUB_REF_NAME" \
               --body "Automated version bump from the $GITHUB_REF_NAME release run."
           fi
+          # GITHUB_TOKEN pushes do not trigger CI; explicit dispatch does.
+          gh workflow run ci.yml --ref "$branch"
           gh pr merge "$branch" --auto --merge

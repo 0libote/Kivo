@@ -17,7 +17,7 @@ pub struct Settings {
     pub dictation_language: String,
     pub improve_dictation_with_ai: bool,
     pub sound_feedback: bool,
-    pub api_key_configured: bool,
+    pub ai_model: String,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -38,13 +38,13 @@ impl Default for Settings {
             start_in_background: true,
             show_idle_flow_bar: false,
             onboarding_complete: false,
-            dictation_shortcut: "Fn".to_string(),
-            writing_shortcut: "Cmd+Shift+K".to_string(),
+            dictation_shortcut: "Ctrl+Meta".to_string(),
+            writing_shortcut: "Ctrl+Space".to_string(),
             microphone_id: None,
             dictation_language: "auto".to_string(),
             improve_dictation_with_ai: false,
             sound_feedback: true,
-            api_key_configured: false,
+            ai_model: crate::ai::MODEL.to_string(),
         }
     }
 }
@@ -90,6 +90,14 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn older_settings_get_a_default_model() {
+        let mut json = serde_json::to_value(Settings::default()).unwrap();
+        json.as_object_mut().unwrap().remove("aiModel");
+        let settings: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(settings.ai_model, crate::ai::MODEL);
     }
 
     #[test]
