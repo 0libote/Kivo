@@ -54,7 +54,7 @@ glib = { path = "vendor/glib-0.18.5" }
 transcribe-cpp = { version = "0.4.0", default-features = false, features = ["vulkan"] }
 
 [target.'cfg(not(all(windows, target_arch = "x86_64")))'.dependencies]
-transcribe-cpp = { version = "0.3.1", default-features = false }
+transcribe-cpp = { version = "0.4.0", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
