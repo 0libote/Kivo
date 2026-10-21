@@ -1,14 +1,5 @@
 version: 2
 updates:
-  # Keep pinned GitHub Actions SHAs fresh.
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
-    groups:
-      actions:
-        patterns: ["*"]
-
   # Frontend dependencies (bun lockfile) — REMOVED with the web frontend.
   # The native app is Rust-only; dependency PRs come from the cargo
   # entries below, and `cargo audit` in CI covers advisories.
