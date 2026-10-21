@@ -1,7 +1,7 @@
 name: Release
 on:
   push:
-    tags: ["app-v*"]
+    tags: ["app-v*", "[0-9]*.[0-9]*.[0-9]*"]
 permissions:
   contents: write
 jobs:
