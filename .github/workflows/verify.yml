@@ -185,12 +185,19 @@ jobs:
       # proc-macro-error, 1x unsound glib RUSTSEC-2024-0429, transitive via
       # Tauri's Linux tray stack -> gtk 0.18, unfixable short of a GTK 0.20
       # / Tauri upgrade; tracked separately).
+      # Scoped ignores below: zip 4.6.1 (via tauri-plugin-updater 2.x, which
+      # pins zip ^4 with no patched 4.x upstream) has 3 unpatched
+      # vulnerabilities incl. a 9.1 symlink-escape on extract
+      # (RUSTSEC-2026-0367/0368/0369). Exploitation needs a malicious update
+      # archive to clear the updater's signature check, and updater 2.14.0
+      # still pins zip ^4. Re-check on the Tauri/updater release that moves
+      # to zip 9; drop these flags then.
       - name: Install cargo-audit (prebuilt)
         uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
         with:
           tool: cargo-audit
       - name: Audit Rust dependencies (cargo-audit)
-        run: cargo audit --file src-tauri/Cargo.lock
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2026-0367 --ignore RUSTSEC-2026-0368 --ignore RUSTSEC-2026-0369
 
   verified:
     if: always()
