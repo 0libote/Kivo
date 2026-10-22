@@ -8,13 +8,24 @@ The current native build is a development preview: writing tools accept pasted t
 Published builds appear on [GitHub Releases](https://github.com/0libote/Kivo/releases).
 The release workflow produces portable `kivo-native.exe` (Windows 11 24H2+) and `kivo-native-macos-arm64` (macOS Apple Silicon) assets and leaves them in a draft for review. There is currently no installer, continuous beta channel, or native in-app updater. Unsigned builds may show a Windows SmartScreen warning; on macOS, run `chmod +x kivo-native-macos-arm64` and `xattr -d com.apple.quarantine kivo-native-macos-arm64` before the first launch.
 
-1. Download the asset for your OS, then run it and open Settings. macOS shortcut with no Gatekeeper prompts: `brew install https://raw.githubusercontent.com/0libote/Kivo/main/Formula/kivo.rb` (re-run it for new releases; URL installs do not auto-update).
+1. Download the asset for your OS, then run it and open Settings. The published `0.1.0` release contains only the Windows executable; macOS users can build from source using the Develop instructions below until a macOS asset is published.
 2. Enter a Gemini API key and choose a model available to your key. The model ID is editable so a retired default does not require a new app build. Save settings to keep the model selection.
 3. Open Writing tools, paste text, and select an action. Copy the result into your app.
 
 The key stays in memory for the current session; enter it again after restarting. Settings are saved in the OS config directory under `kivo/settings.json`. Text sent to Gemini leaves your computer; requests use `store: false`. The native preview does not yet use OS credential storage (Windows Credential Manager, macOS Keychain) or support the reference backend's other AI providers and local speech models.
 
 The Dictation surface currently uses typed or pasted text to exercise its UI states. Shortcut, microphone, and startup settings are placeholders until the integrations are ported. macOS Apple Silicon joins Windows as a preview target; Linux is a development bench, not a supported release target.
+
+### Homebrew (macOS Apple Silicon)
+
+Homebrew installation is not ready yet: the formula points to an unpublished macOS asset and has a placeholder checksum. Once a macOS release is published and the formula's version, URL, and SHA-256 are updated, install with:
+
+```sh
+brew tap 0libote/kivo https://github.com/0libote/Kivo.git
+brew install 0libote/kivo/kivo
+```
+
+Homebrew requires a tap rather than a raw formula URL. The explicit repository URL is needed because this repository is named `Kivo`, rather than `homebrew-kivo`. For later releases, run `brew update` and `brew upgrade 0libote/kivo/kivo`.
 
 ## Develop
 

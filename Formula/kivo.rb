@@ -1,6 +1,9 @@
-# Homebrew formula for Kivo's macOS Apple Silicon build. No tap needed:
-#   brew install https://raw.githubusercontent.com/0libote/Kivo/main/Formula/kivo.rb
-# URL installs do not auto-update; re-run the command for a new release.
+# Homebrew formula for Kivo's macOS Apple Silicon build.
+# Not installable until a macOS asset is published and the placeholder hash is replaced.
+# Then install through an explicit tap (the repository is not named homebrew-kivo):
+#   brew tap 0libote/kivo https://github.com/0libote/Kivo.git
+#   brew install 0libote/kivo/kivo
+# Update with `brew update` followed by `brew upgrade 0libote/kivo/kivo`.
 # Per release, bump `version`, `url`, and `sha256` (see README's Release section).
 class Kivo < Formula
   desc "Quiet dictation and writing utility"

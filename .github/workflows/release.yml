@@ -65,7 +65,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
               --title "Kivo $VERSION" \
-              --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64, or run brew install https://raw.githubusercontent.com/0libote/Kivo/main/Formula/kivo.rb (no Gatekeeper prompts). Dictation and system selection integration are still being ported."
+              --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64 once the macOS build finishes. For Homebrew availability and tap instructions, see https://github.com/0libote/Kivo#homebrew-macos-apple-silicon. Dictation and system selection integration are still being ported."
           fi
           gh release upload "$GITHUB_REF_NAME" native-app/target/release/kivo-native.exe --clobber
 
@@ -115,7 +115,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" --verify-tag --draft \
               --title "Kivo $VERSION" \
-              --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64, or run brew install https://raw.githubusercontent.com/0libote/Kivo/main/Formula/kivo.rb (no Gatekeeper prompts). Dictation and system selection integration are still being ported."
+              --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64 once the macOS build finishes. For Homebrew availability and tap instructions, see https://github.com/0libote/Kivo#homebrew-macos-apple-silicon. Dictation and system selection integration are still being ported."
           fi
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/kivo-native-macos-arm64" --clobber
 
