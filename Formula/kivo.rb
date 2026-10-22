@@ -1,21 +1,23 @@
-# Homebrew formula for Kivo's macOS Apple Silicon build.
-# Not installable until a macOS asset is published and the placeholder hash is replaced.
-# Then install through an explicit tap (the repository is not named homebrew-kivo):
+# Homebrew formula for Kivo's macOS Apple Silicon source build.
+# Install through an explicit tap (the repository is not named homebrew-kivo):
 #   brew tap 0libote/kivo https://github.com/0libote/Kivo.git
 #   brew install 0libote/kivo/kivo
 # Update with `brew update` followed by `brew upgrade 0libote/kivo/kivo`.
-# Per release, bump `version`, `url`, and `sha256` (see README's Release section).
+# Pin `url` to a macOS-capable source commit and update `version` and `sha256` together.
 class Kivo < Formula
   desc "Quiet dictation and writing utility"
   homepage "https://github.com/0libote/Kivo"
-  url "https://github.com/0libote/Kivo/releases/download/0.1.0/kivo-native-macos-arm64"
+  url "https://github.com/0libote/Kivo/archive/608ba92bba4a97f95d501fb1a5fad3063d0bfb55.tar.gz"
   version "0.1.0"
-  # shortcut: placeholder hash until a release publishes a macOS asset, then paste the real sha256.
-  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  sha256 "22bd6e30f8621fbac27443023d1e548df11d5953348f3329bcf8b30453086b52"
+  depends_on "rust" => :build
+  depends_on :macos
   depends_on arch: :arm64
 
   def install
-    bin.install "kivo-native-macos-arm64" => "kivo"
+    system "cargo", "build", "--locked", "--release", "--manifest-path", "native-app/Cargo.toml",
+           "--target-dir", "target"
+    bin.install "target/release/kivo-native" => "kivo"
   end
 
   test do
