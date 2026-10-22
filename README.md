@@ -1,24 +1,24 @@
 # Kivo
 
-Kivo is a Windows dictation and writing utility being ported from Tauri to a native Rust UI.
+Kivo is a Windows and macOS dictation and writing utility being ported from Tauri to a native Rust UI.
 The current native build is a development preview: writing tools accept pasted text and call Gemini, while dictation, global shortcuts, system selection capture, and text replacement still need their OS integrations ported.
 
 ## Download and use
 
 Published builds appear on [GitHub Releases](https://github.com/0libote/Kivo/releases).
-The release workflow produces a portable `kivo-native.exe` for Windows 11 24H2+ and leaves it in a draft for review. There is currently no installer, continuous beta channel, or native in-app updater. Unsigned builds may show a Windows SmartScreen warning.
+The release workflow produces portable `kivo-native.exe` (Windows 11 24H2+) and `kivo-native-macos-arm64` (macOS Apple Silicon) assets and leaves them in a draft for review. There is currently no installer, continuous beta channel, or native in-app updater. Unsigned builds may show a Windows SmartScreen warning; on macOS, run `chmod +x kivo-native-macos-arm64` and `xattr -d com.apple.quarantine kivo-native-macos-arm64` before the first launch.
 
-1. Run `kivo-native.exe` and open Settings.
+1. Download the asset for your OS, then run it and open Settings. macOS shortcut with no Gatekeeper prompts: `brew install https://raw.githubusercontent.com/0libote/Kivo/main/Formula/kivo.rb` (re-run it for new releases; URL installs do not auto-update).
 2. Enter a Gemini API key and choose a model available to your key. The model ID is editable so a retired default does not require a new app build. Save settings to keep the model selection.
 3. Open Writing tools, paste text, and select an action. Copy the result into your app.
 
-The key stays in memory for the current session; enter it again after restarting. Settings are saved in the OS config directory under `kivo/settings.json`. Text sent to Gemini leaves your computer; requests use `store: false`. The native preview does not yet use Windows Credential Manager or support the reference backend's other AI providers and local speech models.
+The key stays in memory for the current session; enter it again after restarting. Settings are saved in the OS config directory under `kivo/settings.json`. Text sent to Gemini leaves your computer; requests use `store: false`. The native preview does not yet use OS credential storage (Windows Credential Manager, macOS Keychain) or support the reference backend's other AI providers and local speech models.
 
-The Dictation surface currently uses typed or pasted text to exercise its UI states. Shortcut, microphone, and startup settings are placeholders until the integrations are ported. Linux is a development bench, not a supported release target.
+The Dictation surface currently uses typed or pasted text to exercise its UI states. Shortcut, microphone, and startup settings are placeholders until the integrations are ported. macOS Apple Silicon joins Windows as a preview target; Linux is a development bench, not a supported release target.
 
 ## Develop
 
-Install [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` selects Rust and the required components. The native Gemini transport also requires `curl` on PATH (included with supported Windows versions).
+Install [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` selects Rust and the required components. The native Gemini transport also requires `curl` on PATH (included with supported Windows and macOS versions).
 
 ```sh
 cargo run --locked --manifest-path native-app/Cargo.toml
@@ -39,9 +39,9 @@ CI caches both Rust targets, cancels superseded runs, and checks only the app af
 
 ## Release
 
-Push a semantic version tag such as `0.2.0` or `app-v0.2.0`. The tag sets the versions in both manifests and lockfiles and the Tauri config before a locked Windows release build. Version syncing uses Python 3.11+ and does not resolve or download dependencies.
+Push a semantic version tag such as `0.2.0` or `app-v0.2.0`. The tag sets the versions in both manifests and lockfiles and the Tauri config before locked Windows and macOS release builds. Version syncing uses Python 3.11+ and does not resolve or download dependencies.
 
-If `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the executable is signed. Review and publish the resulting draft manually. Re-running a tag updates the existing draft asset; published releases require a new version tag.
+If `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` are configured, the Windows executable is signed. macOS builds are unsigned. Review and publish the resulting draft manually, then bump `Formula/kivo.rb` (`version`, `url`, and the `sha256` of the macOS asset). Re-running a tag updates the existing draft asset; published releases require a new version tag.
 
 After the build, the workflow opens a version bump PR against `main`, explicitly dispatches CI, and enables auto-merge. This requires Actions to be allowed to create PRs and auto-merge to be enabled in repository settings. Older tags cannot downgrade the current native package version.
 
