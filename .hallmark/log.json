@@ -1,0 +1,42 @@
+[
+ {
+  "scope": "app",
+  "shape": "app screen",
+  "theme": "Dose",
+  "deal": "1/3, seed kivo-dictation-writing-utility-8263",
+  "genre": "modern-minimal",
+  "axes": "light/grotesk-sans/chromatic-green",
+  "posture": "committed",
+  "screen": "dictation plus writing workbench with settings and onboarding",
+  "nav": "top bar, wordmark left with tabs, model right",
+  "footer": "status bar, privacy note left, build note",
+  "signature": "the writing workbench (input, grouped actions, live result with Copy)",
+  "states": [
+   "loading",
+   "empty",
+   "error",
+   "full"
+  ],
+  "imagery": "none, product UI is the material",
+  "photos": [],
+  "dose": "white",
+  "sections": [
+   "Dictate",
+   "Write",
+   "Settings",
+   "Welcome"
+  ],
+  "fingerprint": [
+   "top-bar-shell",
+   "centered-780-column",
+   "grouped-actions",
+   "pharmacy-mono-labels",
+   "section-separators",
+   "status-bar"
+  ],
+  "waived": [],
+  "prompt": "native dictation and writing utility, utilitarian calm",
+  "date": "2026-10-29",
+  "mode": "build"
+ }
+]

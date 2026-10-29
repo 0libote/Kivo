@@ -1,42 +1,113 @@
 use crate::ai::{self, Action};
 use crate::platform;
 use crate::surfaces::{flow_bar, writing_tools};
+use crate::theme;
+use egui::RichText;
+
+fn flow_status_text(status: &flow_bar::Status) -> &'static str {
+    match status {
+        flow_bar::Status::Hidden => "Hidden",
+        flow_bar::Status::Idle => "Ready",
+        flow_bar::Status::Listening => "Listening",
+        flow_bar::Status::Processing => "Working",
+        flow_bar::Status::Success => "Done",
+        flow_bar::Status::Error => "Needs attention",
+    }
+}
 
 pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
     ui.heading("Dictation");
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label(format!("Status: {:?}", state.status));
-        ui.add(egui::Slider::new(&mut state.level, 0.0..=1.0).text("level"));
+        theme::section_label(ui, "Status");
+        ui.label(RichText::new(flow_status_text(&state.status)).strong());
+        ui.add_space(16.0);
+        ui.label(RichText::new("Input level").small().weak());
+        ui.add(
+            egui::ProgressBar::new(state.level.clamp(0.0, 1.0))
+                .desired_width(140.0)
+                .show_percentage(),
+        );
     });
+    ui.add_space(4.0);
+
+    let listening = state.status == flow_bar::Status::Listening;
     ui.horizontal(|ui| {
-        if ui.button("Start").clicked() {
+        if listening {
+            if theme::primary_button(ui, "Stop and review").clicked() {
+                if state.transcript.trim().is_empty() {
+                    state.status = flow_bar::Status::Error;
+                    state.message = Some("Nothing captured yet.".to_string());
+                } else {
+                    state.status = flow_bar::Status::Processing;
+                }
+            }
+        } else if theme::primary_button(ui, "Start listening").clicked() {
             state.session += 1;
             state.status = flow_bar::Status::Listening;
             state.message = None;
         }
-        if ui.button("Stop").clicked() {
-            if state.transcript.trim().is_empty() {
-                state.status = flow_bar::Status::Error;
-                state.message = Some("Nothing captured yet.".to_string());
-            } else {
-                state.status = flow_bar::Status::Processing;
-            }
-        }
-        if ui.button("Mark success").clicked() {
+        if ui.button("Mark done").clicked() {
             state.status = flow_bar::Status::Success;
         }
-        if ui.button("Cancel").clicked() {
+        let can_clear = !state.transcript.is_empty() || state.status != flow_bar::Status::Hidden;
+        if ui
+            .add_enabled(can_clear, egui::Button::new("Clear transcript"))
+            .clicked()
+        {
             state.status = flow_bar::Status::Hidden;
             state.transcript.clear();
         }
     });
-    ui.label("Transcript (kept in memory only, never logged):");
-    ui.text_edit_multiline(&mut state.transcript);
-    if let Some(msg) = &state.message {
-        ui.colored_label(egui::Color32::RED, msg);
+    ui.add_space(4.0);
+
+    if state.status == flow_bar::Status::Idle && state.transcript.trim().is_empty() {
+        theme::helper(
+            ui,
+            "Nothing here yet. Start listening, then type or paste what you would have said.",
+        );
     }
-    ui.small("Native speech engines plug into platform.rs; this build captures typed/pasted text.");
+    ui.label("Transcript (kept in memory only, never logged):");
+    ui.add(
+        egui::TextEdit::multiline(&mut state.transcript)
+            .hint_text("Type or paste what you would have said…")
+            .desired_rows(6)
+            .desired_width(f32::INFINITY),
+    );
+    theme::mono_small(
+        ui,
+        &format!("{} characters", state.transcript.chars().count()),
+    );
+    if state.status == flow_bar::Status::Success {
+        theme::success_label(ui, "Marked done. The transcript stays in memory.");
+    }
+    if let Some(msg) = state.message.clone() {
+        theme::error_label(ui, &msg);
+        if state.status == flow_bar::Status::Error {
+            theme::helper(
+                ui,
+                "Add some text above, then choose Stop and review again.",
+            );
+        }
+    }
+    theme::helper(
+        ui,
+        "Microphone capture arrives with the OS integration; typing works now.",
+    );
 }
+
+const RESHAPE_ACTIONS: [(&str, Action); 5] = [
+    ("Proofread", Action::Proofread),
+    ("Rewrite", Action::Rewrite),
+    ("Friendly", Action::Friendly),
+    ("Professional", Action::Professional),
+    ("Concise", Action::Concise),
+];
+
+const EXTRACT_ACTIONS: [(&str, Action); 2] = [
+    ("Summarize", Action::Summarize),
+    ("Key points", Action::KeyPoints),
+];
 
 pub fn show_writing_tools(
     ui: &mut egui::Ui,
@@ -47,71 +118,129 @@ pub fn show_writing_tools(
 ) {
     poll_action(state);
     ui.heading("Writing tools");
-    if ui
-        .add_enabled(
-            state.pending.is_none(),
-            egui::Button::new("Capture system selection"),
-        )
-        .clicked()
-    {
-        match platform::capture_selection() {
-            Ok(sel) => {
-                state.input = sel.text;
-                state.can_replace = sel.can_replace;
-                state.captured_app = Some(sel.app_name);
-                state.error = None;
-                state.mode = writing_tools::Mode::Menu;
-            }
-            Err(e) => {
-                state.error = Some(e.to_string());
-                state.mode = writing_tools::Mode::Error;
+    ui.add_space(4.0);
+
+    let busy = state.pending.is_some();
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(!busy, egui::Button::new("Capture system selection"))
+            .clicked()
+        {
+            match platform::capture_selection() {
+                Ok(sel) => {
+                    state.input = sel.text;
+                    state.can_replace = sel.can_replace;
+                    state.captured_app = Some(sel.app_name);
+                    state.error = None;
+                    state.mode = writing_tools::Mode::Menu;
+                }
+                Err(e) => {
+                    state.error = Some(e.to_string());
+                    state.mode = writing_tools::Mode::Error;
+                }
             }
         }
-    }
+        if busy {
+            ui.spinner();
+        }
+    });
     if let Some(app) = &state.captured_app {
-        ui.small(format!("Captured from {app}"));
+        theme::helper(ui, &format!("Captured from {app}"));
+    } else {
+        theme::helper(ui, "Paste text below, or capture the current selection.");
     }
+    ui.add_space(4.0);
+
     ui.label("Text to process:");
-    ui.text_edit_multiline(&mut state.input);
+    ui.add(
+        egui::TextEdit::multiline(&mut state.input)
+            .hint_text("Paste the text to process…")
+            .desired_rows(6)
+            .desired_width(f32::INFINITY),
+    );
+    theme::mono_small(ui, &format!("{} characters", state.input.chars().count()));
+    ui.add_space(4.0);
+
+    theme::section_label(ui, "Fix and reshape");
     ui.horizontal_wrapped(|ui| {
-        for (label, action) in Action::ALL {
-            if ui
-                .add_enabled(state.pending.is_none(), egui::Button::new(*label))
-                .clicked()
-            {
-                run_action(state, *action, api_key, model, None, ctx);
+        for (label, action) in RESHAPE_ACTIONS {
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                run_action(state, action, api_key, model, None, ctx);
             }
+        }
+    });
+    theme::section_label(ui, "Extract");
+    ui.horizontal_wrapped(|ui| {
+        for (label, action) in EXTRACT_ACTIONS {
+            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+                run_action(state, action, api_key, model, None, ctx);
+            }
+        }
+    });
+    theme::section_label(ui, "Ask");
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(!busy, egui::Button::new("Quick chat"))
+            .clicked()
+        {
+            run_action(state, Action::Chat, api_key, model, None, ctx);
         }
     });
     ui.horizontal(|ui| {
         ui.label("Custom instruction:");
-        ui.text_edit_singleline(&mut state.custom_instruction);
+        let row_spacing = ui.spacing().item_spacing.x;
+        let button_width = 110.0;
+        let edit_width = (ui.available_width() - button_width - row_spacing).max(80.0);
+        ui.add_sized(
+            [edit_width, theme::CONTROL_HEIGHT],
+            egui::TextEdit::singleline(&mut state.custom_instruction)
+                .hint_text("For example: turn into a checklist"),
+        );
         if ui
-            .add_enabled(state.pending.is_none(), egui::Button::new("Run custom"))
+            .add_sized(
+                [button_width, theme::CONTROL_HEIGHT],
+                egui::Button::new("Run custom"),
+            )
             .clicked()
         {
             let custom = state.custom_instruction.clone();
             run_action(state, Action::Custom, api_key, model, Some(custom), ctx);
         }
     });
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(4.0);
+
     match state.mode {
         writing_tools::Mode::Processing => {
-            ui.spinner();
-            ui.label("Working…");
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(format!("Working with {model}…"));
+            });
+            theme::helper(
+                ui,
+                "The request runs in the background. The actions stay disabled until it finishes.",
+            );
         }
         writing_tools::Mode::Result | writing_tools::Mode::Chat => {
             ui.label("Result:");
-            ui.text_edit_multiline(&mut state.result);
+            ui.add(
+                egui::TextEdit::multiline(&mut state.result)
+                    .desired_rows(7)
+                    .desired_width(f32::INFINITY),
+            );
+            theme::mono_small(ui, &format!("{} characters", state.result.chars().count()));
             ui.horizontal(|ui| {
-                if ui.button("Copy").clicked() {
+                if theme::primary_button(ui, "Copy").clicked() {
                     platform::copy_to_clipboard(ctx, &state.result);
                 }
                 let can_replace =
                     state.can_replace && state.action.is_some_and(Action::replaces_selection);
-                if ui
-                    .add_enabled(can_replace, egui::Button::new("Replace selection"))
-                    .clicked()
-                {
+                let replace = ui.add_enabled(can_replace, egui::Button::new("Replace selection"));
+                let replace = replace.on_disabled_hover_text(
+                    "Replacement needs a captured selection from an action that rewrites text.",
+                );
+                if replace.clicked() {
                     match platform::replace_selection(&state.result) {
                         Ok(_) => state.error = None,
                         Err(e) => {
@@ -127,13 +256,24 @@ pub fn show_writing_tools(
         }
         writing_tools::Mode::Error => {
             if let Some(err) = state.error.clone() {
-                ui.colored_label(egui::Color32::RED, &err);
+                theme::error_label(ui, &err);
+                theme::helper(
+                    ui,
+                    "Check the text, key, model, and connection, then go back and try again.",
+                );
                 if ui.button("Back").clicked() {
                     state.mode = writing_tools::Mode::Menu;
                 }
             }
         }
-        _ => {}
+        writing_tools::Mode::Menu => {
+            if state.input.trim().is_empty() {
+                theme::helper(
+                    ui,
+                    "The result lands here. Paste text above and choose an action to begin.",
+                );
+            }
+        }
     }
 }
 

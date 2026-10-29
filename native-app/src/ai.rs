@@ -19,18 +19,6 @@ pub enum Action {
 }
 
 impl Action {
-    pub const ALL: &'static [(&'static str, Action)] = &[
-        ("Proofread", Action::Proofread),
-        ("Rewrite", Action::Rewrite),
-        ("Friendly", Action::Friendly),
-        ("Professional", Action::Professional),
-        ("Concise", Action::Concise),
-        ("Summarize", Action::Summarize),
-        ("Key points", Action::KeyPoints),
-        ("Quick chat", Action::Chat),
-        ("Custom", Action::Custom),
-    ];
-
     pub fn replaces_selection(self) -> bool {
         !matches!(self, Self::Summarize | Self::KeyPoints | Self::Chat)
     }

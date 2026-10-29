@@ -41,7 +41,7 @@ pub fn copy_to_clipboard(ctx: &egui::Context, text: &str) {
 }
 
 pub fn microphones() -> Vec<(String, String)> {
-    vec![("default".to_string(), "System Default".to_string())]
+    vec![("default".to_string(), "System default".to_string())]
 }
 
 pub fn speech_languages() -> Vec<(String, String)> {

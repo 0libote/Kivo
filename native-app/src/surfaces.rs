@@ -72,5 +72,5 @@ pub mod onboarding {
     pub struct State {
         pub step: usize,
     }
-    pub const STEPS: [&str; 4] = ["Welcome", "Preview limits", "Shortcuts", "AI key"];
+    pub const STEPS: [&str; 3] = ["Welcome", "Shortcuts", "AI key"];
 }

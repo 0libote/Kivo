@@ -5,11 +5,13 @@ mod platform;
 mod settings;
 mod settings_onboarding;
 mod surfaces;
+mod theme;
 
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([860.0, 620.0])
+            .with_inner_size([920.0, 680.0])
+            .with_min_inner_size([620.0, 460.0])
             .with_title("Kivo"),
         ..Default::default()
     };
