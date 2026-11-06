@@ -167,10 +167,10 @@ impl LocalSpeechEngine {
             let result = loaded.session.run(&pcm, &options);
             // Self-restore: the cache is repopulated even if the awaiting
             // future was dropped (cancelled).
-            if let Ok(mut cache) = slot.lock() {
-                if cache.is_none() {
-                    *cache = Some(loaded);
-                }
+            if let Ok(mut cache) = slot.lock()
+                && cache.is_none()
+            {
+                *cache = Some(loaded);
             }
             result
         })
