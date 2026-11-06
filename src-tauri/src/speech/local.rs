@@ -158,6 +158,7 @@ impl LocalSpeechEngine {
         };
         let slot = Arc::clone(&self.loaded);
         let result = tokio::task::spawn_blocking(move || {
+            let mut loaded = loaded;
             let options = RunOptions {
                 language,
                 family,

@@ -813,7 +813,7 @@ impl ModelStore {
         let entry = catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
         let path = self.directory.join(entry.filename);
         match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok::<(), ModelStoreError>(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
         }?;
