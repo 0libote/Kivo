@@ -28,8 +28,19 @@ pub fn prompt_for(action: Action, source: &str, custom: Option<&str>) -> Result<
     if source.trim().is_empty() {
         return Err("Nothing to process.".to_string());
     }
-    if action == Action::Summarize && source.chars().count() > 200_000 {
-        return Err("Text too long for Summarize (200,000 char limit).".to_string());
+    if source.chars().count() > 200_000 {
+        let name = match action {
+            Action::Proofread => "Proofread",
+            Action::Rewrite => "Rewrite",
+            Action::Friendly => "Friendly",
+            Action::Professional => "Professional",
+            Action::Concise => "Concise",
+            Action::Custom => "Custom",
+            Action::Summarize => "Summarize",
+            Action::KeyPoints => "Key points",
+            Action::Chat => "Chat",
+        };
+        return Err(format!("Text too long for {name} (200,000 char limit)."));
     }
     let instruction = match action {
         Action::Proofread => {
@@ -53,7 +64,7 @@ fn curl_config(api_key: &str, model: &str, prompt: &str) -> Result<String, Strin
     if key.is_empty() || key.chars().any(char::is_control) {
         return Err("Set a valid Gemini API key in Settings first.".to_string());
     }
-    if model.trim().is_empty() {
+    if model.trim().is_empty() || model.chars().any(char::is_control) {
         return Err("Set a Gemini model in Settings first.".to_string());
     }
     let body = serde_json::json!({
@@ -94,7 +105,14 @@ pub fn run_blocking(api_key: &str, model: &str, prompt: &str) -> Result<String, 
     let mut child = command
         .spawn()
         .map_err(|e| format!("Could not start curl: {e}"))?;
-    let written = child.stdin.take().unwrap().write_all(config.as_bytes());
+    let stdin = child.stdin.take();
+    let Some(mut stdin) = stdin else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("Could not send request to curl.".to_string());
+    };
+    let written = stdin.write_all(config.as_bytes());
+    drop(stdin);
     if let Err(error) = written {
         let _ = child.kill();
         let _ = child.wait();
@@ -111,11 +129,17 @@ pub fn run_blocking(api_key: &str, model: &str, prompt: &str) -> Result<String, 
                     .get("message")?
                     .as_str()
                     .map(str::to_owned)
-            })
-            .unwrap_or_else(|| {
-                "Gemini request failed. Check your connection, key, model, and quota.".to_string()
             });
-        return Err(detail.chars().take(300).collect());
+        if let Some(detail) = detail {
+            return Err(detail.chars().take(300).collect());
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        let combined = if stderr.is_empty() {
+            "Gemini request failed. Check your connection, key, model, and quota.".to_string()
+        } else {
+            format!("Gemini request failed: {stderr}")
+        };
+        return Err(combined.chars().take(500).collect());
     }
     let response =
         serde_json::from_slice(&output.stdout).map_err(|e| format!("Bad response: {e}"))?;

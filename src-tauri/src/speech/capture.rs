@@ -16,6 +16,8 @@ use super::{SpeechError, SpeechEvent, SpeechEventSink};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 const LEVEL_INTERVAL: Duration = Duration::from_millis(50);
+/// Cap capture at ~5 min @16kHz mono to bound memory and downstream JSON.
+pub(crate) const MAX_CAPTURE_SAMPLES: usize = 16_000 * 60 * 5;
 
 pub struct AudioCapture {
     stop: Arc<AtomicBool>,
@@ -89,7 +91,10 @@ impl AudioCapture {
             let _ = tokio::task::spawn_blocking(move || handle.join()).await;
         }
         let samples = self.samples.lock().map_err(|_| SpeechError::Backend)?;
-        let pcm = resample_to_16k(&samples, self.sample_rate);
+        if samples.len() > MAX_CAPTURE_SAMPLES {
+            return Err(SpeechError::Backend);
+        }
+        let pcm = resample_to_16k(&samples, self.sample_rate)?;
         let Some((start, end)) = voiced_span(&pcm) else {
             return Err(SpeechError::NoSpeechDetected);
         };
@@ -158,6 +163,9 @@ fn run_capture(
                 let mut count = 0usize;
                 if let Ok(mut buffer) = samples.lock() {
                     for frame in data.chunks(channels) {
+                        if buffer.len() >= MAX_CAPTURE_SAMPLES {
+                            break;
+                        }
                         let mono = frame
                             .iter()
                             .map(|sample| cpal::Sample::to_sample::<f32>(*sample))
@@ -247,31 +255,25 @@ fn merge_span(spans: impl Iterator<Item = (usize, usize)>, len: usize) -> Option
     first.map(|start| (start, last))
 }
 
-fn resample_to_16k(samples: &[f32], input_rate: u32) -> Vec<f32> {
+fn resample_to_16k(samples: &[f32], input_rate: u32) -> Result<Vec<f32>, SpeechError> {
     if input_rate == TARGET_SAMPLE_RATE || samples.is_empty() {
-        return samples.to_vec();
+        return Ok(samples.to_vec());
     }
-    let Ok(mut resampler) = rubato::Fft::<f32>::new(
+    let mut resampler = rubato::Fft::<f32>::new(
         input_rate as usize,
         TARGET_SAMPLE_RATE as usize,
         1024,
         1,
         rubato::FixedSync::Input,
-    ) else {
-        return samples.to_vec();
-    };
-    let input = match rubato::audioadapter_buffers::direct::InterleavedSlice::new(
-        samples,
-        1,
-        samples.len(),
-    ) {
-        Ok(input) => input,
-        Err(_) => return samples.to_vec(),
-    };
-    match resampler.process_all(&input, samples.len(), None) {
-        Ok(processed) => processed.take_data(),
-        Err(_) => samples.to_vec(),
-    }
+    )
+    .map_err(|_| SpeechError::Backend)?;
+    let input =
+        rubato::audioadapter_buffers::direct::InterleavedSlice::new(samples, 1, samples.len())
+            .map_err(|_| SpeechError::Backend)?;
+    resampler
+        .process_all(&input, samples.len(), None)
+        .map(|processed| processed.take_data())
+        .map_err(|_| SpeechError::Backend)
 }
 
 #[cfg(test)]
@@ -281,8 +283,8 @@ mod tests {
     #[test]
     fn sample_rate_conversion_is_stable() {
         let input = vec![0.25f32; 1000];
-        assert_eq!(resample_to_16k(&input, TARGET_SAMPLE_RATE), input);
-        let output = resample_to_16k(&vec![0.0f32; 48_000], 48_000);
+        assert_eq!(resample_to_16k(&input, TARGET_SAMPLE_RATE).unwrap(), input);
+        let output = resample_to_16k(&vec![0.0f32; 48_000], 48_000).unwrap();
         assert!((output.len() as i64 - 16_000).abs() < 2_000);
     }
 

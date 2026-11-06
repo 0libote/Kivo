@@ -414,6 +414,10 @@ pub fn vocabulary_hint(vocabulary: &[crate::config::VocabularyEntry]) -> Option<
     ))
 }
 
+/// Maximum source characters for any AI prompt (200k). Bounds memory, request
+/// size, and cost; matches the previous Summarize-only cap.
+pub const MAX_PROMPT_CHARS: usize = 200_000;
+
 pub fn writing_prompt(
     action: WritingAction,
     source_text: &str,
@@ -423,7 +427,7 @@ pub fn writing_prompt(
     if source_text.trim().is_empty() {
         return Err(PromptError::EmptySource);
     }
-    if action == WritingAction::Summarize && source_text.chars().count() > 200_000 {
+    if source_text.chars().count() > MAX_PROMPT_CHARS {
         return Err(PromptError::SummaryTooLong);
     }
 
@@ -481,6 +485,9 @@ pub fn writing_prompt_from_system(
 ) -> Result<AiPrompt, PromptError> {
     if source_text.trim().is_empty() {
         return Err(PromptError::EmptySource);
+    }
+    if source_text.chars().count() > MAX_PROMPT_CHARS {
+        return Err(PromptError::SummaryTooLong);
     }
     let mut system_instruction = system_instruction;
     if let Some(hint) = vocabulary_hint(vocabulary) {
@@ -703,14 +710,14 @@ impl GeminiClient {
         for _ in 0..3 {
             // Built manually: reqwest is compiled with minimal features
             // (json/rustls/system-proxy) so `RequestBuilder::query` is
-            // unavailable. Tokens are URL-safe base64; no extra encoding needed.
+            // unavailable. Percent-encode the token instead of concatenating.
             let mut url = format!(
                 "{}?pageSize=1000",
                 self.models_endpoint.trim_end_matches('/')
             );
             if let Some(token) = &page_token {
                 url.push_str("&pageToken=");
-                url.push_str(token);
+                url.push_str(&percent_encode(token));
             }
             let response = self
                 .http
@@ -1006,6 +1013,24 @@ fn usage_count(value: &serde_json::Value, names: &[&str]) -> Option<u64> {
     names
         .iter()
         .find_map(|name| value.get(name).and_then(serde_json::Value::as_u64))
+}
+
+/// Percent-encode a query value (unreserved set per RFC 3986). Used for
+/// `pageToken` since `RequestBuilder::query` is unavailable with the minimal
+/// reqwest features.
+fn percent_encode(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if matches!(
+            byte,
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~'
+        ) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 #[derive(Debug)]

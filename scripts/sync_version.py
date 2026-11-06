@@ -25,13 +25,21 @@ def version_key(version):
     return (*map(int, match.group(1, 2, 3)), prerelease is None, identifiers)
 
 
+def current_versions(root):
+    versions = []
+    for directory in ("native-app", "src-tauri"):
+        manifest = root / directory / "Cargo.toml"
+        versions.append(tomllib.loads(manifest.read_text(encoding="utf-8"))["package"]["version"])
+    return versions
+
+
 def sync_version(root, tag, only_newer=False):
     version = tag.removeprefix("app-v")
     candidate = version_key(version)
-    native_manifest = root / "native-app/Cargo.toml"
-    current = tomllib.loads(native_manifest.read_text(encoding="utf-8"))["package"]["version"]
-    if only_newer and candidate < version_key(current):
-        return version
+    if only_newer:
+        newest = max(current_versions(root), key=version_key)
+        if candidate < version_key(newest):
+            return version
 
     updates = {}
     for directory in ("native-app", "src-tauri"):
@@ -39,8 +47,8 @@ def sync_version(root, tag, only_newer=False):
         text = manifest.read_text(encoding="utf-8")
         package = tomllib.loads(text)["package"]
         text, count = re.subn(
-            r'(\[package\]\s*\n(?:(?!\[)[^\n]*\n)*?version\s*=\s*")[^"]+("[^\n]*)',
-            lambda match: match[1] + version + match[2],
+            r'(\[package\]\s*\n(?:(?!\[)[^\n]*\n)*?version\s*=\s*(["\']))[^"\']+(\2[^\n]*)',
+            lambda match: match[1] + version + match[3],
             text,
             count=1,
         )
@@ -51,7 +59,7 @@ def sync_version(root, tag, only_newer=False):
         lockfile = root / directory / "Cargo.lock"
         text, count = re.subn(
             r'(\[\[package\]\]\nname = "' + re.escape(package["name"])
-            + r'"\nversion = ")[^"]+("\n)',
+            + r'"[ \t]*\r?\nversion = ")[^"]+("\n)',
             lambda match: match[1] + version + match[2],
             lockfile.read_text(encoding="utf-8"),
         )

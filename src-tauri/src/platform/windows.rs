@@ -748,6 +748,9 @@ fn write_clipboard_text(window: HWND, value: &str, operation: &'static str) -> P
 }
 
 fn read_clipboard_text(window: HWND, operation: &'static str) -> PlatformResult<String> {
+    // Cap the NUL scan at ~10 MiB chars so a corrupt / unterminated clipboard
+    // cannot loop past the allocation.
+    const MAX_CLIPBOARD_CHARS: usize = 10 * 1024 * 1024;
     unsafe {
         OpenClipboard(Some(window)).map_err(|_| os_error(operation, "The clipboard is busy."))?;
         let result = (|| {
@@ -759,8 +762,14 @@ fn read_clipboard_text(window: HWND, operation: &'static str) -> PlatformResult<
                 )));
             }
             let mut length = 0usize;
-            while *locked.add(length) != 0 {
+            while length < MAX_CLIPBOARD_CHARS && *locked.add(length) != 0 {
                 length += 1;
+            }
+            if length >= MAX_CLIPBOARD_CHARS {
+                let _ = GlobalUnlock(HGLOBAL(handle.0));
+                return Err(::windows::core::Error::from_hresult(HRESULT(
+                    0x80004005u32 as i32,
+                )));
             }
             let text = String::from_utf16_lossy(std::slice::from_raw_parts(locked, length));
             let _ = GlobalUnlock(HGLOBAL(handle.0));

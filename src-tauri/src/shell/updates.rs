@@ -44,8 +44,9 @@ pub(crate) async fn check_for_updates(app: &AppHandle) -> Result<UpdateResult, C
             .await
             .map_err(|_| update_check_error())?;
         let available_version = stable_version_from_tag(&release.tag_name);
-        // A mistagged stable release (tag not starting with `app-v`) must not
-        // read as "up to date": surface it as a check failure instead.
+        // A mistagged stable release (tag neither `app-v*` nor bare
+        // `X.Y.Z`) must not read as "up to date": surface it as a check
+        // failure instead.
         let available_version = available_version.ok_or_else(update_check_error)?;
         let available = version_is_newer(&available_version, &current_version);
         if available || current_sha.is_none() {
@@ -239,7 +240,17 @@ fn update_install_error(code: &str, message: &str) -> CommandError {
 }
 
 pub(super) fn stable_version_from_tag(tag: &str) -> Option<String> {
-    tag.strip_prefix("app-v").map(str::to_owned)
+    if let Some(version) = tag.strip_prefix("app-v") {
+        return (!version.is_empty()).then(|| version.to_owned());
+    }
+    // Bare tags like `0.2.0` also trigger the release workflow.
+    let mut parts = tag.split('.');
+    let valid = tag
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+')
+        && matches!(parts.next(), Some(first) if !first.is_empty() && first.chars().next().is_some_and(|c| c.is_ascii_digit()))
+        && tag.contains('.');
+    valid.then(|| tag.to_owned())
 }
 
 pub(super) fn version_is_newer(candidate: &str, current: &str) -> bool {

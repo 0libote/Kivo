@@ -415,11 +415,9 @@ fn register_dictation_shortcut(
     let registration = match registration_result {
         Ok(registration) => registration,
         Err(error) => {
-            if error.kind == PlatformErrorKind::PermissionDenied
-                && let Some(mut previous) = current.take()
-            {
-                let _ = previous.registration.stop();
-            }
+            // PermissionDenied must not discard the working monitor: keep the
+            // previous registration so dictation keeps working. Only success
+            // replaces the current shortcut.
             return Err(error);
         }
     };
@@ -854,7 +852,7 @@ pub(crate) async fn open_writing_tools(app: &AppHandle) -> Result<(), CommandErr
             // Size before positioning: placement clamps against the real
             // window frame, so the order matters.
             size_writing_surface(app, "menu", None).map_err(platform_command_error)?;
-            position_writing_surface(app, context.cursor, context.anchor);
+            position_writing_surface(app);
             // Keep the source editor focused while the menu is opened. Native
             // accessibility targets can then replace text without requiring
             // the user to switch back to the editor.
@@ -1194,11 +1192,7 @@ fn play_dictation_feedback(core: &AppCore, moment: FeedbackMoment) {
     let _ = moment;
 }
 
-pub(crate) fn position_writing_surface(
-    app: &AppHandle,
-    _cursor: Option<crate::text::ScreenPoint>,
-    _anchor: Option<crate::text::ScreenRect>,
-) {
+pub(crate) fn position_writing_surface(app: &AppHandle) {
     let Some(window) = app.get_webview_window("writing-tools") else {
         return;
     };
@@ -1257,11 +1251,7 @@ pub(crate) fn open_permission_settings(permission: PermissionKind) -> Result<(),
 }
 
 pub(crate) fn open_external(_app: &AppHandle, url: &str) -> Result<(), PlatformError> {
-    let allowed = [
-        "https://aistudio.google.com/",
-        "https://github.com/0libote/Kivo",
-    ];
-    if !allowed.iter().any(|prefix| url.starts_with(prefix)) {
+    if !is_allowed_external_url(url) {
         return Err(PlatformError::new(
             PlatformErrorKind::InvalidState,
             "open_external",
@@ -1269,6 +1259,44 @@ pub(crate) fn open_external(_app: &AppHandle, url: &str) -> Result<(), PlatformE
         ));
     }
     open_url(url)
+}
+
+/// Allowlist without `starts_with` prefix confusion (`Kivo-evil.com`,
+/// `github.com@evil`, `..`, backslashes). Manual parse: no `url` crate dep.
+fn is_allowed_external_url(url: &str) -> bool {
+    // Reject control characters / whitespace / backslashes outright.
+    if url
+        .chars()
+        .any(|c| c.is_control() || c.is_whitespace() || c == '\\')
+    {
+        return false;
+    }
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    // Authority ends at the first / ? #.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let host = rest[..authority_end].to_ascii_lowercase();
+    if host.is_empty() || host.contains('@') || host.contains(':') {
+        return false;
+    }
+    let after_authority = &rest[authority_end..];
+    // Path for the github rule (strip query/fragment).
+    let path_end = after_authority
+        .find(['?', '#'])
+        .unwrap_or(after_authority.len());
+    let path = &after_authority[..path_end];
+    if host == "aistudio.google.com" {
+        // Any path on the exact host, but must be hierarchical.
+        return after_authority.is_empty()
+            || after_authority.starts_with('/')
+            || after_authority.starts_with('?')
+            || after_authority.starts_with('#');
+    }
+    if host == "github.com" {
+        return path == "/0libote/Kivo" || path.starts_with("/0libote/Kivo/");
+    }
+    false
 }
 
 fn open_url(url: &str) -> Result<(), PlatformError> {
@@ -1311,7 +1339,18 @@ fn open_url(url: &str) -> Result<(), PlatformError> {
     })
 }
 
+/// Maximum clipboard payload: 1 MiB of UTF-8. Rejects oversized pastes before
+/// touching the OS clipboard.
+pub(crate) const MAX_COPY_TEXT_BYTES: usize = 1 << 20;
+
 pub(crate) fn copy_text(app: &AppHandle, text: &str) -> Result<(), PlatformError> {
+    if text.len() > MAX_COPY_TEXT_BYTES {
+        return Err(PlatformError::new(
+            PlatformErrorKind::InvalidState,
+            "copy_text",
+            "That text is too large to copy (over 1 MiB).",
+        ));
+    }
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::{
@@ -1453,9 +1492,9 @@ fn window_error(operation: &'static str) -> PlatformError {
 #[cfg(test)]
 mod tests {
     use super::{
-        PressKind, PressOutcome, beta_is_newer, is_native_dictation_shortcut_for,
-        normalize_accelerator, press_kind, press_outcome, stable_version_from_tag,
-        version_is_newer,
+        PressKind, PressOutcome, beta_is_newer, is_allowed_external_url,
+        is_native_dictation_shortcut_for, normalize_accelerator, press_kind, press_outcome,
+        stable_version_from_tag, version_is_newer,
     };
     use crate::config::HostPlatform;
 
@@ -1571,5 +1610,38 @@ mod tests {
         // Without a manifest SHA there is nothing commit-based to compare.
         assert!(!beta_is_newer(Some("aaa"), None, "0.1.0", "0.1.0"));
         assert!(!beta_is_newer(None, None, "0.1.0", "0.1.0"));
+    }
+
+    #[test]
+    fn external_urls_allow_only_exact_hosts_and_repo_path() {
+        assert!(is_allowed_external_url(
+            "https://aistudio.google.com/app/apikey"
+        ));
+        assert!(is_allowed_external_url("https://github.com/0libote/Kivo"));
+        assert!(is_allowed_external_url(
+            "https://github.com/0libote/Kivo/releases"
+        ));
+        // Prefix confusion must not pass.
+        assert!(!is_allowed_external_url(
+            "https://github.com/0libote/Kivo-evil"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://github.com/0libote/Kivoevil/x"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://aistudio.google.com.evil.com/"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://github.com.evil.com/0libote/Kivo"
+        ));
+        assert!(!is_allowed_external_url(
+            "https://github.com@evil.com/0libote/Kivo"
+        ));
+        assert!(!is_allowed_external_url("http://github.com/0libote/Kivo"));
+        assert!(!is_allowed_external_url("https://evil.com/0libote/Kivo"));
+        assert!(!is_allowed_external_url(
+            "https://aistudio.google.com\\@evil.com"
+        ));
+        assert!(!is_allowed_external_url("javascript:alert(1)"));
     }
 }

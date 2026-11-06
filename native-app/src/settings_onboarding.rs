@@ -4,6 +4,36 @@ use crate::surfaces::{onboarding, settings_surface};
 use crate::theme;
 use egui::RichText;
 
+pub fn validate_shortcuts(dictation: &str, writing: &str) -> Result<(), String> {
+    let dictation = dictation.trim();
+    let writing = writing.trim();
+    if dictation.is_empty() {
+        return Err("Enter a dictation shortcut.".to_string());
+    }
+    if writing.is_empty() {
+        return Err("Enter a writing shortcut.".to_string());
+    }
+    if dictation.chars().count() > 64 || writing.chars().count() > 64 {
+        return Err("Shortcuts must be 64 characters or fewer.".to_string());
+    }
+    if dictation == writing {
+        return Err("Dictation and writing shortcuts must be different.".to_string());
+    }
+    Ok(())
+}
+
+pub fn validate_settings(settings: &Settings) -> Result<(), String> {
+    validate_shortcuts(&settings.dictation_shortcut, &settings.writing_shortcut)?;
+    let model = settings.ai_model.trim();
+    if model.is_empty() {
+        return Err("Set a Gemini model in Settings first.".to_string());
+    }
+    if model.chars().count() > 64 {
+        return Err("Model must be 64 characters or fewer.".to_string());
+    }
+    Ok(())
+}
+
 pub fn show_settings(
     ui: &mut egui::Ui,
     settings: &mut Settings,
@@ -97,9 +127,17 @@ pub fn show_settings(
             state.status = Some("Key cleared.".to_string());
         }
         if theme::primary_button(ui, "Save settings").clicked() {
-            *save_error = settings.save().err();
-            if save_error.is_none() {
-                state.status = Some("Settings saved.".to_string());
+            settings.dictation_shortcut = settings.dictation_shortcut.trim().to_owned();
+            settings.writing_shortcut = settings.writing_shortcut.trim().to_owned();
+            settings.ai_model = settings.ai_model.trim().to_owned();
+            match validate_settings(settings) {
+                Err(e) => *save_error = Some(e),
+                Ok(()) => {
+                    *save_error = settings.save().err();
+                    if save_error.is_none() {
+                        state.status = Some("Settings saved.".to_string());
+                    }
+                }
             }
         }
     });
@@ -123,7 +161,12 @@ pub fn show_settings(
     }
 }
 
-pub fn show_onboarding(ui: &mut egui::Ui, settings: &mut Settings, state: &mut onboarding::State) {
+pub fn show_onboarding(
+    ui: &mut egui::Ui,
+    settings: &mut Settings,
+    state: &mut onboarding::State,
+    save_error: &mut Option<String>,
+) {
     ui.heading("Welcome to Kivo");
     ui.add_space(4.0);
     let step = state.step.min(onboarding::STEPS.len() - 1);
@@ -176,15 +219,49 @@ pub fn show_onboarding(ui: &mut egui::Ui, settings: &mut Settings, state: &mut o
             .clicked()
         {
             state.step = step.saturating_sub(1);
+            *save_error = None;
         }
         let last = step + 1 >= onboarding::STEPS.len();
         if theme::primary_button(ui, if last { "Finish" } else { "Next" }).clicked() {
             if last {
-                settings.onboarding_complete = true;
-                let _ = settings.save();
+                settings.dictation_shortcut = settings.dictation_shortcut.trim().to_owned();
+                settings.writing_shortcut = settings.writing_shortcut.trim().to_owned();
+                settings.ai_model = settings.ai_model.trim().to_owned();
+                match validate_settings(settings) {
+                    Err(e) => *save_error = Some(e),
+                    Ok(()) => {
+                        settings.onboarding_complete = true;
+                        match settings.save() {
+                            Ok(()) => *save_error = None,
+                            Err(e) => {
+                                settings.onboarding_complete = false;
+                                *save_error = Some(e);
+                            }
+                        }
+                    }
+                }
             } else {
-                state.step = step + 1;
+                if step == 1 {
+                    settings.dictation_shortcut = settings.dictation_shortcut.trim().to_owned();
+                    settings.writing_shortcut = settings.writing_shortcut.trim().to_owned();
+                    match validate_shortcuts(
+                        &settings.dictation_shortcut,
+                        &settings.writing_shortcut,
+                    ) {
+                        Err(e) => *save_error = Some(e),
+                        Ok(()) => {
+                            *save_error = None;
+                            state.step = step + 1;
+                        }
+                    }
+                } else {
+                    *save_error = None;
+                    state.step = step + 1;
+                }
             }
         }
     });
+    if let Some(e) = save_error.clone() {
+        theme::error_label(ui, &e);
+    }
 }

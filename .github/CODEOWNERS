@@ -1,5 +1,8 @@
 # Minimal ownership for release-adjacent areas.
 /packaging/ @0libote
 /native-app/ @0libote
+/src-tauri/ @0libote
 /.github/ @0libote
 /scripts/ @0libote
+/Formula/ @0libote
+/rust-toolchain.toml @0libote

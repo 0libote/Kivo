@@ -9,10 +9,17 @@ fn flow_status_text(status: &flow_bar::Status) -> &'static str {
         flow_bar::Status::Hidden => "Hidden",
         flow_bar::Status::Idle => "Ready",
         flow_bar::Status::Listening => "Listening",
-        flow_bar::Status::Processing => "Working",
         flow_bar::Status::Success => "Done",
         flow_bar::Status::Error => "Needs attention",
     }
+}
+
+fn cached_chars(cached_bytes: &mut usize, cached_count: &mut usize, text: &str) -> usize {
+    if *cached_bytes != text.len() {
+        *cached_bytes = text.len();
+        *cached_count = text.chars().count();
+    }
+    *cached_count
 }
 
 pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
@@ -21,13 +28,6 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
     ui.horizontal(|ui| {
         theme::section_label(ui, "Status");
         ui.label(RichText::new(flow_status_text(&state.status)).strong());
-        ui.add_space(16.0);
-        ui.label(RichText::new("Input level").small().weak());
-        ui.add(
-            egui::ProgressBar::new(state.level.clamp(0.0, 1.0))
-                .desired_width(140.0)
-                .show_percentage(),
-        );
     });
     ui.add_space(4.0);
 
@@ -39,16 +39,17 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
                     state.status = flow_bar::Status::Error;
                     state.message = Some("Nothing captured yet.".to_string());
                 } else {
-                    state.status = flow_bar::Status::Processing;
+                    state.status = flow_bar::Status::Idle;
+                    state.message = Some("Dictation preview: typed text kept.".to_string());
                 }
             }
         } else if theme::primary_button(ui, "Start listening").clicked() {
-            state.session += 1;
             state.status = flow_bar::Status::Listening;
             state.message = None;
         }
         if ui.button("Mark done").clicked() {
             state.status = flow_bar::Status::Success;
+            state.message = None;
         }
         let can_clear = !state.transcript.is_empty() || state.status != flow_bar::Status::Hidden;
         if ui
@@ -57,6 +58,7 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
         {
             state.status = flow_bar::Status::Hidden;
             state.transcript.clear();
+            state.message = None;
         }
     });
     ui.add_space(4.0);
@@ -74,10 +76,12 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
             .desired_rows(6)
             .desired_width(f32::INFINITY),
     );
-    theme::mono_small(
-        ui,
-        &format!("{} characters", state.transcript.chars().count()),
+    let transcript_count = cached_chars(
+        &mut state.transcript_bytes,
+        &mut state.transcript_chars,
+        &state.transcript,
     );
+    theme::mono_small(ui, &format!("{transcript_count} characters"));
     if state.status == flow_bar::Status::Success {
         theme::success_label(ui, "Marked done. The transcript stays in memory.");
     }
@@ -142,6 +146,11 @@ pub fn show_writing_tools(
         }
         if busy {
             ui.spinner();
+            if ui.button("Cancel").clicked() {
+                state.pending = None;
+                state.mode = writing_tools::Mode::Error;
+                state.error = Some("Cancelled.".to_string());
+            }
         }
     });
     if let Some(app) = &state.captured_app {
@@ -158,7 +167,8 @@ pub fn show_writing_tools(
             .desired_rows(6)
             .desired_width(f32::INFINITY),
     );
-    theme::mono_small(ui, &format!("{} characters", state.input.chars().count()));
+    let input_count = cached_chars(&mut state.input_bytes, &mut state.input_chars, &state.input);
+    theme::mono_small(ui, &format!("{input_count} characters"));
     ui.add_space(4.0);
 
     theme::section_label(ui, "Fix and reshape");
@@ -196,13 +206,16 @@ pub fn show_writing_tools(
             egui::TextEdit::singleline(&mut state.custom_instruction)
                 .hint_text("For example: turn into a checklist"),
         );
-        if ui
-            .add_sized(
-                [button_width, theme::CONTROL_HEIGHT],
-                egui::Button::new("Run custom"),
-            )
-            .clicked()
-        {
+        let run_custom = ui
+            .add_enabled_ui(!busy, |ui| {
+                ui.add_sized(
+                    [button_width, theme::CONTROL_HEIGHT],
+                    egui::Button::new("Run custom"),
+                )
+                .clicked()
+            })
+            .inner;
+        if run_custom {
             let custom = state.custom_instruction.clone();
             run_action(state, Action::Custom, api_key, model, Some(custom), ctx);
         }
@@ -229,7 +242,12 @@ pub fn show_writing_tools(
                     .desired_rows(7)
                     .desired_width(f32::INFINITY),
             );
-            theme::mono_small(ui, &format!("{} characters", state.result.chars().count()));
+            let result_count = cached_chars(
+                &mut state.result_bytes,
+                &mut state.result_chars,
+                &state.result,
+            );
+            theme::mono_small(ui, &format!("{result_count} characters"));
             ui.horizontal(|ui| {
                 if theme::primary_button(ui, "Copy").clicked() {
                     platform::copy_to_clipboard(ctx, &state.result);
@@ -286,6 +304,11 @@ fn run_action(
     ctx: &egui::Context,
 ) {
     if state.pending.is_some() {
+        return;
+    }
+    if action == Action::Custom && custom.as_deref().unwrap_or("").trim().is_empty() {
+        state.error = Some("Enter a custom instruction first.".to_string());
+        state.mode = writing_tools::Mode::Error;
         return;
     }
     let prompt = match ai::prompt_for(action, &state.input, custom.as_deref()) {

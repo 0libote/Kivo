@@ -59,11 +59,26 @@ impl Settings {
             Some(p) => p,
             None => return Self::default(),
         };
-        let text = std::fs::read_to_string(path).unwrap_or_default();
+        Self::load_from(&path)
+    }
+
+    fn load_from(path: &std::path::Path) -> Self {
+        let text = match std::fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Self::default(),
+            Err(_) => return Self::default(),
+        };
         if text.trim().is_empty() {
             return Self::default();
         }
-        serde_json::from_str(&text).unwrap_or_default()
+        match serde_json::from_str(&text) {
+            Ok(settings) => settings,
+            Err(_) => {
+                let corrupt = path.with_extension("json.corrupt");
+                let _ = std::fs::rename(path, &corrupt);
+                Self::default()
+            }
+        }
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -109,5 +124,20 @@ mod tests {
         let back: Settings =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn corrupt_json_falls_back_without_deleting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, "{ not valid json").unwrap();
+        let loaded = Settings::load_from(&path);
+        assert_eq!(loaded, Settings::default());
+        // Original must be preserved as .corrupt, never silently dropped.
+        assert!(!path.exists(), "corrupt file should be renamed away");
+        let corrupt = path.with_extension("json.corrupt");
+        assert!(corrupt.exists(), "corrupt file should be preserved");
+        let preserved = std::fs::read_to_string(&corrupt).unwrap();
+        assert_eq!(preserved, "{ not valid json");
     }
 }

@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python scripts/sync_version.py "$GITHUB_REF_NAME")"
+          version="$(python3 scripts/sync_version.py "$GITHUB_REF_NAME")"
           echo "VERSION=$version" >> "$GITHUB_ENV"
       - name: Build release binary
         shell: pwsh
@@ -68,6 +68,15 @@ jobs:
               --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64 once the macOS build finishes. For Homebrew availability and tap instructions, see https://github.com/0libote/Kivo#homebrew-macos-apple-silicon. Dictation and system selection integration are still being ported."
           fi
           gh release upload "$GITHUB_REF_NAME" native-app/target/release/kivo-native.exe --clobber
+          # Re-runs intentionally replace draft assets for the same tag (--clobber);
+          # published releases are never overwritten (the draft check above fails
+          # first). Tag identity is enforced at creation with --verify-tag.
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd native-app/target/release && sha256sum kivo-native.exe > "$RUNNER_TEMP/kivo-native.exe.sha256")
+          else
+            (cd native-app/target/release && shasum -a 256 kivo-native.exe > "$RUNNER_TEMP/kivo-native.exe.sha256")
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/kivo-native.exe.sha256" --clobber
 
   build-macos:
     needs: build
@@ -118,6 +127,15 @@ jobs:
               --notes "Kivo ${VERSION} native preview. Windows 11 24H2+: download kivo-native.exe. macOS Apple Silicon: download kivo-native-macos-arm64 once the macOS build finishes. For Homebrew availability and tap instructions, see https://github.com/0libote/Kivo#homebrew-macos-apple-silicon. Dictation and system selection integration are still being ported."
           fi
           gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/kivo-native-macos-arm64" --clobber
+          # Re-runs intentionally replace draft assets for the same tag (--clobber);
+          # published releases are never overwritten (the draft check above fails
+          # first). Tag identity is enforced at creation with --verify-tag.
+          if command -v sha256sum >/dev/null 2>&1; then
+            (cd "$RUNNER_TEMP" && sha256sum kivo-native-macos-arm64 > kivo-native-macos-arm64.sha256)
+          else
+            (cd "$RUNNER_TEMP" && shasum -a 256 kivo-native-macos-arm64 > kivo-native-macos-arm64.sha256)
+          fi
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/kivo-native-macos-arm64.sha256" --clobber
 
   bump-version:
     needs: [build, build-macos]

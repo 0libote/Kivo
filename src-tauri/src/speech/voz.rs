@@ -367,6 +367,11 @@ impl VozRuntime for WindowsVozRuntime {
         locale: String,
     ) -> SpeechFuture<'_, Result<VozTranscript, SpeechError>> {
         Box::pin(async move {
+            // Cap at ~120s @16kHz mono to bound the worker JSON message.
+            const MAX_VOZ_SAMPLES: usize = 16_000 * 120;
+            if samples.len() > MAX_VOZ_SAMPLES {
+                return Err(SpeechError::Backend);
+            }
             let reply = self
                 .request("transcribe", Some(samples), Some(locale))
                 .await?;
