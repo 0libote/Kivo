@@ -731,7 +731,18 @@ impl SettingsRepository {
 
     pub fn load(&self) -> Result<AppSettings, SettingsError> {
         match fs::read(&self.path) {
-            Ok(bytes) => serde_json::from_slice::<AppSettings>(&bytes)?.validate_and_normalize(),
+            Ok(bytes) => match serde_json::from_slice::<AppSettings>(&bytes) {
+                Ok(settings) => settings.validate_and_normalize(),
+                Err(error) if error.is_data() || error.is_syntax() || error.is_eof() => {
+                    // A corrupt file must not brick startup: quarantine it and
+                    // fall back to defaults. Best effort; a failed rename still
+                    // returns defaults.
+                    let corrupt = self.path.with_extension("json.corrupt");
+                    let _ = fs::rename(&self.path, &corrupt);
+                    Ok(AppSettings::default())
+                }
+                Err(error) => Err(SettingsError::InvalidJson(error)),
+            },
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(AppSettings::default()),
             Err(error) => Err(error.into()),
         }

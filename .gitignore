@@ -24,7 +24,9 @@ __pycache__/
 .playwright-mcp/
 /dist-browser/
 
-# Generated continuous-channel staging (CI only, never committed).
+# Historical continuous-channel staging paths (no workflow generates these;
+# there is no publish-continuous job). Retained so they are never committed
+# if recreated locally.
 beta/continuous.json
 beta/notes.md
 beta/windows/

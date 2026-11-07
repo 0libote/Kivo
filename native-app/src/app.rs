@@ -65,8 +65,8 @@ impl KivoApp {
 
     fn show_top_bar(&mut self, ui: &mut egui::Ui) {
         let mut surface = self.surface;
-        let model = self.settings.ai_model.clone();
         let key_set = !self.settings_ui.api_key.trim().is_empty();
+        let model: &str = &self.settings.ai_model;
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Kivo").size(20.0).strong());
             ui.add_space(4.0);
@@ -75,7 +75,7 @@ impl KivoApp {
                 ui.selectable_value(&mut surface, tab, tab.title());
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                theme::mono_small(ui, &model);
+                theme::mono_small(ui, model);
                 ui.label(
                     egui::RichText::new(if key_set { "Key set" } else { "No key" })
                         .small()
@@ -132,6 +132,7 @@ impl KivoApp {
                             ui,
                             &mut self.settings,
                             &mut self.onboarding,
+                            &mut self.save_error,
                         );
                     }
                 }

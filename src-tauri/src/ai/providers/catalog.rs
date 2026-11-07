@@ -337,7 +337,9 @@ pub fn normalize_model_list_for(provider: AiProvider, ids: &[String]) -> Vec<Str
 
 /// Normalize a custom base URL: trim, drop trailing slashes, require an
 /// `http(s)` scheme. Returns `None` when empty so callers fall back to the
-/// Ollama default.
+/// Ollama default. Remote `http://` (non-localhost) is rejected: secrets
+/// would travel in cleartext, so only `https://` or local `http://`
+/// (`localhost` / `127.0.0.1` / `[::1]`) is accepted.
 pub fn normalize_base_url(raw: Option<&str>) -> Option<String> {
     let trimmed = raw?.trim().trim_end_matches('/');
     if trimmed.is_empty() {
@@ -349,11 +351,27 @@ pub fn normalize_base_url(raw: Option<&str>) -> Option<String> {
     {
         return None;
     }
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        Some(trimmed.to_owned())
-    } else {
-        None
+    if trimmed.starts_with("https://") {
+        return Some(trimmed.to_owned());
     }
+    if let Some(rest) = trimmed.strip_prefix("http://") {
+        let host_port = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        // Strip optional userinfo.
+        let host_port = host_port.rsplit('@').next().unwrap_or_default();
+        // IPv6 literals are bracketed: [::1]:11434. Otherwise strip :port.
+        let host_only = if let Some(remainder) = host_port.strip_prefix('[') {
+            remainder.split(']').next().unwrap_or_default()
+        } else {
+            host_port.split(':').next().unwrap_or_default()
+        };
+        let host_lower = host_only.to_ascii_lowercase();
+        if matches!(host_lower.as_str(), "localhost" | "127.0.0.1" | "::1") {
+            return Some(trimmed.to_owned());
+        }
+        // Remote http blocked: require https.
+        return None;
+    }
+    None
 }
 
 /// Turn a bare gateway id into a readable picker label

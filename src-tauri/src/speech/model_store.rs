@@ -673,11 +673,22 @@ impl ModelStore {
         })
     }
 
-    /// Resolved path for a downloaded model, if the file is present.
+    /// Resolved path for a downloaded model, if the file is present and its
+    /// SHA-256 matches. A corrupt cache is quarantined (deleted) and treated
+    /// as missing so the next download re-fetches it.
     pub fn path_for(&self, id: &str) -> Option<PathBuf> {
         let entry = catalog_entry(id)?;
         let path = self.directory.join(entry.filename);
-        path.is_file().then_some(path)
+        if !path.is_file() {
+            return None;
+        }
+        match verify_sha256(&path, entry.sha256) {
+            Ok(true) => Some(path),
+            _ => {
+                let _ = fs::remove_file(&path);
+                None
+            }
+        }
     }
 
     pub fn is_downloaded(&self, id: &str) -> bool {
@@ -723,8 +734,20 @@ impl ModelStore {
         let entry = catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
         let operation = self.begin_operation(id)?;
         let target = self.directory.join(entry.filename);
+        // Cached trust: a present file is only reused when its hash matches;
+        // otherwise quarantine it and re-download.
         if target.is_file() {
-            return Ok(());
+            let expected = entry.sha256.to_owned();
+            let verify_target = target.clone();
+            let valid =
+                tokio::task::spawn_blocking(move || verify_sha256(&verify_target, &expected))
+                    .await
+                    .map_err(|_| ModelStoreError::Unavailable)?
+                    .unwrap_or(false);
+            if valid {
+                return Ok(());
+            }
+            let _ = tokio::fs::remove_file(&target).await;
         }
         tokio::fs::create_dir_all(&self.directory)
             .await
@@ -783,16 +806,20 @@ impl ModelStore {
     }
 
     /// Deletes an installed model. The file is removed even if it is currently
-    /// selected; the next dictation reports the model as missing.
+    /// selected; the next dictation reports the model as missing. A leftover
+    /// `.partial` is removed too (best effort).
     pub fn delete(&self, id: &str) -> Result<(), ModelStoreError> {
         let _operation = self.begin_operation(id)?;
         let entry = catalog_entry(id).ok_or(ModelStoreError::UnknownModel)?;
         let path = self.directory.join(entry.filename);
         match fs::remove_file(&path) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok::<(), ModelStoreError>(()),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(error.into()),
-        }
+        }?;
+        let partial = self.directory.join(format!("{}.partial", entry.filename));
+        let _ = fs::remove_file(&partial);
+        Ok(())
     }
 
     async fn stream_to_file(
@@ -812,6 +839,9 @@ impl ModelStore {
             .unwrap_or(0);
         let client = crate::http::client_builder()
             .connect_timeout(Duration::from_secs(15))
+            // Bound stalled downloads; cancel checks in the chunk loop still
+            // abort promptly. 30 min covers multi-GB models on slow links.
+            .timeout(Duration::from_secs(30 * 60))
             .build()
             .map_err(|_| ModelStoreError::Download)?;
         let mut request = client.get(&url);
@@ -1062,5 +1092,26 @@ mod tests {
         assert!(!store.is_downloaded("whisper-small"));
         assert!(store.path_for("does-not-exist").is_none());
         assert!(store.first_downloaded().is_none());
+    }
+
+    #[test]
+    fn corrupt_cached_file_is_quarantined_and_reports_missing() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("kivo-corrupt-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = ModelStore::new(&dir);
+        let entry = catalog_entry("whisper-tiny").unwrap();
+        let target = dir.join(entry.filename);
+        // Corrupt cache: wrong bytes, so the hash mismatches.
+        std::fs::write(&target, b"not a model").unwrap();
+        assert!(target.is_file());
+        assert!(store.path_for("whisper-tiny").is_none());
+        assert!(!target.is_file());
+        assert!(!store.is_downloaded("whisper-tiny"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

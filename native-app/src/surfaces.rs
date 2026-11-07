@@ -5,7 +5,6 @@ pub mod flow_bar {
         Hidden,
         Idle,
         Listening,
-        Processing,
         Success,
         Error,
     }
@@ -15,8 +14,8 @@ pub mod flow_bar {
         pub status: Status,
         pub transcript: String,
         pub message: Option<String>,
-        pub level: f32,
-        pub session: u64,
+        pub transcript_bytes: usize,
+        pub transcript_chars: usize,
     }
 
     impl Default for State {
@@ -25,8 +24,8 @@ pub mod flow_bar {
                 status: Status::Idle,
                 transcript: String::new(),
                 message: None,
-                level: 0.0,
-                session: 0,
+                transcript_bytes: 0,
+                transcript_chars: 0,
             }
         }
     }
@@ -56,6 +55,10 @@ pub mod writing_tools {
         pub can_replace: bool,
         pub captured_app: Option<String>,
         pub pending: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+        pub input_bytes: usize,
+        pub input_chars: usize,
+        pub result_bytes: usize,
+        pub result_chars: usize,
     }
 }
 

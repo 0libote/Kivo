@@ -243,7 +243,12 @@ impl SpeechEngine for PlatformSpeechEngine {
                             {
                                 let _ = sender.send(Err(error.clone()));
                             }
-                            if let Ok(mut result) = result_for_callback.lock() {
+                            // Last-write-wins would clobber a Final transcript
+                            // with a trailing Error: only record the error when
+                            // nothing arrived yet.
+                            if let Ok(mut result) = result_for_callback.lock()
+                                && result.is_none()
+                            {
                                 *result = Some(Err(error));
                             }
                         }

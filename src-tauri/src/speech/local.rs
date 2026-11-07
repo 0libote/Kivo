@@ -41,7 +41,8 @@ pub struct LocalSpeechEngine {
     store: Arc<ModelStore>,
     next_session: AtomicU64,
     sessions: Mutex<HashMap<SpeechSessionId, ActiveSession>>,
-    loaded: Mutex<Option<LoadedModel>>,
+    loaded: Arc<Mutex<Option<LoadedModel>>>,
+    load_lock: tokio::sync::Mutex<()>,
 }
 
 impl LocalSpeechEngine {
@@ -53,7 +54,8 @@ impl LocalSpeechEngine {
             store,
             next_session: AtomicU64::new(1),
             sessions: Mutex::new(HashMap::new()),
-            loaded: Mutex::new(None),
+            loaded: Arc::new(Mutex::new(None)),
+            load_lock: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -93,6 +95,9 @@ impl LocalSpeechEngine {
     }
 
     async fn ensure_loaded(&self, path: &Path) -> Result<(), SpeechError> {
+        // Serialize concurrent loads: check + load + publish holds one lock
+        // so two sessions cannot load the model twice.
+        let _guard = self.load_lock.lock().await;
         let already_loaded = self
             .loaded
             .lock()
@@ -119,7 +124,9 @@ impl LocalSpeechEngine {
     }
 
     /// Runs the loaded model over a finished utterance, returning the session
-    /// to the cache so the next dictation does not pay model load again.
+    /// to the cache so the next dictation does not pay model load again. The
+    /// blocking worker restores the session itself, so dropping this future
+    /// (cancel) cannot lose the loaded model.
     async fn transcribe(
         &self,
         pcm: Vec<f32>,
@@ -127,7 +134,7 @@ impl LocalSpeechEngine {
         vocabulary: Vec<crate::config::VocabularyEntry>,
         whisper_hint: bool,
     ) -> Result<SpeechTranscript, SpeechError> {
-        let mut loaded = self
+        let loaded = self
             .loaded
             .lock()
             .map_err(|_| SpeechError::Backend)?
@@ -149,18 +156,26 @@ impl LocalSpeechEngine {
         } else {
             None
         };
-        let (result, loaded) = tokio::task::spawn_blocking(move || {
+        let slot = Arc::clone(&self.loaded);
+        let result = tokio::task::spawn_blocking(move || {
+            let mut loaded = loaded;
             let options = RunOptions {
                 language,
                 family,
                 ..RunOptions::default()
             };
             let result = loaded.session.run(&pcm, &options);
-            (result, loaded)
+            // Self-restore: the cache is repopulated even if the awaiting
+            // future was dropped (cancelled).
+            if let Ok(mut cache) = slot.lock()
+                && cache.is_none()
+            {
+                *cache = Some(loaded);
+            }
+            result
         })
         .await
         .map_err(|_| SpeechError::Backend)?;
-        *self.loaded.lock().map_err(|_| SpeechError::Backend)? = Some(loaded);
         let transcript = result.map_err(|_| SpeechError::RecognitionUnavailable)?;
         SpeechTranscript::new(transcript.text)
     }

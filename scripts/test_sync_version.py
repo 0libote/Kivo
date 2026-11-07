@@ -28,6 +28,11 @@ class SyncVersionTests(unittest.TestCase):
     def snapshot(self):
         return {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
 
+    def set_directory_version(self, directory, old, new):
+        for filename in ("Cargo.toml", "Cargo.lock"):
+            path = self.root / directory / filename
+            path.write_text(path.read_text().replace(f'"{old}"', f'"{new}"'))
+
     def test_updates_both_tag_formats_and_leaves_dependencies_untouched(self):
         for tag in ("app-v1.2.3-rc.1+build.4", "1.2.3"):
             with self.subTest(tag=tag):
@@ -59,6 +64,42 @@ class SyncVersionTests(unittest.TestCase):
             self.assertEqual(self.snapshot(), before)
         ordered = ["1.0.0-alpha", "1.0.0-alpha.2", "1.0.0-alpha.10", "1.0.0-beta", "1.0.0-rc.1", "1.0.0", "1.1.0"]
         self.assertEqual(sorted(ordered, key=version_key), ordered)
+
+    def test_only_newer_compares_newest_of_both_manifests(self):
+        self.set_directory_version("native-app", "0.1.0", "0.2.0")
+        before = self.snapshot()
+        sync_version(self.root, "0.1.5", only_newer=True)
+        self.assertEqual(self.snapshot(), before)
+        sync_version(self.root, "app-v0.1.5", only_newer=True)
+        self.assertEqual(self.snapshot(), before)
+        sync_version(self.root, "0.2.0", only_newer=True)
+        for directory in ("native-app", "src-tauri"):
+            manifest = tomllib.loads((self.root / directory / "Cargo.toml").read_text())
+            self.assertEqual(manifest["package"]["version"], "0.2.0")
+
+        self.set_directory_version("src-tauri", "0.2.0", "0.3.0")
+        before = self.snapshot()
+        sync_version(self.root, "0.2.0", only_newer=True)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_single_quoted_toml_version(self):
+        manifest = self.root / "native-app/Cargo.toml"
+        manifest.write_text(manifest.read_text().replace('version = "0.1.0"', "version = '0.1.0'"))
+        version = sync_version(self.root, "1.2.3")
+        self.assertEqual(version, "1.2.3")
+        text = manifest.read_text()
+        self.assertIn("version = '1.2.3'", text)
+        parsed = tomllib.loads(text)
+        self.assertEqual(parsed["package"]["version"], "1.2.3")
+        self.assertEqual(parsed["dependencies"]["other"]["version"], "2.0")
+
+    def test_lockfile_name_trailing_whitespace(self):
+        lock = self.root / "src-tauri/Cargo.lock"
+        lock.write_text(lock.read_text().replace('name = "kivo"\n', 'name = "kivo"   \n'))
+        sync_version(self.root, "1.2.3")
+        parsed = tomllib.loads(lock.read_text())
+        self.assertEqual(parsed["package"][0]["version"], "1.2.3")
+        self.assertEqual(parsed["package"][1]["version"], "2.0.1")
 
     def test_invalid_tags_never_change_files(self):
         before = self.snapshot()

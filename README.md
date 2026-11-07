@@ -53,6 +53,7 @@ CI caches both Rust targets and cancels superseded runs. It checks only the app 
 ## Release
 
 Push a semantic version tag such as `0.2.0` or `app-v0.2.0`. The workflow uses the tag to set the versions in both manifests and lockfiles and the Tauri config, then builds the Windows and macOS releases with locked dependencies. Version syncing uses Python 3.11+ and does not resolve or download dependencies.
+Prefer `app-v*` tags: bare `0.2.0`-style tags trigger the workflow, but the in-app updater only follows `app-v*` until bare-tag support lands.
 
 The workflow signs the Windows executable if `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_CERTIFICATE_PASSWORD` are configured. macOS builds are unsigned. Review and publish the draft manually, then update `Formula/kivo.rb`: set `version`, pin the source archive `url` to the release commit, and update the archive's `sha256`. The source commit must include macOS support; the original `0.1.0` tag predates it. Re-running a tag updates the existing draft asset. Published releases require a new version tag.
 

@@ -187,7 +187,16 @@ impl AppCore {
                     )
                     .await?;
                 if models.len() > 1 {
-                    let listed = self.ai.list_models(&api_key).await?;
+                    // Offline / transport failure must not fail Test connection:
+                    // fall back to the curated list like Zen/Go, so the check
+                    // still validates the remaining queue entries.
+                    let listed = match self.ai.list_models(&api_key).await {
+                        Ok(listed) => listed,
+                        Err(error) if matches!(&error, crate::ai::GeminiError::Transport(_)) => {
+                            crate::ai::curated_listed_models()
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
                     if let Some(missing) = find_unavailable_model(&listed, provider, &models[1..]) {
                         return Err(AppCoreError::AiModelUnavailable { model: missing });
                     }
@@ -747,10 +756,8 @@ impl AppCore {
                 let prompt = match system_instruction.as_deref() {
                     Some(instruction) if !instruction.trim().is_empty() => {
                         // `writing_prompt` enforces this for built-ins; the
-                        // editable-template path must too.
-                        if action == WritingAction::Summarize
-                            && source_text.chars().count() > 200_000
-                        {
+                        // editable-template path must too (all actions, 200k).
+                        if source_text.chars().count() > crate::ai::MAX_PROMPT_CHARS {
                             return Err(PromptError::SummaryTooLong.into());
                         }
                         writing_prompt_from_system(
@@ -1901,7 +1908,7 @@ pub async fn get_writing_context(
             .await
             .map_err(CommandError::from)?
     };
-    crate::shell::position_writing_surface(&app, context.cursor, context.anchor);
+    crate::shell::position_writing_surface(&app);
     Ok(selection_context(context))
 }
 
