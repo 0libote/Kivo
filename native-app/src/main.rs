@@ -1,6 +1,7 @@
 mod ai;
 mod app;
 mod flow_writing;
+mod keystore;
 mod platform;
 mod settings;
 mod settings_onboarding;

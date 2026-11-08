@@ -59,14 +59,19 @@ pub mod writing_tools {
         pub input_chars: usize,
         pub result_bytes: usize,
         pub result_chars: usize,
+        pub copied_at: Option<std::time::Instant>,
     }
 }
 
 pub mod settings_surface {
-    #[derive(Clone, Debug, Default)]
+    #[derive(Debug, Default)]
     pub struct State {
         pub api_key: String,
+        pub show_key: bool,
         pub status: Option<String>,
+        pub testing: bool,
+        pub test_result: Option<Result<String, String>>,
+        pub test_pending: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     }
 }
 

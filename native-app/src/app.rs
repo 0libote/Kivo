@@ -1,4 +1,5 @@
 use crate::flow_writing;
+use crate::keystore;
 use crate::settings::Settings;
 use crate::settings_onboarding;
 use crate::surfaces::{flow_bar, onboarding, settings_surface, writing_tools};
@@ -28,6 +29,14 @@ impl Surface {
             Surface::Onboarding => "Welcome",
         }
     }
+    pub fn shortcut(self) -> &'static str {
+        match self {
+            Surface::FlowBar => "Ctrl+1",
+            Surface::WritingTools => "Ctrl+2",
+            Surface::Settings => "Ctrl+3",
+            Surface::Onboarding => "Ctrl+4",
+        }
+    }
 }
 
 pub struct KivoApp {
@@ -51,15 +60,39 @@ impl KivoApp {
             Surface::Onboarding
         };
         let applied_theme = settings.theme;
+        // Restore the persisted API key into memory (vault or 0600 fallback).
+        let mut settings_ui = settings_surface::State::default();
+        if let Ok(Some(key)) = keystore::load_api_key(keystore::GEMINI_ACCOUNT) {
+            settings_ui.api_key = key;
+        }
         Self {
             surface,
             settings,
             applied_theme,
             flow: flow_bar::State::default(),
             writing: writing_tools::State::default(),
-            settings_ui: settings_surface::State::default(),
+            settings_ui,
             onboarding: onboarding::State::default(),
             save_error: None,
+        }
+    }
+
+    fn poll_key_test(&mut self) {
+        settings_onboarding::poll_key_test(&mut self.settings_ui);
+    }
+
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Num1)) {
+            self.surface = Surface::FlowBar;
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Num2)) {
+            self.surface = Surface::WritingTools;
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Num3)) {
+            self.surface = Surface::Settings;
+        }
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::Num4)) {
+            self.surface = Surface::Onboarding;
         }
     }
 
@@ -72,12 +105,21 @@ impl KivoApp {
             ui.add_space(4.0);
             ui.separator();
             for tab in Surface::ALL {
-                ui.selectable_value(&mut surface, tab, tab.title());
+                let response = ui.selectable_value(
+                    &mut surface,
+                    tab,
+                    format!("{} ({})", tab.title(), tab.shortcut()),
+                );
+                response.on_hover_text(format!(
+                    "Switch to {} with {}",
+                    tab.title(),
+                    tab.shortcut()
+                ));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 theme::mono_small(ui, model);
                 ui.label(
-                    egui::RichText::new(if key_set { "Key set" } else { "No key" })
+                    egui::RichText::new(if key_set { "● Key set" } else { "○ No key" })
                         .small()
                         .weak(),
                 );
@@ -87,14 +129,22 @@ impl KivoApp {
     }
 
     fn show_status_bar(&self, ui: &mut egui::Ui) {
+        let busy = self.writing.pending.is_some() || self.settings_ui.testing;
         ui.horizontal(|ui| {
+            if busy {
+                ui.spinner();
+            }
             ui.label(
-                egui::RichText::new("Typed text stays on this computer until sent to Gemini")
-                    .small()
-                    .weak(),
+                egui::RichText::new(if self.writing.pending.is_some() {
+                    "Working with Gemini…"
+                } else if self.settings_ui.testing {
+                    "Testing key…"
+                } else {
+                    "Ready. Text stays on this computer until sent to Gemini."
+                })
+                .small()
+                .weak(),
             );
-            ui.add_space(16.0);
-            ui.label(egui::RichText::new("Native preview build").small().weak());
         });
     }
 
@@ -132,6 +182,7 @@ impl KivoApp {
                             ui,
                             &mut self.settings,
                             &mut self.onboarding,
+                            &mut self.settings_ui,
                             &mut self.save_error,
                         );
                     }
@@ -145,6 +196,8 @@ impl KivoApp {
 impl eframe::App for KivoApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.handle_shortcuts(&ctx);
+        self.poll_key_test();
         theme::apply_if_changed(&self.settings, &ctx, &mut self.applied_theme);
         egui::Panel::top("kivo-topbar").show(ui, |ui| {
             self.show_top_bar(ui);
@@ -157,6 +210,10 @@ impl eframe::App for KivoApp {
                 .auto_shrink([false; 2])
                 .show(ui, |ui| self.show_surface(ui, &ctx));
         });
+        // Keep repainting while background work (AI / key test) is in flight.
+        if self.writing.pending.is_some() || self.settings_ui.testing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
     }
 }
 
@@ -202,5 +259,11 @@ mod tests {
     fn shell_names_each_destination_once() {
         let titles: Vec<_> = Surface::ALL.iter().map(|s| s.title()).collect();
         assert_eq!(titles, vec!["Dictate", "Write", "Settings", "Welcome"]);
+    }
+
+    #[test]
+    fn surfaces_have_keyboard_shortcuts() {
+        assert_eq!(Surface::FlowBar.shortcut(), "Ctrl+1");
+        assert_eq!(Surface::WritingTools.shortcut(), "Ctrl+2");
     }
 }

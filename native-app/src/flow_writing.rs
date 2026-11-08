@@ -22,6 +22,14 @@ fn cached_chars(cached_bytes: &mut usize, cached_count: &mut usize, text: &str) 
     *cached_count
 }
 
+fn word_count(text: &str) -> usize {
+    text.split_whitespace().count()
+}
+
+fn count_label(chars: usize, words: usize) -> String {
+    format!("{chars} characters · {words} words")
+}
+
 pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
     ui.heading("Dictation");
     ui.add_space(4.0);
@@ -81,7 +89,10 @@ pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
         &mut state.transcript_chars,
         &state.transcript,
     );
-    theme::mono_small(ui, &format!("{transcript_count} characters"));
+    theme::mono_small(
+        ui,
+        &count_label(transcript_count, word_count(&state.transcript)),
+    );
     if state.status == flow_bar::Status::Success {
         theme::success_label(ui, "Marked done. The transcript stays in memory.");
     }
@@ -125,9 +136,14 @@ pub fn show_writing_tools(
     ui.add_space(4.0);
 
     let busy = state.pending.is_some();
+    let key_missing = api_key.trim().is_empty();
+    if key_missing {
+        theme::helper(ui, "Add your Gemini API key under Settings to run actions.");
+    }
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(!busy, egui::Button::new("Capture system selection"))
+            .add_enabled(!busy, egui::Button::new("Capture clipboard"))
+            .on_hover_text("Reads the OS clipboard — copy text in any app first, then Capture.")
             .clicked()
         {
             match platform::capture_selection() {
@@ -144,6 +160,16 @@ pub fn show_writing_tools(
                 }
             }
         }
+        if !state.input.is_empty()
+            && ui
+                .add_enabled(!busy, egui::Button::new("Clear"))
+                .on_hover_text("Clear the input text.")
+                .clicked()
+        {
+            state.input.clear();
+            state.captured_app = None;
+            state.can_replace = false;
+        }
         if busy {
             ui.spinner();
             if ui.button("Cancel").clicked() {
@@ -156,7 +182,7 @@ pub fn show_writing_tools(
     if let Some(app) = &state.captured_app {
         theme::helper(ui, &format!("Captured from {app}"));
     } else {
-        theme::helper(ui, "Paste text below, or capture the current selection.");
+        theme::helper(ui, "Copy text anywhere, then Capture — or paste below.");
     }
     ui.add_space(4.0);
 
@@ -168,13 +194,17 @@ pub fn show_writing_tools(
             .desired_width(f32::INFINITY),
     );
     let input_count = cached_chars(&mut state.input_bytes, &mut state.input_chars, &state.input);
-    theme::mono_small(ui, &format!("{input_count} characters"));
+    theme::mono_small(ui, &count_label(input_count, word_count(&state.input)));
     ui.add_space(4.0);
 
     theme::section_label(ui, "Fix and reshape");
     ui.horizontal_wrapped(|ui| {
         for (label, action) in RESHAPE_ACTIONS {
-            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+            if ui
+                .add_enabled(!busy, egui::Button::new(label))
+                .on_hover_text(format!("{} with {}", label, model))
+                .clicked()
+            {
                 run_action(state, action, api_key, model, None, ctx);
             }
         }
@@ -182,7 +212,11 @@ pub fn show_writing_tools(
     theme::section_label(ui, "Extract");
     ui.horizontal_wrapped(|ui| {
         for (label, action) in EXTRACT_ACTIONS {
-            if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
+            if ui
+                .add_enabled(!busy, egui::Button::new(label))
+                .on_hover_text(format!("{} with {}", label, model))
+                .clicked()
+            {
                 run_action(state, action, api_key, model, None, ctx);
             }
         }
@@ -191,6 +225,7 @@ pub fn show_writing_tools(
     ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(!busy, egui::Button::new("Quick chat"))
+            .on_hover_text(format!("Ask about this text with {model}"))
             .clicked()
         {
             run_action(state, Action::Chat, api_key, model, None, ctx);
@@ -232,8 +267,13 @@ pub fn show_writing_tools(
             });
             theme::helper(
                 ui,
-                "The request runs in the background. The actions stay disabled until it finishes.",
+                "The request runs in the background (up to 90s). Actions stay disabled until it finishes.",
             );
+            if ui.button("Cancel").clicked() {
+                state.pending = None;
+                state.mode = writing_tools::Mode::Error;
+                state.error = Some("Cancelled.".to_string());
+            }
         }
         writing_tools::Mode::Result | writing_tools::Mode::Chat => {
             ui.label("Result:");
@@ -247,20 +287,27 @@ pub fn show_writing_tools(
                 &mut state.result_chars,
                 &state.result,
             );
-            theme::mono_small(ui, &format!("{result_count} characters"));
+            theme::mono_small(ui, &count_label(result_count, word_count(&state.result)));
             ui.horizontal(|ui| {
                 if theme::primary_button(ui, "Copy").clicked() {
                     platform::copy_to_clipboard(ctx, &state.result);
+                    state.copied_at = Some(std::time::Instant::now());
                 }
                 let can_replace =
                     state.can_replace && state.action.is_some_and(Action::replaces_selection);
-                let replace = ui.add_enabled(can_replace, egui::Button::new("Replace selection"));
+                let replace = ui.add_enabled(can_replace, egui::Button::new("Copy for replace"));
                 let replace = replace.on_disabled_hover_text(
                     "Replacement needs a captured selection from an action that rewrites text.",
                 );
-                if replace.clicked() {
+                if replace
+                    .on_hover_text("Copies the result so you can paste over the original.")
+                    .clicked()
+                {
                     match platform::replace_selection(&state.result) {
-                        Ok(_) => state.error = None,
+                        Ok(_) => {
+                            state.error = None;
+                            state.copied_at = Some(std::time::Instant::now());
+                        }
                         Err(e) => {
                             state.error = Some(e.to_string());
                             state.mode = writing_tools::Mode::Error;
@@ -271,17 +318,38 @@ pub fn show_writing_tools(
                     state.mode = writing_tools::Mode::Menu;
                 }
             });
+            if let Some(at) = state.copied_at {
+                if at.elapsed().as_secs() < 5 {
+                    theme::success_label(ui, "Copied — paste with Ctrl+V (Cmd+V on Mac).");
+                }
+            }
+            if let Some(err) = state.error.clone() {
+                theme::error_label(ui, &err);
+            }
         }
         writing_tools::Mode::Error => {
             if let Some(err) = state.error.clone() {
                 theme::error_label(ui, &err);
                 theme::helper(
                     ui,
-                    "Check the text, key, model, and connection, then go back and try again.",
+                    "Check the text, key, model, and connection, then try again.",
                 );
-                if ui.button("Back").clicked() {
-                    state.mode = writing_tools::Mode::Menu;
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("Back").clicked() {
+                        state.mode = writing_tools::Mode::Menu;
+                    }
+                    if let Some(action) = state.action {
+                        let retry_label = format!("Retry {}", action.label());
+                        if ui.button(retry_label).clicked() {
+                            let custom = if action == Action::Custom {
+                                Some(state.custom_instruction.clone())
+                            } else {
+                                None
+                            };
+                            run_action(state, action, api_key, model, custom, ctx);
+                        }
+                    }
+                });
             }
         }
         writing_tools::Mode::Menu => {
@@ -319,10 +387,16 @@ fn run_action(
             return;
         }
     };
+    if api_key.trim().is_empty() {
+        state.error = Some("Set a valid Gemini API key in Settings first.".to_string());
+        state.mode = writing_tools::Mode::Error;
+        return;
+    }
     let (sender, receiver) = std::sync::mpsc::channel();
     state.pending = Some(receiver);
     state.action = Some(action);
     state.error = None;
+    state.copied_at = None;
     state.mode = writing_tools::Mode::Processing;
     let key = api_key.to_owned();
     let model = model.to_owned();
@@ -364,6 +438,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn counts_cover_words_and_chars() {
+        assert_eq!(count_label(11, 2), "11 characters · 2 words");
+        assert_eq!(word_count("  hello   world "), 2);
+        assert_eq!(word_count(""), 0);
+    }
+
+    #[test]
     fn pending_request_does_not_block_and_keeps_selection_capability() {
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut state = writing_tools::State {
@@ -403,5 +484,25 @@ mod tests {
             assert!(state.pending.is_none());
             assert!(state.error.is_some());
         }
+    }
+
+    #[test]
+    fn missing_key_is_a_clean_error_not_a_spawn() {
+        let ctx = egui::Context::default();
+        let mut state = writing_tools::State {
+            input: "hello".to_owned(),
+            ..Default::default()
+        };
+        run_action(
+            &mut state,
+            Action::Proofread,
+            "   ",
+            "gemini-3.8-flash",
+            None,
+            &ctx,
+        );
+        assert_eq!(state.mode, writing_tools::Mode::Error);
+        assert!(state.pending.is_none());
+        assert!(state.error.as_deref().unwrap_or("").contains("API key"));
     }
 }
