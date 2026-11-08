@@ -11,8 +11,8 @@ mod theme;
 fn main() -> eframe::Result<()> {
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([920.0, 680.0])
-            .with_min_inner_size([620.0, 460.0])
+            .with_inner_size([1120.0, 740.0])
+            .with_min_inner_size([820.0, 560.0])
             .with_title("Kivo"),
         ..Default::default()
     };

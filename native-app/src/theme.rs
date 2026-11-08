@@ -169,6 +169,48 @@ pub fn apply_if_changed(
     }
 }
 
+/// A settings-style card: theme-aware fill, hairline rule, room to breathe.
+/// Keeps both dials honest without hardcoding paper tones.
+pub fn card(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
+    egui::Frame::new()
+        .fill(ui.visuals().faint_bg_color)
+        .stroke(ui.visuals().window_stroke)
+        .corner_radius(14)
+        .inner_margin(18)
+        .outer_margin(egui::Margin {
+            bottom: 14,
+            ..Default::default()
+        })
+        .show(ui, add_contents);
+}
+
+/// Card title: heading voice, used once per card.
+pub fn card_title(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).size(19.0).strong());
+}
+
+/// A status dot: color plus adjacent words, never color alone.
+pub fn status_dot(ui: &mut Ui, color: Color32, diameter: f32) {
+    let (resp, painter) = ui.allocate_painter(egui::vec2(diameter, diameter), egui::Sense::hover());
+    painter.circle_filled(resp.rect.center(), diameter / 2.0, color);
+}
+
+/// Small pill for state words like Ready / Listening / Done.
+pub fn pill(ui: &mut Ui, text: &str, fill: Color32, ink: Color32) {
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(20)
+        .inner_margin(egui::Margin {
+            left: 12,
+            right: 12,
+            top: 5,
+            bottom: 5,
+        })
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).small().strong().color(ink));
+        });
+}
+
 /// The one primary button recipe: green fill, paired ink text.
 pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
     ui.add(
@@ -176,6 +218,22 @@ pub fn primary_button(ui: &mut Ui, text: &str) -> Response {
             .fill(ACCENT)
             .stroke(Stroke::new(1.0, ACCENT_DEEP)),
     )
+}
+
+/// Primary call-to-action with a comfortable hit target.
+pub fn primary_button_wide(ui: &mut Ui, text: &str) -> Response {
+    ui.add_sized(
+        [ui.available_width(), 42.0],
+        egui::Button::new(RichText::new(text).color(ACCENT_INK).strong().size(16.0))
+            .fill(ACCENT)
+            .stroke(Stroke::new(1.0, ACCENT_DEEP))
+            .corner_radius(11),
+    )
+}
+
+/// Shortcut hint in the pharmacy-label voice.
+pub fn shortcut_hint(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new(text).monospace().small().weak());
 }
 
 /// Section label: body face, a step smaller, sentence case, untracked.

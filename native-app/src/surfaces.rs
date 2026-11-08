@@ -16,6 +16,7 @@ pub mod flow_bar {
         pub message: Option<String>,
         pub transcript_bytes: usize,
         pub transcript_chars: usize,
+        pub listening_since: Option<std::time::Instant>,
     }
 
     impl Default for State {
@@ -26,6 +27,7 @@ pub mod flow_bar {
                 message: None,
                 transcript_bytes: 0,
                 transcript_chars: 0,
+                listening_since: None,
             }
         }
     }

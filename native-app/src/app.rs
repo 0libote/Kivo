@@ -29,6 +29,14 @@ impl Surface {
             Surface::Onboarding => "Welcome",
         }
     }
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Surface::FlowBar => "Capture your voice",
+            Surface::WritingTools => "Polish your words",
+            Surface::Settings => "Keys and shortcuts",
+            Surface::Onboarding => "Get set up",
+        }
+    }
     pub fn shortcut(self) -> &'static str {
         match self {
             Surface::FlowBar => "Ctrl+1",
@@ -96,51 +104,115 @@ impl KivoApp {
         }
     }
 
-    fn show_top_bar(&mut self, ui: &mut egui::Ui) {
-        let mut surface = self.surface;
-        let key_set = !self.settings_ui.api_key.trim().is_empty();
-        let model: &str = &self.settings.ai_model;
+    fn show_sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(10.0);
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new("Kivo").size(20.0).strong());
-            ui.add_space(4.0);
-            ui.separator();
-            for tab in Surface::ALL {
-                let response = ui.selectable_value(
-                    &mut surface,
-                    tab,
-                    format!("{} ({})", tab.title(), tab.shortcut()),
-                );
-                response.on_hover_text(format!(
-                    "Switch to {} with {}",
-                    tab.title(),
-                    tab.shortcut()
-                ));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                theme::mono_small(ui, model);
-                ui.label(
-                    egui::RichText::new(if key_set { "● Key set" } else { "○ No key" })
-                        .small()
-                        .weak(),
-                );
-            });
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Kivo").size(26.0).strong());
         });
+        ui.add_space(2.0);
+        ui.horizontal(|ui| {
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new("Dictation and writing").small().weak());
+        });
+        ui.add_space(18.0);
+
+        let mut surface = self.surface;
+        for tab in Surface::ALL {
+            let active = surface == tab;
+            let row = egui::Frame::new()
+                .fill(if active {
+                    ui.visuals().selection.bg_fill
+                } else {
+                    egui::Color32::TRANSPARENT
+                })
+                .corner_radius(11)
+                .inner_margin(egui::Margin {
+                    left: 12,
+                    right: 10,
+                    top: 9,
+                    bottom: 9,
+                })
+                .outer_margin(egui::Margin {
+                    left: 8,
+                    right: 8,
+                    bottom: 4,
+                    ..Default::default()
+                })
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(tab.title()).size(15.5).strong());
+                            ui.label(egui::RichText::new(tab.blurb()).small().weak());
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            theme::shortcut_hint(ui, tab.shortcut())
+                        });
+                    });
+                });
+            let response = row.response.interact(egui::Sense::click());
+            let clicked = response
+                .on_hover_text(format!("Switch to {} ({})", tab.title(), tab.shortcut()))
+                .clicked();
+            if clicked {
+                surface = tab;
+            }
+        }
         self.surface = surface;
+
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            ui.add_space(10.0);
+            egui::Frame::new()
+                .stroke(ui.visuals().window_stroke)
+                .corner_radius(11)
+                .inner_margin(12)
+                .outer_margin(egui::Margin {
+                    left: 8,
+                    right: 8,
+                    ..Default::default()
+                })
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let key_set = !self.settings_ui.api_key.trim().is_empty();
+                    ui.horizontal(|ui| {
+                        theme::status_dot(
+                            ui,
+                            if key_set { theme::ACCENT } else { theme::WARN },
+                            9.0,
+                        );
+                        ui.label(
+                            egui::RichText::new(if key_set { "Key set" } else { "No key yet" })
+                                .small()
+                                .strong(),
+                        );
+                    });
+                    ui.add_space(2.0);
+                    theme::mono_small(ui, &self.settings.ai_model);
+                });
+            ui.add_space(4.0);
+        });
     }
 
     fn show_status_bar(&self, ui: &mut egui::Ui) {
         let busy = self.writing.pending.is_some() || self.settings_ui.testing;
+        let listening = self.flow.status == flow_bar::Status::Listening;
         ui.horizontal(|ui| {
             if busy {
                 ui.spinner();
+            }
+            if listening {
+                theme::status_dot(ui, theme::ACCENT, 8.0);
             }
             ui.label(
                 egui::RichText::new(if self.writing.pending.is_some() {
                     "Working with Gemini…"
                 } else if self.settings_ui.testing {
                     "Testing key…"
+                } else if listening {
+                    "Listening…"
                 } else {
-                    "Ready. Text stays on this computer until sent to Gemini."
+                    "Ready — text stays on this computer until sent to Gemini"
                 })
                 .small()
                 .weak(),
@@ -149,9 +221,8 @@ impl KivoApp {
     }
 
     fn show_surface(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        // One centered working column; narrow windows take the full width.
         let outer = ui.available_width();
-        let width = outer.min(theme::MAX_CONTENT_WIDTH);
+        let width = outer.min(860.0);
         ui.horizontal(|ui| {
             let gutter = (outer - width).max(0.0) / 2.0;
             if gutter > 1.0 {
@@ -159,7 +230,8 @@ impl KivoApp {
             }
             ui.vertical(|ui| {
                 ui.set_max_width(width);
-                ui.add_space(8.0);
+                ui.add_space(14.0);
+                let mut go = None;
                 match self.surface {
                     Surface::FlowBar => flow_writing::show_flow_bar(ui, &mut self.flow),
                     Surface::WritingTools => flow_writing::show_writing_tools(
@@ -168,6 +240,7 @@ impl KivoApp {
                         &mut self.writing,
                         &self.settings_ui.api_key,
                         &self.settings.ai_model,
+                        &mut go,
                     ),
                     Surface::Settings => {
                         settings_onboarding::show_settings(
@@ -187,7 +260,10 @@ impl KivoApp {
                         );
                     }
                 }
-                ui.add_space(16.0);
+                if let Some(dest) = go {
+                    self.surface = dest;
+                }
+                ui.add_space(20.0);
             });
         });
     }
@@ -199,9 +275,13 @@ impl eframe::App for KivoApp {
         self.handle_shortcuts(&ctx);
         self.poll_key_test();
         theme::apply_if_changed(&self.settings, &ctx, &mut self.applied_theme);
-        egui::Panel::top("kivo-topbar").show(ui, |ui| {
-            self.show_top_bar(ui);
-        });
+        let key_set = !self.settings_ui.api_key.trim().is_empty();
+        egui::Panel::left("kivo-nav")
+            .min_size(228.0)
+            .max_size(228.0)
+            .resizable(false)
+            .show(ui, |ui| self.show_sidebar(ui));
+        let _ = key_set;
         egui::Panel::bottom("kivo-status").show(ui, |ui| {
             self.show_status_bar(ui);
         });
@@ -210,9 +290,12 @@ impl eframe::App for KivoApp {
                 .auto_shrink([false; 2])
                 .show(ui, |ui| self.show_surface(ui, &ctx));
         });
-        // Keep repainting while background work (AI / key test) is in flight.
-        if self.writing.pending.is_some() || self.settings_ui.testing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        // Keep repainting while background work (AI / key test / timer) runs.
+        if self.writing.pending.is_some()
+            || self.settings_ui.testing
+            || self.flow.status == flow_bar::Status::Listening
+        {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
     }
 }
