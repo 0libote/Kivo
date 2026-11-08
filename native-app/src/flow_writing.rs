@@ -27,7 +27,13 @@ fn word_count(text: &str) -> usize {
 }
 
 fn count_label(chars: usize, words: usize) -> String {
-    format!("{chars} characters · {words} words")
+    let c = if chars == 1 {
+        "character"
+    } else {
+        "characters"
+    };
+    let w = if words == 1 { "word" } else { "words" };
+    format!("{chars} {c} · {words} {w}")
 }
 
 pub fn show_flow_bar(ui: &mut egui::Ui, state: &mut flow_bar::State) {
@@ -440,6 +446,8 @@ mod tests {
     #[test]
     fn counts_cover_words_and_chars() {
         assert_eq!(count_label(11, 2), "11 characters · 2 words");
+        assert_eq!(count_label(1, 1), "1 character · 1 word");
+        assert_eq!(count_label(0, 0), "0 characters · 0 words");
         assert_eq!(word_count("  hello   world "), 2);
         assert_eq!(word_count(""), 0);
     }

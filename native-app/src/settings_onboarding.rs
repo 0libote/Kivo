@@ -178,11 +178,16 @@ pub fn show_settings(
     theme::section_label(ui, "Gemini API key");
     ui.label("Stored in the OS vault (Keychain / Credential Manager / Secret Service).");
     ui.horizontal(|ui| {
-        ui.add(
+        // `desired_width(INFINITY)` would push the toggle out of the column;
+        // reserve room for it like the custom-instruction row does.
+        let spacing = ui.spacing().item_spacing.x;
+        let toggle_width = 70.0;
+        let edit_width = (ui.available_width() - toggle_width - spacing).max(80.0);
+        ui.add_sized(
+            [edit_width, theme::CONTROL_HEIGHT],
             egui::TextEdit::singleline(&mut state.api_key)
                 .password(!state.show_key)
-                .hint_text("AIza…")
-                .desired_width(f32::INFINITY),
+                .hint_text("AIza…"),
         );
         ui.checkbox(&mut state.show_key, "Show");
     });
@@ -329,11 +334,14 @@ pub fn show_onboarding(
                 "Create a Gemini key in AI Studio and paste it here. It is stored in the OS vault.",
             );
             ui.horizontal(|ui| {
-                ui.add(
+                let spacing = ui.spacing().item_spacing.x;
+                let toggle_width = 70.0;
+                let edit_width = (ui.available_width() - toggle_width - spacing).max(80.0);
+                ui.add_sized(
+                    [edit_width, theme::CONTROL_HEIGHT],
                     egui::TextEdit::singleline(&mut settings_ui.api_key)
                         .password(!settings_ui.show_key)
-                        .hint_text("AIza…")
-                        .desired_width(f32::INFINITY),
+                        .hint_text("AIza…"),
                 );
                 ui.checkbox(&mut settings_ui.show_key, "Show");
             });
