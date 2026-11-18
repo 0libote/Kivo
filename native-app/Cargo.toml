@@ -15,7 +15,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "7.0"
 ureq = { version = "2.12", features = ["json", "tls"] }
-keyring = "3.6"
+keyring = "4.2"
 arboard = "3.4"
 
 [dev-dependencies]
